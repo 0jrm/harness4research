@@ -6,6 +6,7 @@
 # A run_dir named explore-* needs no question card but gets small caps, and the fence keeps its results out of reports.
 set -euo pipefail
 [ $# -ge 2 ] || { echo "usage: guard/run preflight <run_dir> <job_script> [sbatch options...]" >&2; exit 64; }
+command -v sbatch >/dev/null || { echo "preflight: no scheduler on this host; guard/run manifest is the only allowed step here" >&2; exit 2; }
 run_dir=${1%/}; job=$2; shift 2
 base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
 card_path=guard/budget.card

@@ -14,6 +14,18 @@ expect() {  # expect <name> <want: ok|fail> <grep pattern or -> -- command...
   if [ "$got" = "$want" ] && { [ "$pat" = - ] || grep -q -E -- "$pat" <<<"$out"; }; then pass=$((pass+1)); echo "ok   $name"
   else fail=$((fail+1)); echo "FAIL $name (exit $rc, wanted $want, pattern '$pat')"; sed 's/^/     /' <<<"$out" | tail -8; fi
 }
+path_without() {  # path_without <cmd>: prints a PATH like this one on which <cmd> is not found
+  local cmd=$1 shadow=$tmp/no-$1 out="" d f IFS=:
+  mkdir -p "$shadow"
+  for d in $PATH; do
+    if [ -e "$d/$cmd" ]; then
+      for f in "$d"/*; do [ "${f##*/}" = "$cmd" ] || [ -e "$shadow/${f##*/}" ] || ln -s "$f" "$shadow/"; done
+      d=$shadow
+    fi
+    [[ :$out: == *":$d:"* ]] || out=${out:+$out:}$d
+  done
+  echo "$out"
+}
 
 git init -q --bare -b main "$tmp/origin.git"
 git clone -q "$tmp/origin.git" "$tmp/proj" 2>/dev/null
@@ -73,6 +85,8 @@ echo "== preflight"
 expect preflight-no-card fail 'not committed' -- guard/run preflight "$R" job.sh
 cp runs/_template/question.card "$R/question.card"; git add -A; git commit -q -m "run: question card"
 expect preflight-ok ok 'SBATCH .*--account=gom --job-name=2026-09-29-demo' -- guard/run preflight "$R" job.sh --array=0-3
+expect preflight-no-scheduler fail '^preflight: no scheduler on this host; guard/run manifest is the only allowed step here$' -- \
+  env PATH="$(path_without sbatch)" guard/run preflight "$R" job.sh
 expect preflight-account-wins ok 'SBATCH --account=other .*--account=gom' -- guard/run preflight "$R" job.sh --account=other
 expect preflight-walltime fail 'exceeds max_walltime' -- guard/run preflight "$R" job.sh --time=1-00:00:00
 expect preflight-budget fail 'exceeds 8500 available' -- guard/run preflight "$R" job.sh --nodes=4 --time=12:00:00 --array=0-9%2
