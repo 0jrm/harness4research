@@ -65,6 +65,12 @@ expect init-committed ok 'feat\(guard\)' -- git -C "$tmp/wt" log -1 --format=%s
 expect init-survey-file ok 'Survey of proj' -- cat "$tmp/wt/guard/SURVEY.md"
 expect init-no-overwrite fail - -- "$guard" init "$tmp/proj" --worktree "$tmp/wt2"
 expect workflow-yaml ok - -- python3 -c "import yaml,sys; yaml.safe_load(open('$tmp/wt/.github/workflows/guard-fence.yml'))"
+git init -q --bare -b main "$tmp/agents-origin.git"
+git clone -q "$tmp/agents-origin.git" "$tmp/agents" 2>/dev/null
+echo "# Our rules" > "$tmp/agents/AGENTS.md"
+git -C "$tmp/agents" add -A; git -C "$tmp/agents" commit -q -m init
+git -C "$tmp/agents" push -q -u origin HEAD:main; git -C "$tmp/agents" remote set-head origin -a >/dev/null
+expect init-agents-proposal ok '^     Merge .*/guard/AGENTS.proposed.md into your AGENTS.md, or delete it\.$' -- "$guard" init "$tmp/agents" --worktree "$tmp/agents-wt"
 
 echo "== merge the guard, as the human would"
 cd "$tmp/wt" || exit 1

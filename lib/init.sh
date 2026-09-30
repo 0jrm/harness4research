@@ -6,7 +6,7 @@
 # line into the run templates without changing any other line.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-repo=""; branch=guard/init; wt=""; update=0
+repo=""; branch=guard/init; wt=""; update=0; agents_note=""
 while [ $# -gt 0 ]; do
   case $1 in
     --branch) branch=$2; shift 2 ;;
@@ -60,6 +60,7 @@ if [ $update = 0 ]; then
   place "$t/runs/_template/report.md" runs/_template/report.md
   place "$t/FACTS.md" FACTS.md
   if [ -e "$wt/AGENTS.md" ]; then place "$t/AGENTS.md" guard/AGENTS.proposed.md; skipped+=("AGENTS.md (proposal in guard/AGENTS.proposed.md)")
+    agents_note=$'\n'"     Merge $wt/guard/AGENTS.proposed.md into your AGENTS.md, or delete it."
   else place "$t/AGENTS.md" AGENTS.md; fi
   place "$t/CLAUDE.md" CLAUDE.md
   "$here/lib/survey.sh" "$repo" > "$wt/guard/SURVEY.md"; added+=(guard/SURVEY.md)
@@ -96,7 +97,7 @@ if [ ${#skipped[@]} -gt 0 ]; then echo; echo "Left alone because they already ex
 cat <<NEXT
 
 Next steps. Only you can do these.
-  1. Read $wt/guard/SURVEY.md.
+  1. Read $wt/guard/SURVEY.md.$agents_note
   2. Fill in $wt/guard/budget.card and $wt/guard/watch.list, then commit.
   3. Push and open the PR:
        git -C $wt push -u origin $branch
