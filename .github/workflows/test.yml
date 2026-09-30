@@ -1,0 +1,21 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck and PyYAML
+        run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck python3-yaml
+      - name: Lint
+        run: shellcheck -S warning bin/guard install.sh lib/*.sh templates/guard/run templates/guard/bin/*.sh tests/run.sh tests/mock-bin/*
+      - name: End-to-end tests
+        run: tests/run.sh

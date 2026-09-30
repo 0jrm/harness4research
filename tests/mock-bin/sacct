@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+if [[ "$*" == *JobID,JobName* ]]; then cat "${MOCK_SACCT_ROWS:-/dev/null}"; else printf '%s\n' ${MOCK_SACCT_CPUSECONDS:-36000 72000}; fi
