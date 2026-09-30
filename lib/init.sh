@@ -2,7 +2,8 @@
 # usage: guard init <repo> [--branch NAME] [--worktree DIR] [--update]
 # Surveys the repo, then proposes guard/ and its companions on a new branch in a separate worktree.
 # Never touches the repo's checked-out tree, never overwrites a file, never pushes.
-# --update refreshes only guard/bin/ and guard/run from this installer, for a follow-up PR.
+# --update refreshes guard/bin/ and guard/run, and inserts a missing setting or hypothesis
+# line into the run templates without changing any other line.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 repo=""; branch=guard/init; wt=""; update=0
@@ -32,6 +33,21 @@ place() {
   if [ -e "$wt/$dst" ] && [ "$mode" = keep ]; then skipped+=("$dst"); return; fi
   mkdir -p "$(dirname "$wt/$dst")"; cp -p "$src" "$wt/$dst"; added+=("$dst")
 }
+# Insert one line when its key is absent. Prefer the line after `after`, else before `before`.
+insert_line() {
+  local file=$1 line=$2 key=$3 after=$4 before=$5
+  [ -f "$file" ] || return 1
+  awk -v k="$key" 'index($0, k)==1 { f=1 } END { exit f ? 0 : 1 }' "$file" && return 1
+  local tmp; tmp=$(mktemp)
+  awk -v line="$line" -v after="$after" -v before="$before" '
+    BEGIN { done=0 }
+    !done && after != "" && index($0, after)==1 { print; print line; done=1; next }
+    !done && before != "" && index($0, before)==1 { print line; print; done=1; next }
+    { print }
+    END { if (!done) print line }
+  ' "$file" > "$tmp"
+  mv "$tmp" "$file"
+}
 t=$here/templates
 for f in preflight ripples manifest fence; do place "$t/guard/bin/$f.sh" "guard/bin/$f.sh" replace; done
 place "$t/guard/run" guard/run replace
@@ -47,6 +63,15 @@ if [ $update = 0 ]; then
   else place "$t/AGENTS.md" AGENTS.md; fi
   place "$t/CLAUDE.md" CLAUDE.md
   "$here/lib/survey.sh" "$repo" > "$wt/guard/SURVEY.md"; added+=(guard/SURVEY.md)
+else
+  card="$wt/runs/_template/question.card"
+  report="$wt/runs/_template/report.md"
+  if insert_line "$card" "setting: <dataset, geometry, code, and pinned commits>" "setting:" "decision_this_informs:" "hypothesis:"; then
+    added+=(runs/_template/question.card)
+  fi
+  if insert_line "$report" "hypothesis: n/a" "hypothesis:" "Question:" "## "; then
+    added+=(runs/_template/report.md)
+  fi
 fi
 {
   echo "installer: $(git -C "$here" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -55,11 +80,11 @@ fi
 } > "$wt/guard/VERSION"; added+=(guard/VERSION)
 
 git -C "$wt" add -A
-if [ $update = 1 ] && git -C "$wt" diff --cached --quiet -- guard/bin guard/run; then
+if [ $update = 1 ] && git -C "$wt" diff --cached --quiet -- guard/bin guard/run runs/_template/question.card runs/_template/report.md; then
   git -C "$repo" worktree remove --force "$wt"; git -C "$repo" branch -q -D "$branch"
   echo "guard scripts in $name are already current. Nothing proposed."; exit 0
 fi
-if [ $update = 1 ]; then msg="chore(guard): refresh guard scripts"; else msg="feat(guard): add agent guard, facts file, and survey"; fi
+if [ $update = 1 ]; then msg="chore(guard): refresh guard scripts and fill missing template lines"; else msg="feat(guard): add agent guard, facts file, and survey"; fi
 git -C "$wt" -c user.name="${GIT_AUTHOR_NAME:-$(git -C "$repo" config user.name || echo guard)}" \
   -c user.email="${GIT_AUTHOR_EMAIL:-$(git -C "$repo" config user.email || echo guard@localhost)}" \
   commit -q -m "$msg" -m "Installed by harness4research. Nothing outside the listed files changed."

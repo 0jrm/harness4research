@@ -113,6 +113,7 @@ rm -f "$R"/manifest-* "$R/inputs.list"
 echo "== fence"
 git switch -q -c pr/clean origin/main; mkdir -p runs/r1; cp runs/_template/question.card runs/r1/; git add -A; git commit -q -m "run: r1"
 expect fence-clean ok 'PASS.guard-untouched' -- guard/run fence origin/main HEAD
+expect fence-clean-setting ok 'PASS.setting-key' -- guard/run fence origin/main HEAD
 cp runs/_template/report.md runs/r1/report.md
 printf '| Claim | Value | Artifact | Job | Commit |\n' > /dev/null
 sed -i '/^|---|---|---|---|---|$/a | RMSE 50-200 m | 0.81 (0.06) | `runs/r1/metrics.csv` | 812400 | a1b2c3d |\n| looks great | 23% | none | - | - |' runs/r1/report.md
@@ -130,6 +131,79 @@ git push -q origin pr/clean:refs/heads/pr-clean; git switch -q -c pr/card origin
 echo "metric: moved" >> runs/r1/question.card; git commit -q -am x
 expect fence-card fail 'FAIL.question-cards-frozen.*runs/r1/question.card' -- guard/run fence origin/pr-clean HEAD
 
+git switch -q -c pr/no-setting origin/main; mkdir -p runs/ns; cp runs/_template/question.card runs/ns/
+sed -i '/^setting:/d' runs/ns/question.card
+git add -A; git commit -q -m x
+expect fence-card-no-setting fail 'FAIL.setting-key' -- guard/run fence origin/main HEAD
+
+git switch -q -c pr/hyp-na origin/main; mkdir -p runs/hn
+cp runs/_template/question.card runs/hn/; cp runs/_template/report.md runs/hn/
+git add -A; git commit -q -m x
+expect fence-hypothesis-na ok 'PASS.hypothesis-line' -- guard/run fence origin/main HEAD
+
+git switch -q -c pr/hyp-na-case origin/main; mkdir -p runs/hc
+cp runs/_template/question.card runs/hc/; cp runs/_template/report.md runs/hc/
+sed -i 's/^hypothesis: .*/hypothesis: N\/A/' runs/hc/report.md
+git add -A; git commit -q -m x
+expect fence-hypothesis-na-case ok 'PASS.hypothesis-line' -- guard/run fence origin/main HEAD
+
+git switch -q -c pr/hyp-na-wide origin/main; mkdir -p runs/hw
+cp runs/_template/question.card runs/hw/; cp runs/_template/report.md runs/hw/
+awk 'BEGIN{line="hypothesis: \357\274\256\357\274\217\357\274\241"} /^hypothesis: /{print line; next} {print}' runs/hw/report.md > runs/hw/report.md.new
+mv runs/hw/report.md.new runs/hw/report.md
+git add -A; git commit -q -m x
+expect fence-hypothesis-na-wide ok 'PASS.hypothesis-line' -- guard/run fence origin/main HEAD
+
+git switch -q -c pr/hyp-na-dot origin/main; mkdir -p runs/hd
+cp runs/_template/question.card runs/hd/; cp runs/_template/report.md runs/hd/
+sed -i 's/^hypothesis: .*/hypothesis: N.A./' runs/hd/report.md
+git add -A; git commit -q -m x
+expect fence-hypothesis-na-dot fail 'FAIL.hypothesis-line' -- guard/run fence origin/main HEAD
+
+git switch -q -c pr/hyp-match origin/main; mkdir -p runs/hm
+cp runs/_template/question.card runs/hm/; cp runs/_template/report.md runs/hm/
+sed -i 's/^hypothesis: .*/hypothesis: increment is zero at every layer/' runs/hm/question.card runs/hm/report.md
+git add -A; git commit -q -m x
+expect fence-hypothesis-match ok 'PASS.hypothesis-line' -- guard/run fence origin/main HEAD
+
+git switch -q -c pr/hyp-lt origin/main; mkdir -p runs/hl
+cp runs/_template/question.card runs/hl/; cp runs/_template/report.md runs/hl/
+sed -i 's/^hypothesis: .*/hypothesis: layer increment < 1e-6/' runs/hl/question.card runs/hl/report.md
+git add -A; git commit -q -m x
+expect fence-hypothesis-lessthan ok 'PASS.hypothesis-line' -- guard/run fence origin/main HEAD
+
+git switch -q -c pr/hyp-mismatch origin/main; mkdir -p runs/hx
+cp runs/_template/question.card runs/hx/; cp runs/_template/report.md runs/hx/
+sed -i 's/^hypothesis: .*/hypothesis: increment is zero at every layer/' runs/hx/question.card
+sed -i 's/^hypothesis: .*/hypothesis: increment grows with depth/' runs/hx/report.md
+git add -A; git commit -q -m x
+expect fence-hypothesis-mismatch fail 'FAIL.hypothesis-line' -- guard/run fence origin/main HEAD
+
+git switch -q -c pr/hyp-ph origin/main; mkdir -p runs/hp
+cp runs/_template/question.card runs/hp/; cp runs/_template/report.md runs/hp/
+sed -i 's/^hypothesis: .*/hypothesis: increment is zero at every layer/' runs/hp/question.card
+sed -i 's/^hypothesis: .*/hypothesis: <placeholder>/' runs/hp/report.md
+git add -A; git commit -q -m x
+expect fence-hypothesis-placeholder fail 'FAIL.hypothesis-line' -- guard/run fence origin/main HEAD
+
+git switch -q -c pr/hyp-head origin/main; mkdir -p runs/hh
+cp runs/_template/question.card runs/hh/; cp runs/_template/report.md runs/hh/
+sed -i '/^hypothesis:/d' runs/hh/report.md
+sed -i '/^## Open questions$/a hypothesis: n/a' runs/hh/report.md
+git add -A; git commit -q -m x
+expect fence-hypothesis-heading fail 'FAIL.hypothesis-line' -- guard/run fence origin/main HEAD
+
+git switch -q -c pr/legacy-card origin/main; mkdir -p runs/legacy
+cp runs/_template/question.card runs/legacy/
+sed -i '/^setting:/d' runs/legacy/question.card
+git add -A; git commit -q -m x
+git push -q origin pr/legacy-card:refs/heads/pr-legacy-card
+git switch -q -c pr/legacy-report origin/pr-legacy-card
+cp runs/_template/report.md runs/legacy/
+git add -A; git commit -q -m x
+expect fence-legacy-setting ok 'PASS.setting-key' -- guard/run fence origin/pr-legacy-card HEAD
+expect fence-legacy-hypothesis ok 'PASS.hypothesis-line' -- guard/run fence origin/pr-legacy-card HEAD
+
 echo "== init --update"
 git -C "$tmp/proj" fetch -q origin
 expect update-noop ok 'already current' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt3"
@@ -137,6 +211,30 @@ git switch -q -c old origin/main; echo "# older fence" >> guard/bin/fence.sh; gi
 git -C "$tmp/proj" fetch -q origin
 expect update-refreshes ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt3"
 expect update-keeps-card ok 'account: gom' -- cat "$tmp/wt3/guard/budget.card"
+git -C "$tmp/proj" worktree remove --force "$tmp/wt3"
+git -C "$tmp/proj" branch -D guard/update
+git switch -q -c keep-lines origin/main
+sed -i 's/^setting: .*/setting: our tank/' runs/_template/question.card
+sed -i 's/^hypothesis: .*/hypothesis: kept/' runs/_template/report.md
+git add -A; git commit -q -m x; git push -q origin keep-lines:main
+git -C "$tmp/proj" fetch -q origin
+expect update-keeps-lines ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt5"
+expect update-kept-setting ok '^setting: our tank$' -- grep '^setting:' "$tmp/wt5/runs/_template/question.card"
+expect update-kept-hypothesis ok '^hypothesis: kept$' -- grep '^hypothesis:' "$tmp/wt5/runs/_template/report.md"
+git -C "$tmp/proj" worktree remove --force "$tmp/wt5"
+git -C "$tmp/proj" branch -D guard/update
+git switch -q -c fill-lines origin/main
+sed -i '/^setting:/d' runs/_template/question.card
+printf 'custom_note: leave this\n' >> runs/_template/question.card
+sed -i '/^hypothesis:/d' runs/_template/report.md
+printf 'group: ocean\n' >> runs/_template/report.md
+git add -A; git commit -q -m x; git push -q origin fill-lines:main
+git -C "$tmp/proj" fetch -q origin
+expect update-fills ok 'runs/_template/question.card' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt4"
+expect update-filled-setting ok '^setting: <dataset, geometry, code, and pinned commits>$' -- grep '^setting:' "$tmp/wt4/runs/_template/question.card"
+expect update-filled-note ok '^custom_note: leave this$' -- grep '^custom_note:' "$tmp/wt4/runs/_template/question.card"
+expect update-filled-hypothesis ok '^hypothesis: n/a$' -- grep '^hypothesis:' "$tmp/wt4/runs/_template/report.md"
+expect update-filled-group ok '^group: ocean$' -- grep '^group:' "$tmp/wt4/runs/_template/report.md"
 
 echo; echo "$pass passed, $fail failed"
 [ $fail -eq 0 ]

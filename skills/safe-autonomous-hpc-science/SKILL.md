@@ -85,6 +85,7 @@ Copy `runs/_template/question.card` to `runs/<run_id>/question.card`. It has fla
 ```
 question: one sentence
 decision_this_informs: what changes depending on the answer
+setting: dataset, geometry, code, and pinned commits
 hypothesis: stated so it can be wrong
 metric: exact definition, script path, commit
 partner_metric: the one that punishes doing less
@@ -110,7 +111,7 @@ max_concurrent_jobs: 0
 quota_pct_cmd: <site command that prints percent used>
 ```
 
-Copy `runs/_template/report.md`. It holds, in order:
+Copy `runs/_template/report.md`. It carries `hypothesis:` copied from the card, or `n/a` in any letter case. A fullwidth letter or a fraction slash in that token counts the same as `n/a`. It holds, in order:
 - the question and the verdict against the kill criteria;
 - an evidence table (claim, value with spread, artifact path, job id, commit);
 - verifier checks with pass or fail;

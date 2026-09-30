@@ -22,6 +22,27 @@ fi
 cards=$(git diff --name-status "$base...$head" | awk '$1 !~ /^A/ && $NF ~ /^runs\/[^/]+\/question\.card$/ && $NF !~ /^runs\/_template\// {print $NF}' | tr '\n' ' ')
 if [ -z "$cards" ]; then say PASS question-cards-frozen ""; else say FAIL question-cards-frozen "changed after first commit, open a new run id: $cards"; fi
 
+first_val() {
+  awk -v k="$1" -v h="${2:-0}" '
+    h && /^## / { exit }
+    index($0, k ":") == 1 {
+      sub("^" k ":", "")
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+      print
+      exit
+    }
+  '
+}
+
+unset_setting=""
+while read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in runs/_template/*) continue ;; esac
+  s=$(git show "$head:$f" | first_val setting)
+  [ -n "$s" ] || unset_setting="$unset_setting $f"
+done < <(git diff --name-only --diff-filter=A "$base...$head" -- 'runs/*/question.card')
+if [ -z "$unset_setting" ]; then say PASS setting-key ""; else say FAIL setting-key "added card has no setting:$unset_setting"; fi
+
 unproven=""
 while read -r f; do
   [ -n "$f" ] || continue
@@ -31,6 +52,28 @@ while read -r f; do
   [ -z "$rows" ] || unproven="$unproven $f:$(echo $rows | tr ' ' ',')"
 done < <(git diff --name-only --diff-filter=AM "$base...$head" -- 'runs/*/report.md')
 if [ -z "$unproven" ]; then say PASS evidence-paths ""; else say FAIL evidence-paths "evidence rows without a backticked artifact path:$unproven"; fi
+
+bad_h=""
+while read -r f; do
+  [ -n "$f" ] || continue
+  hyp=$(git show "$head:$f" | first_val hypothesis 1)
+  if [ -z "$hyp" ] || printf '%s\n' "$hyp" | grep -qE '^<[^>]*>$'; then
+    bad_h="$bad_h $f"
+    continue
+  fi
+  folded=$(printf '%s\n' "$hyp" | LC_ALL=C awk '{
+    s=$0
+    gsub(/\357\274\217|\342\201\204|\342\210\225/, "/", s)
+    gsub(/\357\274\256|\357\275\216/, "n", s)
+    gsub(/\357\274\241|\357\275\201/, "a", s)
+    print tolower(s)
+  }')
+  [ "$folded" = n/a ] && continue
+  chyp=$(git show "$head:${f%/report.md}/question.card" 2>/dev/null | first_val hypothesis)
+  [ -n "$chyp" ] && [ "$hyp" = "$chyp" ] && continue
+  bad_h="$bad_h $f"
+done < <(git diff --name-only --diff-filter=AM "$base...$head" -- 'runs/*/report.md')
+if [ -z "$bad_h" ]; then say PASS hypothesis-line ""; else say FAIL hypothesis-line "must be n/a or the card hypothesis:$bad_h"; fi
 
 ex=$(git diff --name-only --diff-filter=AM "$base...$head" -- 'runs/explore-*/report.md' | tr '\n' ' ')
 if [ -z "$ex" ]; then say PASS no-exploration-reports ""; else say FAIL no-exploration-reports "rerun under a question card before reporting: $ex"; fi

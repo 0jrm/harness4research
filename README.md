@@ -101,7 +101,7 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 |---|---|---|
 | `guard survey <repo>` | your machine | read-only inventory |
 | `guard init <repo>` | your machine | propose the guard on a new branch |
-| `guard init <repo> --update` | your machine | propose refreshed guard scripts |
+| `guard init <repo> --update` | your machine | propose refreshed guard scripts, and add a missing `setting` or `hypothesis` line in the run templates |
 | `guard archive <repo>` | your machine | tag every remote branch |
 | `guard/run preflight <run_dir> <job.sh> [sbatch options]` | cluster | submit or refuse |
 | `guard/run ripples <run_dir>` | cluster | warning signs |
