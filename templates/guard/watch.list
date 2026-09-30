@@ -1,0 +1,3 @@
+# Paths the implementing agent must not change. The fence blocks their merge and ripples flag them.
+# One git pathspec per line. Add the verifier, test and threshold files for this project.
+runs/*/checks/*

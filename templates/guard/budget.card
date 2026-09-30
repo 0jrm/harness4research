@@ -1,0 +1,12 @@
+account: <slurm account for agent work>
+start_date: <YYYY-MM-DD, first day this budget covers>
+stop_date: <YYYY-MM-DD, last day agents may submit>
+max_core_hours: <total core-hours agents may spend>
+verification_reserve_core_hours: <core-hours held back for baselines and verifier jobs>
+cores_per_node: <cores per node on the partition you use>
+max_nodes_per_job: <nodes>
+max_walltime_minutes: <minutes>
+max_concurrent_jobs: <jobs>
+quota_pct_cmd: <command that prints percent of your scratch quota used>
+explore_max_nodes: 1
+explore_max_walltime_minutes: 60

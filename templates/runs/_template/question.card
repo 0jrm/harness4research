@@ -1,0 +1,10 @@
+question: <one sentence: what do we not know?>
+decision_this_informs: <what changes depending on the answer>
+hypothesis: <what we expect, stated so it can be wrong>
+metric: <exact definition, script path, commit>
+partner_metric: <a metric that punishes doing less: smoothing, averaging, predicting the prior>
+baseline: <run id or configuration of the control>
+baseline_tolerance: <number>
+kill_criteria: <stop if ...>
+negative_result_means: <what we conclude and write down>
+out_of_scope: <what this run will not try>

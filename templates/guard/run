@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# usage: guard/run <preflight|ripples|manifest|fence> [args...]
+# Runs the script as it exists on the protected branch, so edits on a working branch have no effect.
+# HPC_GUARD_LOCAL=1 runs the working-tree copy instead, for the bootstrap before guard/ is merged.
+set -euo pipefail
+cmd=${1:-}; shift || true
+case $cmd in
+  preflight|ripples|manifest|fence) ;;
+  *) echo "usage: guard/run <preflight|ripples|manifest|fence> [args...]" >&2; exit 64 ;;
+esac
+top=$(git rev-parse --show-toplevel)
+if [ "${HPC_GUARD_LOCAL:-0}" = 1 ]; then exec bash "$top/guard/bin/$cmd.sh" "$@"; fi
+base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
+script=$(git show "$base:guard/bin/$cmd.sh" 2>/dev/null) \
+  || { echo "guard/bin/$cmd.sh is not on $base yet. Merge the guard PR, or set HPC_GUARD_LOCAL=1 for a first test." >&2; exit 2; }
+cd "$top"
+exec bash -c "$script" "guard/bin/$cmd.sh" "$@"
