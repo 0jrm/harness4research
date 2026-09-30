@@ -25,18 +25,22 @@ if [ ${#watch[@]} -gt 0 ]; then
   if [ -z "$w" ]; then say PASS watched-paths ""; else say RIPPLE watched-paths "$(echo $w)"; fi
 else say UNCHECKED watched-paths "list verifier, test and threshold paths in guard/watch.list"; fi
 
-rows=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobID,JobName,State,ElapsedRaw,TimelimitRaw \
-  | awk -F'|' -v r="$run_id" '$2==r')
-bad=$(awk -F'|' '$3 ~ /TIMEOUT|OUT_OF_ME|NODE_FAIL|FAILED|PREEMPTED/ {printf "%s:%s ", $1, $3}' <<<"$rows")
-if [ -z "$bad" ]; then say PASS job-states ""; else say RIPPLE job-states "$bad"; fi
-tight=$(awk -F'|' '$5>0 && $4 > 0.8*$5*60 {printf "%s:%d%% ", $1, 100*$4/($5*60)}' <<<"$rows")
-if [ -z "$tight" ]; then say PASS walltime-headroom ""; else say RIPPLE walltime-headroom "$tight"; fi
-nfail=$(awk -F'|' 'NF && $3 !~ /COMPLETED|RUNNING|PENDING/' <<<"$rows" | wc -l)
-if [ "$nfail" -le 1 ]; then say PASS retries "$nfail not completed"; else say RIPPLE retries "$nfail not completed"; fi
+if command -v sacct >/dev/null; then
+  rows=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobID,JobName,State,ElapsedRaw,TimelimitRaw \
+    | awk -F'|' -v r="$run_id" '$2==r')
+  bad=$(awk -F'|' '$3 ~ /TIMEOUT|OUT_OF_ME|NODE_FAIL|FAILED|PREEMPTED/ {printf "%s:%s ", $1, $3}' <<<"$rows")
+  if [ -z "$bad" ]; then say PASS job-states ""; else say RIPPLE job-states "$bad"; fi
+  tight=$(awk -F'|' '$5>0 && $4 > 0.8*$5*60 {printf "%s:%d%% ", $1, 100*$4/($5*60)}' <<<"$rows")
+  if [ -z "$tight" ]; then say PASS walltime-headroom ""; else say RIPPLE walltime-headroom "$tight"; fi
+  nfail=$(awk -F'|' 'NF && $3 !~ /COMPLETED|RUNNING|PENDING/' <<<"$rows" | wc -l)
+  if [ "$nfail" -le 1 ]; then say PASS retries "$nfail not completed"; else say RIPPLE retries "$nfail not completed"; fi
 
-spent=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW | awk '{s+=$1} END{printf "%d", s/3600}')
-if [[ $max_ch =~ ^[0-9]+$ ]] && [ $(( spent * 100 )) -gt $(( max_ch * 80 )) ]; then say RIPPLE budget "$spent of $max_ch core-h"
-else say PASS budget "$spent of ${max_ch:-?} core-h"; fi
+  spent=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW | awk '{s+=$1} END{printf "%d", s/3600}')
+  if [[ $max_ch =~ ^[0-9]+$ ]] && [ $(( spent * 100 )) -gt $(( max_ch * 80 )) ]; then say RIPPLE budget "$spent of $max_ch core-h"
+  else say PASS budget "$spent of ${max_ch:-?} core-h"; fi
+else
+  for k in job-states walltime-headroom retries budget; do say UNCHECKED "$k" "sacct not found on PATH on this host"; done
+fi
 
 qcmd=$(get quota_pct_cmd)
 if [ -n "$qcmd" ] && [[ $qcmd != *"<"* ]]; then

@@ -14,6 +14,18 @@ expect() {  # expect <name> <want: ok|fail> <grep pattern or -> -- command...
   if [ "$got" = "$want" ] && { [ "$pat" = - ] || grep -q -E -- "$pat" <<<"$out"; }; then pass=$((pass+1)); echo "ok   $name"
   else fail=$((fail+1)); echo "FAIL $name (exit $rc, wanted $want, pattern '$pat')"; sed 's/^/     /' <<<"$out" | tail -8; fi
 }
+path_without() {  # path_without <cmd>: prints a PATH like this one on which <cmd> is not found
+  local cmd=$1 shadow=$tmp/no-$1 out="" d f IFS=:
+  mkdir -p "$shadow"
+  for d in $PATH; do
+    if [ -e "$d/$cmd" ]; then
+      for f in "$d"/*; do [ "${f##*/}" = "$cmd" ] || [ -e "$shadow/${f##*/}" ] || ln -s "$f" "$shadow/"; done
+      d=$shadow
+    fi
+    [[ :$out: == *":$d:"* ]] || out=${out:+$out:}$d
+  done
+  echo "$out"
+}
 
 git init -q --bare -b main "$tmp/origin.git"
 git clone -q "$tmp/origin.git" "$tmp/proj" 2>/dev/null
@@ -101,6 +113,8 @@ expect ripples-quota fail 'PASS.quota.42%' -- guard/run ripples "$R"
 expect ripples-other-run-ignored fail 'retries.2 not' -- guard/run ripples "$R"
 printf '101|2026-09-29-demo|COMPLETED|100|240\n' > "$tmp/rows"; rm -rf "$R/checks"
 expect ripples-clean ok 'PASS.budget.30 of 10000' -- guard/run ripples "$R"
+expect ripples-no-sacct ok 'UNCHECKED.job-states.*UNCHECKED.walltime-headroom.*UNCHECKED.retries.*UNCHECKED.budget.*PASS.quota.42%' -- \
+  env PATH="$(path_without sacct)" bash -c 'set -o pipefail; guard/run ripples "$1" 2>&1 | tr "\n" " "' _ "$R"
 unset MOCK_SACCT_ROWS
 
 echo "== manifest"
