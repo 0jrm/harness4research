@@ -127,12 +127,16 @@ out_of_scope: compiling TSIS
 
 ## Results
 
+Run on 2026-09-30 against 0jrm/gom-da-workspace. The repository chose a bulk freeze (everything ledger-like moved under `archive/2026-09-30/` with the "Historical. Not instructions." marker) instead of a row-by-row poison pass, so that row reads "not run".
+
 | Step | Expected | Observed | Pass |
 |---|---|---|---|
-| survey, archive, init | leads listed, tags only, worktree | | |
-| poison pass | operator and obs-error rows with evidence | | |
-| reset PRs | small, fence green | | |
-| cluster smoke | manifest, ripples PASS | | |
-| refusal | nodes cap refused | | |
-| baseline card | card shown before compute | | |
-| baseline report | evidence paths, fence green | | |
+| survey, archive, init | leads listed, tags only, worktree | survey listed 45 remote branches, the P3/P4 worktrees under `tmp/wt/` and `.claude/worktrees/*` as nested repos; archive tagged 54 branches locally and printed the push and delete commands; init made `gom-da-workspace.guard-init` on `guard/init` off `origin/main` and left the existing `AGENTS.md` alone | yes |
+| poison pass | operator and obs-error rows with evidence | not run; bulk freeze chosen (gom-da-workspace PR 76) | n/a |
+| reset PRs | small, fence green | freeze PR 76 (3 commits, 416 renames), promotion PR 77, guard PR 78, pin PR 79; hygiene green on each; the fence did not exist on the base until PR 78 merged | yes |
+| cluster smoke | manifest, ripples PASS | `PREFLIGHT OK: explore-hello nodes=1 time=5m tasks=1 projected=3 spent=2 queued=0 available=1600`, job 13178790 COMPLETED, `manifest-13178790.txt` with commit fb1b871 and `modules: precompiled`; ripples PASS on guard, card, watched paths, job states, walltime, retries, budget (2 of 2000 core-h), quota 66 %; domain-checks UNCHECKED | yes |
+| refusal | nodes cap refused | `PREFLIGHT FAIL: --nodes=2 exceeds max_nodes_per_job=1` | yes |
+| baseline card | card shown before compute | `runs/p1-lookahead/question.card` (P1 information time, not the TSIS baseline in this doc) opened as a PR for approval; no compute run | pending |
+| baseline report | evidence paths, fence green | not yet | pending |
+
+Findings filed as PRs 2 to 6 in this repository: ripples printed PASS without `sacct`; preflight died on a host without `sbatch`; a placeholder in `verification_reserve_core_hours` crashed the arithmetic; the survey header named the base branch while reading the working tree; init said nothing about `guard/AGENTS.proposed.md` in its next steps. Two site facts the templates do not anticipate: RCC has no per-user quota command (`quota_pct_cmd` reports the filesystem fill), and a private repository on a free GitHub plan cannot make the fence a required check.
