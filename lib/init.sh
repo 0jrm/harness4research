@@ -76,8 +76,7 @@ Next steps. Only you can do these.
   3. Push and open the PR:
        git -C $wt push -u origin $branch
        gh pr create -R "\$(git -C $wt remote get-url origin)" --head $branch --title "feat(guard): add agent guard" --body-file $wt/guard/README.md
-  4. After merging, add a GitHub ruleset on the default branch (Settings > Rules > Rulesets) that
-     requires a pull request and the "guard-fence / fence" status check, with only you on the bypass list.
-  5. Give agents credentials that cannot bypass that rule. See docs/enforcement.md.
-  6. On the cluster, ask for a capped sub-account. Template: docs/cluster-subaccount-request.md.
+  4. After merging, protect the default branch, give agents weaker credentials, and cap the
+     cluster account. The README's Quickstart, steps 4 to 6, gives each click and command:
+     https://github.com/0jrm/harness4research#quickstart
 NEXT

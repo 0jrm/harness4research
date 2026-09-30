@@ -4,19 +4,58 @@ Guardrails for AI agents that run computational science on shared clusters. One 
 
 ## Quickstart
 
+### 1. Install
+
 ```shell
 git clone --recurse-submodules https://github.com/0jrm/harness4research ~/harness4research
-~/harness4research/install.sh
+~/harness4research/install.sh           # add --pstack skip if you already use the pstack plugin
+guard version                           # prints this repo's commit and pstack's
+```
+
+`install.sh` puts `guard` in `~/.local/bin` and links the skill into `~/.agents/skills`, `~/.claude/skills`, and `~/.cursor/skills`. To check that an agent sees it, open the agent and ask which skills it has. `safe-autonomous-hpc-science` should be in the list. If your agent reads skills from another folder, rerun with `--skills-dir <that folder>`.
+
+### 2. Propose the guard
+
+```shell
 guard survey ~/path/to/your-repo        # read-only report of stale branches, docs, and duplicates
 guard init ~/path/to/your-repo          # proposes the guard on a new branch and worktree
 ```
 
-Then, in the worktree that `init` printed:
+`init` creates a worktree next to your repository, `<repo>.guard-init`, on branch `guard/init`, and prints the next commands. Your checked-out tree is not touched.
 
-1. Read `guard/SURVEY.md`.
-2. Fill in `guard/budget.card` and `guard/watch.list`, commit, push, and open the pull request. Merge it yourself.
-3. On GitHub, protect the default branch. Require a pull request and the `guard-fence / fence` check.
-4. Give agents weaker credentials than yours, and ask your cluster for a capped sub-account. See [docs/enforcement.md](docs/enforcement.md).
+### 3. Fill in the guard and merge it
+
+In the worktree:
+
+1. Read `guard/SURVEY.md`. It lists what an agent could mistake for current truth.
+2. Replace every `<placeholder>` in `guard/budget.card` with your cluster values. Preflight refuses to submit while any placeholder is left. If the repository submits no jobs, leave them.
+3. Add to `guard/watch.list` the files agents must not edit: verifiers, contract tests, thresholds. Use one git pathspec per line. List specific files, not all of `tests/`, or agents cannot add tests.
+4. Commit, then push and open the pull request with the two commands `init` printed. Merge it yourself.
+
+### 4. Protect the default branch
+
+The `guard-fence / fence` check exists only after the merge in step 3, and GitHub offers it in the ruleset form only after it has run once. Open any small pull request first, then:
+
+1. On GitHub, open the repository and go to **Settings → Rules → Rulesets → New ruleset → New branch ruleset**.
+2. Set **Enforcement status** to **Active**. Under **Target branches**, choose **Add target → Include default branch**.
+3. Select **Require a pull request before merging**.
+4. Select **Require status checks to pass**, choose **Add checks**, type `fence`, and pick `guard-fence / fence`.
+5. Under **Bypass list**, add **Repository admin** and nobody else. Save.
+
+### 5. Give agents weaker credentials
+
+If an agent runs with your `gh` login or SSH key, it can use your bypass. Give it its own token:
+
+1. On GitHub, go to **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.
+2. Under **Repository access**, choose **Only select repositories** and pick the guarded repositories.
+3. Under **Permissions**, set **Contents** and **Pull requests** to **Read and write**. Leave **Administration** at **No access**.
+4. Run agents with that token as `GH_TOKEN`, an HTTPS remote, and no `SSH_AUTH_SOCK`.
+
+To check it, open a pull request that edits `guard/budget.card`, so the fence fails, and run `GH_TOKEN=<agent token> gh pr merge <number> --admin --merge`. GitHub must refuse. Close the pull request afterwards.
+
+### 6. Cap the cluster account
+
+Ask your cluster admins for a Slurm sub-account with a hard core-hour cap, and put it in `guard/budget.card` as `account`. Preflight forces every job onto it, and the scheduler enforces the cap even for jobs submitted without preflight. Email template: [docs/cluster-subaccount-request.md](docs/cluster-subaccount-request.md). [docs/enforcement.md](docs/enforcement.md) explains why steps 4 to 6 matter.
 
 From then on, agents submit jobs with `guard/run preflight`, check on them with `guard/run ripples`, and start each experiment with a committed question card. The skill tells them how.
 
