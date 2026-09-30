@@ -21,7 +21,7 @@ guard survey ~/path/to/your-repo        # read-only report of stale branches, do
 guard init ~/path/to/your-repo          # proposes the guard on a new branch and worktree
 ```
 
-`init` creates a worktree next to your repository, `<repo>.guard-init`, on branch `guard/init`, and prints the next commands. Your checked-out tree is not touched.
+`init` creates a worktree next to your repository, `<repo>.guard-init`, on branch `guard/init`, and prints the next commands. Your checked-out tree is not touched. If the repository already has an `AGENTS.md`, `init` leaves it alone and writes its version to `guard/AGENTS.proposed.md`, which you merge into yours or delete before you commit.
 
 ### 3. Fill in the guard and merge it
 
