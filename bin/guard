@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# usage: guard <survey|init|archive|preflight|ripples|manifest|fence> [args...]
+set -euo pipefail
+here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+cmd=${1:-help}; shift || true
+case $cmd in
+  survey|init|archive) exec bash "$here/lib/$cmd.sh" "$@" ;;
+  preflight|ripples|manifest|fence) exec bash "$here/templates/guard/bin/$cmd.sh" "$@" ;;
+  version) echo "safe-autonomous-hpc-science $(git -C "$here" rev-parse --short HEAD 2>/dev/null), pstack $(git -C "$here/vendor/pstack" rev-parse --short HEAD 2>/dev/null || echo missing)" ;;
+  *) cat <<'USAGE'
+usage: guard <command> [args]
+
+Project setup, run from your machine:
+  survey <repo>       read-only inventory of branches, context files, stale docs, duplicates
+  init <repo>         propose guard/ and its companions on a new branch and worktree
+  init <repo> --update  refresh guard scripts in a project that already has guard/
+  archive <repo>      tag every remote branch before any cleanup
+
+Inside a guarded project, prefer guard/run, which runs the protected branch's copy:
+  preflight, ripples, manifest, fence
+USAGE
+     [ "$cmd" = help ] || exit 64 ;;
+esac
