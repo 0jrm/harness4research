@@ -91,6 +91,13 @@ expect preflight-account-wins ok 'SBATCH --account=other .*--account=gom' -- gua
 expect preflight-walltime fail 'exceeds max_walltime' -- guard/run preflight "$R" job.sh --time=1-00:00:00
 expect preflight-budget fail 'exceeds 8500 available' -- guard/run preflight "$R" job.sh --nodes=4 --time=12:00:00 --array=0-9%2
 expect preflight-reserve-open ok 'available=10000' -- env HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
+sed -i 's/^verification_reserve_core_hours: .*/verification_reserve_core_hours: <core-hours held back for baselines and verifier jobs>/' guard/budget.card
+git commit -q -am "placeholder reserve"
+expect preflight-reserve-placeholder fail "^PREFLIGHT FAIL: budget card 'verification_reserve_core_hours' is still a placeholder" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+sed -i 's/^verification_reserve_core_hours: .*/verification_reserve_core_hours: 1500/; s/^cores_per_node: .*/cores_per_node: 128 cores/' guard/budget.card
+git commit -q -am "unit in cores_per_node"
+expect preflight-budget-not-integer fail "^PREFLIGHT FAIL: budget card 'cores_per_node' must be a whole number: 128 cores$" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+git reset -q --hard HEAD~2
 sed -i 's/max_core_hours: 10000/max_core_hours: 99999/' guard/budget.card; git commit -q -am "raise budget"
 expect preflight-card-edit fail 'guard/ differs' -- guard/run preflight "$R" job.sh
 printf '#!/usr/bin/env bash\necho SBATCH bypassed\n' > guard/bin/preflight.sh; git commit -q -am "neuter preflight"

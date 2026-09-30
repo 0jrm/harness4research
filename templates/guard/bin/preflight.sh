@@ -20,6 +20,11 @@ need() {
   [[ $v != *"<"* ]] || fail "budget card '$1' is still a placeholder: $v"
   echo "$v"
 }
+whole() {
+  local v; v=$(need "$1")
+  [[ $v =~ ^[[:space:]]*([0-9]+)[[:space:]]*$ ]] || fail "budget card '$1' must be a whole number: $v"
+  echo "${BASH_REMATCH[1]}"
+}
 to_min() {
   local t=$1 d=0 h=0 m=0 s=0 a b c
   [[ $t == *-* ]] && { d=${t%%-*}; t=${t#*-}; }
@@ -62,10 +67,10 @@ fi
 stop=$(need stop_date)
 [[ ! $(date +%F) > $stop ]] || fail "past stop_date $stop"
 
-acct=$(need account); start=$(need start_date); max_ch=$(need max_core_hours)
-reserve=$(get verification_reserve_core_hours); reserve=${reserve:-0}
-cpn=$(need cores_per_node); max_nodes=$(need max_nodes_per_job)
-max_wall=$(need max_walltime_minutes); max_conc=$(need max_concurrent_jobs)
+acct=$(need account); start=$(need start_date); max_ch=$(whole max_core_hours)
+reserve=0; [ -z "$(get verification_reserve_core_hours)" ] || reserve=$(whole verification_reserve_core_hours)
+cpn=$(whole cores_per_node); max_nodes=$(whole max_nodes_per_job)
+max_wall=$(whole max_walltime_minutes); max_conc=$(whole max_concurrent_jobs)
 
 wall=$(opt time "$@"); nodes=$(opt nodes "$@"); array=$(opt array "$@")
 [ -n "$wall" ] || fail "state --time=... explicitly"
