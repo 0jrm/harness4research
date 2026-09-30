@@ -141,6 +141,25 @@ cp runs/_template/question.card runs/hn/; cp runs/_template/report.md runs/hn/
 git add -A; git commit -q -m x
 expect fence-hypothesis-na ok 'PASS.hypothesis-line' -- guard/run fence origin/main HEAD
 
+git switch -q -c pr/hyp-na-case origin/main; mkdir -p runs/hc
+cp runs/_template/question.card runs/hc/; cp runs/_template/report.md runs/hc/
+sed -i 's/^hypothesis: .*/hypothesis: N\/A/' runs/hc/report.md
+git add -A; git commit -q -m x
+expect fence-hypothesis-na-case ok 'PASS.hypothesis-line' -- guard/run fence origin/main HEAD
+
+git switch -q -c pr/hyp-na-wide origin/main; mkdir -p runs/hw
+cp runs/_template/question.card runs/hw/; cp runs/_template/report.md runs/hw/
+awk 'BEGIN{line="hypothesis: \357\274\256\357\274\217\357\274\241"} /^hypothesis: /{print line; next} {print}' runs/hw/report.md > runs/hw/report.md.new
+mv runs/hw/report.md.new runs/hw/report.md
+git add -A; git commit -q -m x
+expect fence-hypothesis-na-wide ok 'PASS.hypothesis-line' -- guard/run fence origin/main HEAD
+
+git switch -q -c pr/hyp-na-dot origin/main; mkdir -p runs/hd
+cp runs/_template/question.card runs/hd/; cp runs/_template/report.md runs/hd/
+sed -i 's/^hypothesis: .*/hypothesis: N.A./' runs/hd/report.md
+git add -A; git commit -q -m x
+expect fence-hypothesis-na-dot fail 'FAIL.hypothesis-line' -- guard/run fence origin/main HEAD
+
 git switch -q -c pr/hyp-match origin/main; mkdir -p runs/hm
 cp runs/_template/question.card runs/hm/; cp runs/_template/report.md runs/hm/
 sed -i 's/^hypothesis: .*/hypothesis: increment is zero at every layer/' runs/hm/question.card runs/hm/report.md
@@ -192,6 +211,30 @@ git switch -q -c old origin/main; echo "# older fence" >> guard/bin/fence.sh; gi
 git -C "$tmp/proj" fetch -q origin
 expect update-refreshes ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt3"
 expect update-keeps-card ok 'account: gom' -- cat "$tmp/wt3/guard/budget.card"
+git -C "$tmp/proj" worktree remove --force "$tmp/wt3"
+git -C "$tmp/proj" branch -D guard/update
+git switch -q -c keep-lines origin/main
+sed -i 's/^setting: .*/setting: our tank/' runs/_template/question.card
+sed -i 's/^hypothesis: .*/hypothesis: kept/' runs/_template/report.md
+git add -A; git commit -q -m x; git push -q origin keep-lines:main
+git -C "$tmp/proj" fetch -q origin
+expect update-keeps-lines ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt5"
+expect update-kept-setting ok '^setting: our tank$' -- grep '^setting:' "$tmp/wt5/runs/_template/question.card"
+expect update-kept-hypothesis ok '^hypothesis: kept$' -- grep '^hypothesis:' "$tmp/wt5/runs/_template/report.md"
+git -C "$tmp/proj" worktree remove --force "$tmp/wt5"
+git -C "$tmp/proj" branch -D guard/update
+git switch -q -c fill-lines origin/main
+sed -i '/^setting:/d' runs/_template/question.card
+printf 'custom_note: leave this\n' >> runs/_template/question.card
+sed -i '/^hypothesis:/d' runs/_template/report.md
+printf 'group: ocean\n' >> runs/_template/report.md
+git add -A; git commit -q -m x; git push -q origin fill-lines:main
+git -C "$tmp/proj" fetch -q origin
+expect update-fills ok 'runs/_template/question.card' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt4"
+expect update-filled-setting ok '^setting: <dataset, geometry, code, and pinned commits>$' -- grep '^setting:' "$tmp/wt4/runs/_template/question.card"
+expect update-filled-note ok '^custom_note: leave this$' -- grep '^custom_note:' "$tmp/wt4/runs/_template/question.card"
+expect update-filled-hypothesis ok '^hypothesis: n/a$' -- grep '^hypothesis:' "$tmp/wt4/runs/_template/report.md"
+expect update-filled-group ok '^group: ocean$' -- grep '^group:' "$tmp/wt4/runs/_template/report.md"
 
 echo; echo "$pass passed, $fail failed"
 [ $fail -eq 0 ]

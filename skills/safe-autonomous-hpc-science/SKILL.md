@@ -111,7 +111,7 @@ max_concurrent_jobs: 0
 quota_pct_cmd: <site command that prints percent used>
 ```
 
-Copy `runs/_template/report.md`. It carries `hypothesis:` copied from the card or `n/a`. It holds, in order:
+Copy `runs/_template/report.md`. It carries `hypothesis:` copied from the card, or `n/a` in any letter case. A fullwidth letter or a fraction slash in that token counts the same as `n/a`. It holds, in order:
 - the question and the verdict against the kill criteria;
 - an evidence table (claim, value with spread, artifact path, job id, commit);
 - verifier checks with pass or fail;

@@ -61,7 +61,14 @@ while read -r f; do
     bad_h="$bad_h $f"
     continue
   fi
-  [ "$hyp" = n/a ] && continue
+  folded=$(printf '%s\n' "$hyp" | LC_ALL=C awk '{
+    s=$0
+    gsub(/\357\274\217|\342\201\204|\342\210\225/, "/", s)
+    gsub(/\357\274\256|\357\275\216/, "n", s)
+    gsub(/\357\274\241|\357\275\201/, "a", s)
+    print tolower(s)
+  }')
+  [ "$folded" = n/a ] && continue
   chyp=$(git show "$head:${f%/report.md}/question.card" 2>/dev/null | first_val hypothesis)
   [ -n "$chyp" ] && [ "$hyp" = "$chyp" ] && continue
   bad_h="$bad_h $f"
