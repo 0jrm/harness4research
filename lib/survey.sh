@@ -7,12 +7,14 @@ cd "$repo" || exit 2
 git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repository: $repo" >&2; exit 2; }
 base=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
 git rev-parse --verify -q "$base" >/dev/null || base=HEAD
-name=$(basename "$(git rev-parse --show-toplevel)")
+top=$(git rev-parse --show-toplevel); name=$(basename "$top")
+dirty=$(git status --porcelain | wc -l)
 docs() { git ls-files -- '*.md' '*.mdc' '*.txt' '.cursorrules' | grep -v '^vendor/\|^node_modules/'; }
 
 echo "# Survey of $name"
 echo
-echo "Generated $(date -u +%FT%TZ) against \`$base\` at \`$(git rev-parse --short "$base")\`. Nothing was changed."
+[ "$dirty" -eq 0 ] || { echo "warning: working tree has $dirty uncommitted changes; document findings reflect it"; echo; }
+echo "Generated $(date -u +%FT%TZ) from the working tree of \`$top\`; branches compared against \`$base\` at \`$(git rev-parse --short "$base")\`. Nothing was changed."
 echo "Each finding is a lead for a human or agent to check, not a verdict."
 
 echo; echo "## Branches"; echo
