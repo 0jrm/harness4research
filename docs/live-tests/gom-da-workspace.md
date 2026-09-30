@@ -114,6 +114,7 @@ Draft of that card, to be completed with your paths and commits:
 ```text
 question: Does TSIS return a zero increment when fed profiles equal to the background?
 decision_this_informs: whether any NeSPReSO ingest result is interpretable before the operator is fixed
+setting: one TSIS cycle, zero-innovation profiles, pinned commits in metric
 hypothesis: no; zprofile2lyr produces a nonzero layer increment
 metric: max |increment| per variable and layer, <script path> @ <commit>
 partner_metric: fraction of observations at the clip bounds

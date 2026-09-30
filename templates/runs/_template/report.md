@@ -1,6 +1,7 @@
 # <run_id>
 
 Question: <from question.card>
+hypothesis: n/a
 Verdict against kill criteria: <continue | kill | escalate>
 
 ## Evidence

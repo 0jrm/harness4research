@@ -1,5 +1,6 @@
 question: <one sentence: what do we not know?>
 decision_this_informs: <what changes depending on the answer>
+setting: <dataset, geometry, code, and pinned commits>
 hypothesis: <what we expect, stated so it can be wrong>
 metric: <exact definition, script path, commit>
 partner_metric: <a metric that punishes doing less: smoothing, averaging, predicting the prior>
