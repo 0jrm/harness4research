@@ -1,0 +1,4 @@
+[submodule "vendor/pstack"]
+	path = vendor/pstack
+	url = https://github.com/michael-denyer/pstack-claude
+	branch = main
