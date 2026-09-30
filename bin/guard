@@ -6,7 +6,7 @@ cmd=${1:-help}; shift || true
 case $cmd in
   survey|init|archive) exec bash "$here/lib/$cmd.sh" "$@" ;;
   preflight|ripples|manifest|fence) exec bash "$here/templates/guard/bin/$cmd.sh" "$@" ;;
-  version) echo "safe-autonomous-hpc-science $(git -C "$here" rev-parse --short HEAD 2>/dev/null), pstack $(git -C "$here/vendor/pstack" rev-parse --short HEAD 2>/dev/null || echo missing)" ;;
+  version) echo "harness4research $(git -C "$here" rev-parse --short HEAD 2>/dev/null), pstack $(git -C "$here/vendor/pstack" rev-parse --short HEAD 2>/dev/null || echo missing)" ;;
   *) cat <<'USAGE'
 usage: guard <command> [args]
 

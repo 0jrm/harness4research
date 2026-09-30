@@ -62,7 +62,7 @@ fi
 if [ $update = 1 ]; then msg="chore(guard): refresh guard scripts"; else msg="feat(guard): add agent guard, facts file, and survey"; fi
 git -C "$wt" -c user.name="${GIT_AUTHOR_NAME:-$(git -C "$repo" config user.name || echo guard)}" \
   -c user.email="${GIT_AUTHOR_EMAIL:-$(git -C "$repo" config user.email || echo guard@localhost)}" \
-  commit -q -m "$msg" -m "Installed by safe-autonomous-hpc-science. Nothing outside the listed files changed."
+  commit -q -m "$msg" -m "Installed by harness4research. Nothing outside the listed files changed."
 
 echo "Proposed on branch $branch in worktree $wt"
 echo; echo "Added:"; printf '  %s\n' "${added[@]}"

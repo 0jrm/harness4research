@@ -42,7 +42,7 @@ Never do these:
 
 ## Guards are structure, not prose
 
-A guarded repo has a `guard/` directory, `FACTS.md`, and a `guard-fence` CI check. If `guard/` is missing, work at tier 1 only and tell the human to run `guard init` from the safe-autonomous-hpc-science repo. Never create `guard/` yourself.
+A guarded repo has a `guard/` directory, `FACTS.md`, and a `guard-fence` CI check. If `guard/` is missing, work at tier 1 only and tell the human to run `guard init` from the harness4research repo. Never create `guard/` yourself.
 
 - `guard/budget.card` and every path in `guard/watch.list` live on the protected branch, and the human changes them. `guard/run <command>` runs the protected branch's copy of each script, so an edit on your branch has no effect and trips a ripple. The `guard-fence` check blocks the merge of any change to `guard/`, `.github/workflows/`, watched paths, or an existing question card, and of any report evidence row without an artifact path.
 - Submit only through `guard/run preflight <run_dir> <job.sh> [options]`. It fails when guard files differ from `origin/main`, the question card is uncommitted or edited, the date is past `stop_date`, `--time` or `--nodes` is missing or over its cap, spent plus queued plus projected core-hours exceed the budget minus the verification reserve, or concurrency would exceed its cap. It stamps `--job-name=<run_id>` and forces `--account` to the card's account. Verifier jobs set `HPC_SPEND_RESERVE=1`.

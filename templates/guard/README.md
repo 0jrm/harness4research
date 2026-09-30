@@ -14,4 +14,4 @@ Commands:
     guard/run manifest <run_dir> "$0" "$@"                   first line of work in each job script
     guard/run fence [base] [head]                            the merge inspector, also run by CI
 
-Installed by safe-autonomous-hpc-science. See its README for why each piece exists.
+Installed by harness4research. See its README for why each piece exists.

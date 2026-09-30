@@ -12,7 +12,7 @@ The suspects listed below come from conversations in September 2026. They are le
 ### Install and survey
 
 ```shell
-~/safe-autonomous-hpc-science/install.sh --pstack skip
+~/harness4research/install.sh --pstack skip
 cd ~/gom-da-workspace && git fetch --prune && git remote set-head origin -a
 guard survey ~/gom-da-workspace > /tmp/gom-survey.md
 guard archive ~/gom-da-workspace

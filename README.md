@@ -1,12 +1,12 @@
-# safe-autonomous-hpc-science
+# harness4research
 
 Guardrails for AI agents that run computational science on shared clusters. One command adds them to a research repository, and they apply to Claude Code, Cursor, Codex, and any other agent, because they live in git, in GitHub's merge check, and in the cluster scheduler instead of in any one tool.
 
 ## Quickstart
 
 ```shell
-git clone --recurse-submodules https://github.com/0jrm/safe-autonomous-hpc-science ~/safe-autonomous-hpc-science
-~/safe-autonomous-hpc-science/install.sh
+git clone --recurse-submodules https://github.com/0jrm/harness4research ~/harness4research
+~/harness4research/install.sh
 guard survey ~/path/to/your-repo        # read-only report of stale branches, docs, and duplicates
 guard init ~/path/to/your-repo          # proposes the guard on a new branch and worktree
 ```
@@ -93,7 +93,7 @@ The suite builds throwaway repositories and a fake Slurm and checks each refusal
 ## Uninstall
 
 ```shell
-find ~/.agents/skills ~/.claude/skills ~/.cursor/skills ~/.local/bin -maxdepth 1 -lname "$HOME/safe-autonomous-hpc-science/*" -delete
+find ~/.agents/skills ~/.claude/skills ~/.cursor/skills ~/.local/bin -maxdepth 1 -lname "$HOME/harness4research/*" -delete
 ```
 
 ## License
