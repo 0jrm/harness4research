@@ -20,7 +20,11 @@ The present is one block in the chat reply. A project rule may also require a fi
 Fence the block with a gift emoji on its own line at the start and the same emoji on its own line at the end. Those two marks are the only emoji. They stay, including under unslop. Write every sentence inside per the unslop skill.
 
 ```
-🎁<prose>🎁
+🎁
+
+<prose>
+
+🎁
 ```
 
 ## The ledger
@@ -43,8 +47,6 @@ Leave `FACTS.md` for the human. If a checked claim belongs there, say so in the 
 
 Prose, in this order. Drop a job only when it is truly empty. A deviation and an unchecked claim always appear. If there were none, say that in one sentence.
 
-1. Macro view of the project (short, relevant to auditor), session outline, and why this turn matters within this context (important).
-
 1. What is true now. Command outcomes in words. Give the exact command only when the human's next action is to run it, or the outcome is meaningless without it.
 2. What you need from them, or that you need nothing. If you need something, say what the action changes, in enough detail that they need not open a diff, a terminal, or a pull request to know what they are agreeing to.
 3. Names they will meet later. Each name once, and what it refers to.
@@ -55,3 +57,23 @@ Add the facts that lived in tools, edits, names, and pastes. Leave out the sessi
 Name the ledger path, and name which doubt a row answers. Keep in the chat any fact the decision needs. The path is there for a later check.
 
 If `/present` arrives before the work is finished, say that it is unfinished.
+
+## Examples
+
+Write this shape.
+
+```
+🎁
+
+The date test passed. `format_date` in `report.py` now writes UTC. You do not need to do anything.
+
+`runs/smoke-3` is this attempt. I assumed the cluster clock is UTC, and I did not check the host. You asked for local time. I used UTC because the question card says timestamps are UTC. The ledger is `.audit/present-smoke-3.tsv`. The unverified row is the clock.
+
+🎁
+```
+
+Do not write this. It recaps the session, hides an unchecked number, and has no fence.
+
+```
+I explored the date code and improved consistency across the pipeline. The suite looks good and the error rate is effectively zero. Let me know if you want anything else.
+```
