@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # usage: ./install.sh [--pinned] [--pstack link|skip] [--skills-dir DIR]... [--bin-dir DIR]
-# Fetches pstack, links this repo's skill (and pstack's) where each agent looks, and puts `guard` on PATH.
 # Skips anything that already exists. Re-run it any time; it converges.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -33,7 +32,7 @@ link() {
 }
 for d in "${dirs[@]}"; do
   echo "skills in $d"
-  link "$here/skills/safe-autonomous-hpc-science" "$d/safe-autonomous-hpc-science"
+  for s in "$here"/skills/*/; do link "${s%/}" "$d/$(basename "$s")"; done
 done
 if [ "$pstack" = link ]; then
   echo "pstack skills in $HOME/.agents/skills"

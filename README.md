@@ -12,7 +12,7 @@ git clone --recurse-submodules https://github.com/0jrm/harness4research ~/harnes
 guard version                           # prints this repo's commit and pstack's
 ```
 
-`install.sh` puts `guard` in `~/.local/bin` and links the skill into `~/.agents/skills`, `~/.claude/skills`, and `~/.cursor/skills`. To check that an agent sees it, open the agent and ask which skills it has. `safe-autonomous-hpc-science` should be in the list. If your agent reads skills from another folder, rerun with `--skills-dir <that folder>`.
+`install.sh` puts `guard` in `~/.local/bin` and links the skills into `~/.agents/skills`, `~/.claude/skills`, and `~/.cursor/skills`. To check that an agent sees them, open the agent and ask which skills it has. `safe-autonomous-hpc-science` and `present` should be in the list. `/present` asks for a present mid-task. If your agent reads skills from another folder, rerun with `--skills-dir <that folder>`.
 
 ### 2. Propose the guard
 
@@ -115,7 +115,8 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 - [docs/prompts.md](docs/prompts.md): prompts for the cleanup and the first run
 - [docs/live-tests/runhub.md](docs/live-tests/runhub.md) and [docs/live-tests/gom-da-workspace.md](docs/live-tests/gom-da-workspace.md): step-by-step acceptance tests
 - [docs/cluster-subaccount-request.md](docs/cluster-subaccount-request.md): email template for a capped account
-- [skills/safe-autonomous-hpc-science/SKILL.md](skills/safe-autonomous-hpc-science/SKILL.md): what agents read
+- [skills/safe-autonomous-hpc-science/SKILL.md](skills/safe-autonomous-hpc-science/SKILL.md): what agents read for experiment work
+- [skills/present/SKILL.md](skills/present/SKILL.md): the `/present` block a person judges from the chat alone
 
 ## Requirements
 
