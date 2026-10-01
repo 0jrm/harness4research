@@ -43,6 +43,8 @@ Leave `FACTS.md` for the human. If a checked claim belongs there, say so in the 
 
 Prose, in this order. Drop a job only when it is truly empty. A deviation and an unchecked claim always appear. If there were none, say that in one sentence.
 
+1. Macro view of the project (short, relevant to auditor), session outline, and why this turn matters within this context (important).
+
 1. What is true now. Command outcomes in words. Give the exact command only when the human's next action is to run it, or the outcome is meaningless without it.
 2. What you need from them, or that you need nothing. If you need something, say what the action changes, in enough detail that they need not open a diff, a terminal, or a pull request to know what they are agreeing to.
 3. Names they will meet later. Each name once, and what it refers to.
