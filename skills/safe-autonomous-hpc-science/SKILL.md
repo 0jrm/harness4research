@@ -62,9 +62,11 @@ When a guard blocks you, the block is the answer. Report it. Do not route around
 
 ## Ripples pause spending, not work
 
-A RIPPLE stops new submissions. The agent keeps working on the cause within the verification reserve. It diagnoses at the small rung, reads logs, and writes `runs/<run_id>/incidents/<n>.md`. This matches Autonomous run's rule that mid-run discoveries are the agent's to handle. The ripple that matters most is the agent's own diff touching a guard, a watched path, or the question card. An agent that hits a limit reaches for the limit before the cause, so treat that ripple as a stop.
+A RIPPLE stops new submissions. The agent keeps working on the cause within the verification reserve. It diagnoses at the small rung, reads logs, and writes `runs/<run_id>/incidents/<n>.md` with one `job: <id>` line per job it covers. This matches Autonomous run's rule that mid-run discoveries are the agent's to handle. The ripple that matters most is the agent's own diff touching a guard, a watched path, or the question card. An agent that hits a limit reaches for the limit before the cause, so treat that ripple as a stop.
 
 `guard/run ripples` checks these: guard files untouched, question card frozen, watched paths untouched, bad job states, walltime above 80% of the limit, more than one non-completed job, budget above 80%, quota above 80% via the card's `quota_pct_cmd`, and every domain check. It reports UNCHECKED instead of PASS when it cannot see a value. An unchecked ripple is not a pass.
+
+A committed incident note turns that job's job-state, walltime and retry ripples into HANDLED lines, which do not stop submissions. A note in the working tree does not count. Once a run has more handled jobs than the card's `max_handled_failures`, ripples flags it again, and the next call is the human's. Never start a new run directory to clear a ripple.
 
 ## Untrusted text
 
@@ -109,6 +111,7 @@ max_nodes_per_job: 0
 max_walltime_minutes: 0
 max_concurrent_jobs: 0
 quota_pct_cmd: <site command that prints percent used>
+max_handled_failures: 2
 ```
 
 Copy `runs/_template/report.md`. It carries `hypothesis:` copied from the card, or `n/a` in any letter case. A fullwidth letter or a fraction slash in that token counts the same as `n/a`. It holds, in order:

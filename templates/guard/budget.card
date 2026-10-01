@@ -10,3 +10,4 @@ max_concurrent_jobs: <jobs>
 quota_pct_cmd: <command that prints percent of your scratch quota used>
 explore_max_nodes: 1
 explore_max_walltime_minutes: 60
+max_handled_failures: 2

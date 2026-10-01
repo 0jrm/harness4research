@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # usage: guard/run ripples <run_dir>
-# One line per precursor: PASS, RIPPLE or UNCHECKED. Exit 1 on any RIPPLE, which means stop new submissions.
+# One line per precursor: PASS, RIPPLE, HANDLED or UNCHECKED. Exit 1 on any RIPPLE, which means stop new submissions.
 set -uo pipefail
 [ $# -eq 1 ] || { echo "usage: guard/run ripples <run_dir>" >&2; exit 64; }
 run_dir=${1%/}; run_id=$(basename "$run_dir")
@@ -28,18 +28,35 @@ else say UNCHECKED watched-paths "list verifier, test and threshold paths in gua
 if command -v sacct >/dev/null; then
   rows=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobID,JobName,State,ElapsedRaw,TimelimitRaw \
     | awk -F'|' -v r="$run_id" '$2==r')
-  bad=$(awk -F'|' '$3 ~ /TIMEOUT|OUT_OF_ME|NODE_FAIL|FAILED|PREEMPTED/ {printf "%s:%s ", $1, $3}' <<<"$rows")
-  if [ -z "$bad" ]; then say PASS job-states ""; else say RIPPLE job-states "$bad"; fi
-  tight=$(awk -F'|' '$5>0 && $4 > 0.8*$5*60 {printf "%s:%d%% ", $1, 100*$4/($5*60)}' <<<"$rows")
-  if [ -z "$tight" ]; then say PASS walltime-headroom ""; else say RIPPLE walltime-headroom "$tight"; fi
-  nfail=$(awk -F'|' 'NF && $3 !~ /COMPLETED|RUNNING|PENDING/' <<<"$rows" | wc -l)
-  if [ "$nfail" -le 1 ]; then say PASS retries "$nfail not completed"; else say RIPPLE retries "$nfail not completed"; fi
+  # A job is handled once a committed $run_dir/incidents/*.md has the line `job: <id>`.
+  declare -A incident=() acked=()
+  while IFS=: read -r _ path line; do id=${line#job:}; incident[${id// /}]=incidents/$(basename "$path")
+  done < <(git grep -E '^job: *[0-9][0-9_]* *$' HEAD -- "$run_dir/incidents/" 2>/dev/null)
+  sort_out() {  # sort_out <check> "<id>:<detail> ...": HANDLED for entries with an incident, RIPPLE for the rest
+    local open="" done="" e id
+    for e in $2; do id=${e%%:*}
+      if [ -n "${incident[$id]+x}" ]; then done+="$e->${incident[$id]} "; acked[$id]=1; else open+="$e "; fi
+    done
+    [ -n "$done" ] && say HANDLED "$1" "$done"
+    if [ -n "$open" ]; then say RIPPLE "$1" "$open"; elif [ -z "$done" ]; then say PASS "$1" ""; fi
+  }
+  sort_out job-states "$(awk -F'|' '$3 ~ /TIMEOUT|OUT_OF_ME|NODE_FAIL|FAILED|PREEMPTED/ {printf "%s:%s ", $1, $3}' <<<"$rows")"
+  sort_out walltime-headroom "$(awk -F'|' '$5>0 && $4 > 0.8*$5*60 {printf "%s:%d%% ", $1, 100*$4/($5*60)}' <<<"$rows")"
+  nfail=0
+  for id in $(awk -F'|' 'NF && $3 !~ /COMPLETED|RUNNING|PENDING/ {print $1}' <<<"$rows"); do
+    if [ -n "${incident[$id]+x}" ]; then acked[$id]=1; else nfail=$((nfail+1)); fi
+  done
+  if [ "$nfail" -le 1 ]; then say PASS retries "$nfail not completed without an incident"
+  else say RIPPLE retries "$nfail not completed without an incident"; fi
+  cap=$(get max_handled_failures); [[ $cap =~ ^[0-9]+$ ]] || cap=2
+  if [ ${#acked[@]} -gt "$cap" ]; then say RIPPLE handled-failures "${#acked[@]} handled, over max_handled_failures=$cap"
+  else say PASS handled-failures "${#acked[@]} of $cap"; fi
 
   spent=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW | awk '{s+=$1} END{printf "%d", s/3600}')
   if [[ $max_ch =~ ^[0-9]+$ ]] && [ $(( spent * 100 )) -gt $(( max_ch * 80 )) ]; then say RIPPLE budget "$spent of $max_ch core-h"
   else say PASS budget "$spent of ${max_ch:-?} core-h"; fi
 else
-  for k in job-states walltime-headroom retries budget; do say UNCHECKED "$k" "sacct not found on PATH on this host"; done
+  for k in job-states walltime-headroom retries handled-failures budget; do say UNCHECKED "$k" "sacct not found on PATH on this host"; done
 fi
 
 qcmd=$(get quota_pct_cmd)
