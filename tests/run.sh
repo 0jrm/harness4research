@@ -135,6 +135,21 @@ printf '101|2026-09-29-demo|COMPLETED|100|240\n' > "$tmp/rows"; rm -rf "$R/check
 expect ripples-clean ok 'PASS.budget.30 of 10000' -- guard/run ripples "$R"
 expect ripples-no-sacct ok 'UNCHECKED.job-states.*UNCHECKED.walltime-headroom.*UNCHECKED.retries.*UNCHECKED.budget.*PASS.quota.42%' -- \
   env PATH="$(path_without sacct)" bash -c 'set -o pipefail; guard/run ripples "$1" 2>&1 | tr "\n" " "' _ "$R"
+pre=$(git rev-parse HEAD); mkdir -p "$R/incidents"
+printf '100|2026-09-29-demo|TIMEOUT|14400|240\n101|2026-09-29-demo|COMPLETED|100|240\n102|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
+printf '# Incident 0\njob: 10\n' > "$R/incidents/0.md"; git add -A; git commit -q -m "run: incident 0"
+expect ripples-incident-exact-id fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED' -- guard/run ripples "$R"
+printf '# Incident 1\njob: 100\n' > "$R/incidents/1.md"; printf '# Incident 2\njob: 102\n' > "$R/incidents/2.md"
+expect ripples-incident-uncommitted fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED' -- guard/run ripples "$R"
+git add -A; git commit -q -m "run: incidents 1 and 2"
+expect ripples-handled-states ok 'HANDLED.job-states.100:TIMEOUT->incidents/1.md 102:FAILED->incidents/2.md' -- guard/run ripples "$R"
+expect ripples-handled-walltime ok 'HANDLED.walltime-headroom.100:100%->incidents/1.md' -- guard/run ripples "$R"
+expect ripples-handled-retries ok 'PASS.retries.0 not completed' -- guard/run ripples "$R"
+expect ripples-handled-count ok 'PASS.handled-failures.2 of 2' -- guard/run ripples "$R"
+echo '103|2026-09-29-demo|FAILED|10|240' >> "$tmp/rows"; printf '# Incident 3\njob: 103\n' > "$R/incidents/3.md"
+git add -A; git commit -q -m "run: incident 3"
+expect ripples-handled-cap fail 'RIPPLE.handled-failures.3 handled, over max_handled_failures=2' -- guard/run ripples "$R"
+git reset -q --hard "$pre"
 unset MOCK_SACCT_ROWS
 
 echo "== manifest"
