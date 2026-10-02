@@ -69,9 +69,9 @@ need() {
 }
 card_or_default() { local v=${cardv[$1]-}; if [ -z "$v" ] || [[ $v == *"<"* ]]; then echo "$2"; else echo "$v"; fi; }
 launch_hosts() { card_or_default launch_hosts none; }
-state_dir() {
-  local d; d=$(card_or_default host_state_dir '~/.local/state/guard/launches')
-  case $d in '~') d=$HOME ;; '~/'*) d=$HOME/${d#'~/'} ;; esac
+state_dir() {  # the card's host_state_dir, with a leading ~ expanded; the template value is ~/.local/state/guard/launches
+  local d; d=$(card_or_default host_state_dir "$HOME/.local/state/guard/launches")
+  d=${d/#\~/$HOME}
   [[ $d == /* ]] || fail "host_state_dir must be an absolute path: $d"
   echo "$d"
 }
@@ -144,10 +144,12 @@ index_procs() {
 # rec_members <record_dir>: the members of a record's job from the process index. The supervisor and --stop
 # call members directly because they act on what is alive now.
 rec_members() {
-  local d=$1 pids p
+  local d=$1 pids p out=""
   if [ -z "${members_cache[$d]+x}" ]; then
+    local -A seen=()
     rk "$d" start sid; pids=${by_sid[${r:-none}]-}; rk "$d" request job_id; pids="$pids ${by_tag[$r]-}"
-    members_cache[$d]=$(for p in $pids; do echo "$p"; done | sort -un)
+    for p in $pids; do [ -n "${seen[$p]+x}" ] || { seen[$p]=1; out="$out$p"$'\n'; }; done
+    members_cache[$d]=${out%$'\n'}
   fi
   echo "${members_cache[$d]}"
 }
@@ -342,8 +344,8 @@ ledger_check() {
 # cmd_handled <run_dir>: "<job id> execution.tsv:<row id>" for every valid restart or resume row, so ripples treats
 # the job as handled, exactly like an incident naming it.
 cmd_handled() {
-  local rd=${1%/} rid id ts field value rest owner; rid=$(basename "$rd")
-  while IFS=$'\t' read -r id ts field value rest; do
+  local rd=${1%/} rid id field value owner; rid=$(basename "$rd")
+  while IFS=$'\t' read -r id _ field value _; do
     case $field in
       restart) restart_ok "$rid" "$value" && echo "$value execution.tsv:$id" ;;
       resume) owner=$(resume_owner "$rid" "$value") && echo "$owner execution.tsv:$id" ;;
@@ -516,9 +518,10 @@ poll_once() {
   if [ "$avail" -lt "$floor_kb" ]; then low=$((low+1)); else low=0; fi
   if [ "$avail" -lt $(( 2 * floor_kb )) ] || [ $(( elapsed - last_beat )) -ge "$BEAT_EVERY" ]; then write_beat; last_beat=$elapsed; fi
   reason=$want
-  [ -n "$reason" ] || if [ "$elapsed" -ge "$time_limit" ]; then reason=walltime
+  [ -z "$reason" ] || return 0
+  if [ "$elapsed" -ge "$time_limit" ]; then reason=walltime
   elif [ "$charge" -gt "$mem_limit_kb" ]; then reason=mem
-  elif [ "$low" -ge 2 ] && elected; then reason=host-mem
+  elif [ "$low" -ge 2 ] && elected; then reason='host-mem'
   else elected_detail=""; fi
 }
 # ladder <kill_below_kb>: INT to every member; wait up to grace for none to remain; TERM; wait grace/2; KILL; wait 5 s.
