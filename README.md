@@ -108,8 +108,9 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 | `guard/run ripples <run_dir>` | cluster | warning signs |
 | `guard/run manifest <run_dir> "$0" "$@"` | inside a job | provenance record |
 | `guard/run fence [base] [head]` | anywhere, CI | merge inspector |
+| `guard/run code <repo> <commit>` | cluster | absolute path of a clean worktree at that commit |
 
-`guard preflight`, `guard ripples`, `guard manifest`, and `guard fence` on PATH run the enclosing project's `guard/run` from its protected branch, and refuse outside a guarded project.
+`guard preflight`, `guard ripples`, `guard manifest`, `guard fence`, and `guard code` on PATH run the enclosing project's `guard/run` from its protected branch, and refuse outside a guarded project.
 
 ## Updating a guarded project
 

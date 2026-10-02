@@ -159,6 +159,24 @@ expect manifest-content ok 'modules: hycom/2.3' -- cat "$R/manifest-555.txt"
 expect manifest-idempotent ok 'manifest exists' -- env SLURM_JOB_ID=555 bash job.sh "$R"
 rm -f "$R"/manifest-* "$R/inputs.list"
 
+echo "== code"
+git init -q "$tmp/model"; echo 'print(1)' > "$tmp/model/model.py"
+git -C "$tmp/model" add -A; git -C "$tmp/model" commit -q -m init
+code_sha=$(git -C "$tmp/model" rev-parse HEAD)
+export HPC_CODE_ROOT=$tmp/code-root
+code_path=$(realpath -m "$HPC_CODE_ROOT")/model-${code_sha:0:12}
+# code_from_runs <commit>: guard/run code from the project's runs/ with a relative repo, which resolves only from there.
+code_from_runs() { local out; out=$(cd runs && ../guard/run code ../../model "$1") || return; echo "$out"; [ "$out" = "$code_path" ]; }
+expect code-absolute-path ok '^/' -- code_from_runs "$code_sha"
+expect code-idempotent ok '^/' -- code_from_runs "${code_sha:0:7}"
+expect code-at-commit ok "^$code_sha$" -- git -C "$code_path" rev-parse HEAD
+expect code-unknown-commit fail 'not a commit' -- guard/run code "$tmp/model" deadbeef
+touch "$code_path/scratch.txt"
+expect code-refuses-dirty ok 'uncommitted' -- bash -c '! guard/run code "$1" "$2" && test -e "$3/scratch.txt"' _ "$tmp/model" "$code_sha" "$code_path"
+expect code-refuses-relative-root fail 'not absolute' -- env HPC_CODE_ROOT=rel/dir guard/run code "$tmp/model" "$code_sha"
+expect code-not-inside-repo fail 'is inside' -- env HPC_CODE_ROOT="$tmp/model/frozen" guard/run code "$tmp/model" "$code_sha"
+unset HPC_CODE_ROOT
+
 echo "== fence"
 git switch -q -c pr/clean origin/main; mkdir -p runs/r1; cp runs/_template/question.card runs/r1/; git add -A; git commit -q -m "run: r1"
 expect fence-clean ok 'PASS.guard-untouched' -- guard/run fence origin/main HEAD
@@ -333,7 +351,7 @@ expect update-conflict-others-clean ok 'hypothesis-line' -- cat "$tmp/wt7/guard/
 git -C "$tmp/wt7" push -q origin guard/update:refs/heads/conflicted
 git fetch -q origin; git switch -q --detach "$good"
 expect run-refuses-conflicted fail 'unresolved conflicts or does not parse' -- env HPC_GUARD_REF=origin/conflicted guard/run preflight "$R" job.sh
-expect run-names-schema fail 'guard is schema 2' -- env HPC_GUARD_REF=origin/conflicted guard/run launch
+expect run-names-schema fail "guard is schema $(cat "$here/SCHEMA")" -- env HPC_GUARD_REF=origin/conflicted guard/run launch
 git -C "$tmp/proj" worktree remove --force "$tmp/wt7"; git -C "$tmp/proj" branch -q -D guard/update
 git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# usage: guard <survey|init|archive|preflight|ripples|manifest|fence> [args...]
+# usage: guard <survey|init|archive|preflight|ripples|manifest|fence|code> [args...]
 set -euo pipefail
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 cmd=${1:-help}; shift || true
 case $cmd in
   survey|init|archive) exec bash "$here/lib/$cmd.sh" "$@" ;;
-  preflight|ripples|manifest|fence)
+  preflight|ripples|manifest|fence|code)
     # Run the enclosing project's protected guard/run, never this harness's templates.
     base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
     runner=$(git show "$base:guard/run" 2>/dev/null) || {
@@ -38,7 +38,7 @@ Project setup, run from your machine:
   archive <repo>      tag every remote branch before any cleanup
 
 Inside a guarded project, guard <command> runs the project's guard/run from the protected branch:
-  preflight, ripples, manifest, fence
+  preflight, ripples, manifest, fence, code
 USAGE
      [ "$cmd" = help ] || exit 64 ;;
 esac

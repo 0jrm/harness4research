@@ -8,11 +8,11 @@ Stable means additions only. Nothing on this list is renamed or removed.
 
 | Surface | Stable part |
 |---|---|
-| Paths | `guard/run`, `guard/bin/{preflight,ripples,manifest,fence}.sh`, `guard/budget.card`, `guard/watch.list`, `guard/VERSION`, `runs/_template/{question.card,report.md}`, `runs/<id>/{question.card,report.md,checks/*,incidents/*.md}` |
+| Paths | `guard/run`, `guard/bin/{preflight,ripples,manifest,fence,code}.sh`, `guard/budget.card`, `guard/watch.list`, `guard/VERSION`, `runs/_template/{question.card,report.md}`, `runs/<id>/{question.card,report.md,checks/*,incidents/*.md}` |
 | Workflow | `.github/workflows/guard-fence.yml`, workflow name `guard-fence`, job id `fence`. Rulesets require the check `guard-fence / fence`, so a renamed job leaves every pull request waiting. |
-| Calling convention | `guard/run <command> args` runs the base branch's script as `bash -c "$script" guard/bin/<command>.sh args` from the repository top. Any `guard/run` must run any script version, because agent branches carry an older working-tree `guard/run`. |
-| Environment | `HPC_GUARD_REF`, `HPC_GUARD_LOCAL`, `HPC_SPEND_RESERVE`, `HPC_LOCK_FILES`, `HPC_HASH_INPUTS` |
-| Exit codes | 64 is a usage error everywhere. Preflight exits 2 when it refuses, otherwise with sbatch's code. Ripples exits 0, or 1 to stop submissions. The fence exits 0 or 1. `guard/run` exits 2 when the script is missing on the base branch or does not parse. `guard init --update` exits 3 when it proposes conflicts. |
+| Calling convention | `guard/run <command> args` runs the base branch's script as `bash -c "$script" guard/bin/<command>.sh args` from the repository top, with `HPC_CALLER_DIR` set to the directory the caller ran it from. Any `guard/run` must run any script version, because agent branches carry an older working-tree `guard/run`. |
+| Environment | `HPC_GUARD_REF`, `HPC_GUARD_LOCAL`, `HPC_SPEND_RESERVE`, `HPC_LOCK_FILES`, `HPC_HASH_INPUTS`, `HPC_CODE_ROOT`, `HPC_CALLER_DIR` (set by `guard/run`) |
+| Exit codes | 64 is a usage error everywhere. Preflight exits 2 when it refuses, otherwise with sbatch's code. Ripples exits 0, or 1 to stop submissions. The fence exits 0 or 1. `code` exits 2 when it refuses. `guard/run` exits 2 when the script is missing on the base branch or does not parse. `guard init --update` exits 3 when it proposes conflicts. |
 | Output | Ripples and the fence print `STATUS<TAB>check<TAB>detail`. Ripples statuses are PASS, RIPPLE, HANDLED, UNCHECKED. Fence statuses are PASS, FAIL, WARN. Check names are never removed; a check that cannot run says UNCHECKED. Preflight keeps the `PREFLIGHT OK:` and `PREFLIGHT FAIL:` prefixes. |
 | Card format | Flat `key: value` lines. The first match wins. `<...>` means unset. Manifests and incidents use the same format, and incidents keep `job: <id>`. |
 | Required budget keys | `account`, `start_date`, `stop_date`, `max_core_hours`, `verification_reserve_core_hours`, `cores_per_node`, `max_nodes_per_job`, `max_walltime_minutes`, `max_concurrent_jobs`. No key is ever added to this list. |
@@ -43,7 +43,7 @@ A file without a `schema:` line was written by schema 1. Every release since `v1
 `guard init <repo> --update` reads `guard/VERSION` from the project's default branch and proposes the result on a new branch, `guard/update`, in a separate worktree.
 
 - It refuses when this harness does not contain the installer commit, or when the project's schema is newer, and says to pull the harness. `--force` proposes anyway.
-- Each installer-owned file goes through `git merge-file`, with the template at the installer commit as the base. That covers the four scripts, `guard/run`, `guard/README.md`, and the workflow. A human's edit survives. An edit on lines the harness also changed becomes conflict markers, and the command exits 3.
+- Each installer-owned file goes through `git merge-file`, with the template at the installer commit as the base. That covers the five scripts, `guard/run`, `guard/README.md`, and the workflow. A human's edit survives. An edit on lines the harness also changed becomes conflict markers, and the command exits 3.
 - A template key that is new since the install is inserted next to its template neighbours. A budget key whose template value is a placeholder is listed, not inserted, because preflight refuses placeholders. A key that the template already had at install time and the project lacks stays out, because a human removed it.
 - With no usable installer commit, each file merges against an empty base. That is clean when the file already matches the template and a whole-file conflict otherwise.
 - `watch.list`, `FACTS.md`, and `AGENTS.md` are never touched. When `templates/AGENTS.md` changed since the install, the output prints the command to compare it.
