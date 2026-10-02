@@ -253,6 +253,15 @@ git add -A; git commit -q -m x
 expect fence-legacy-setting ok 'PASS.setting-key' -- guard/run fence origin/pr-legacy-card HEAD
 expect fence-legacy-hypothesis ok 'PASS.hypothesis-line' -- guard/run fence origin/pr-legacy-card HEAD
 
+git switch -q -c pr/old-report origin/main; mkdir -p runs/old
+cp runs/_template/question.card runs/_template/report.md runs/old/
+sed -i '/^hypothesis:/d' runs/old/report.md
+git add -A; git commit -q -m x
+git push -q origin pr/old-report:refs/heads/pr-old-report
+git switch -q -c pr/old-report-edit origin/pr-old-report
+echo "A later note." >> runs/old/report.md; git commit -q -am x
+expect fence-legacy-report-modified ok 'PASS.hypothesis-line' -- guard/run fence origin/pr-old-report HEAD
+
 echo "== init --update"
 git -C "$tmp/proj" fetch -q origin
 expect update-noop ok 'already current' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt3"

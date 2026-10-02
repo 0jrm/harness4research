@@ -53,9 +53,12 @@ while read -r f; do
 done < <(git diff --name-only --diff-filter=AM "$base...$head" -- 'runs/*/report.md')
 if [ -z "$unproven" ]; then say PASS evidence-paths ""; else say FAIL evidence-paths "evidence rows without a backticked artifact path:$unproven"; fi
 
+# A rule added later judges an added file, and a modified file only if its merge-base copy already passed.
+mb=$(git merge-base "$base" "$head")
 bad_h=""
-while read -r f; do
+while read -r st f; do
   [ -n "$f" ] || continue
+  [ "$st" = M ] && [ -z "$(git show "$mb:$f" | first_val hypothesis 1)" ] && continue
   hyp=$(git show "$head:$f" | first_val hypothesis 1)
   if [ -z "$hyp" ] || printf '%s\n' "$hyp" | grep -qE '^<[^>]*>$'; then
     bad_h="$bad_h $f"
@@ -72,7 +75,7 @@ while read -r f; do
   chyp=$(git show "$head:${f%/report.md}/question.card" 2>/dev/null | first_val hypothesis)
   [ -n "$chyp" ] && [ "$hyp" = "$chyp" ] && continue
   bad_h="$bad_h $f"
-done < <(git diff --name-only --diff-filter=AM "$base...$head" -- 'runs/*/report.md')
+done < <(git diff --name-status --no-renames --diff-filter=AM "$base...$head" -- 'runs/*/report.md')
 if [ -z "$bad_h" ]; then say PASS hypothesis-line ""; else say FAIL hypothesis-line "must be n/a or the card hypothesis:$bad_h"; fi
 
 ex=$(git diff --name-only --diff-filter=AM "$base...$head" -- 'runs/explore-*/report.md' | tr '\n' ' ')
