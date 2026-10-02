@@ -128,9 +128,9 @@ run_records() { local d; for d in $(records "$project"); do rk "$d" request run_
 # members <job_id> [sid]: pids of processes in session <sid> or whose environ holds HPC_JOB_ID=<job_id>, read now.
 # The env tag finds a child that called setsid; the session finds a child that scrubbed its environment.
 members() {
-  { [ -z "${2:-}" ] || ps -o pid= -s "$2" 2>/dev/null
+  { [ -z "${2:-}" ] || ps -o pid=,state= -s "$2" 2>/dev/null
     grep -lzx "HPC_JOB_ID=$1" /proc/[0-9]*/environ 2>/dev/null; } \
-    | awk '{ n = split($0, a, "/"); p = (n > 1 ? a[3] : $1) + 0; if (p > 0 && !seen[p]++) print p }'
+    | awk '$2 == "Z" { next } { n = split($0, a, "/"); p = (n > 1 ? a[3] : $1) + 0; if (p > 0 && !seen[p]++) print p }'
 }
 # index_procs: every process once, so views answer rec_members from arrays. by_sid[sid] and by_tag[job_id] hold pid lists.
 declare -A by_sid=() by_tag=()
@@ -138,8 +138,8 @@ index_procs() {
   local p s t
   while read -r p s t; do
     by_sid[$s]="${by_sid[$s]-} $p"; [ -z "$t" ] || by_tag[$t]="${by_tag[$t]-} $p"
-  done < <( { ps -e -o pid=,sid= 2>/dev/null; grep -zoE '^HPC_JOB_ID=[^[:cntrl:]]+' /proc/[0-9]*/environ 2>/dev/null | tr '\0' '\n'; } \
-    | awk '/^\/proc\// { split($0, a, "/"); sub(/^[^=]*=/, "", $0); tag[a[3]] = $0; next } { pid[$1] = $2 } END { for (p in pid) print p, pid[p], tag[p] }')
+  done < <( { ps -e -o pid=,sid=,state= 2>/dev/null; grep -zoE '^HPC_JOB_ID=[^[:cntrl:]]+' /proc/[0-9]*/environ 2>/dev/null | tr '\0' '\n'; } \
+    | awk '/^\/proc\// { split($0, a, "/"); sub(/^[^=]*=/, "", $0); tag[a[3]] = $0; next } $3 != "Z" { pid[$1] = $2 } END { for (p in pid) print p, pid[p], tag[p] }')
 }
 # rec_members <record_dir>: the members of a record's job from the process index. The supervisor and --stop
 # call members directly because they act on what is alive now.
@@ -176,7 +176,7 @@ charge_kb() {
 # pstat <pid>: PSTAT holds /proc/<pid>/stat past the comm field, so PSTAT[1] is the parent and PSTAT[19] the start time.
 pstat() { local s; { read -r s < "/proc/$1/stat"; } 2>/dev/null || return 1; read -ra PSTAT <<<"${s##*) }"; }
 starttime() { pstat "$1" && echo "${PSTAT[19]}"; }
-pid_is() { [ -n "${1:-}" ] && [ -n "${2:-}" ] && pstat "$1" && [ "${PSTAT[19]}" = "$2" ]; }
+pid_is() { [ -n "${1:-}" ] && [ -n "${2:-}" ] && pstat "$1" && [ "${PSTAT[19]}" = "$2" ] && [ "${PSTAT[0]}" != Z ]; }
 signal_members() { local p; for p in $(members "$2" "$3"); do kill "-$1" "$p" 2>/dev/null; done; return 0; }
 
 # ---------------------------------------------------------------- state, derived
@@ -363,7 +363,188 @@ strays() {
   return $rc
 }
 
+
+# ---------------------------------------------------------------- supervisor
+# One supervisor owns one job. It reads every limit from <record_dir>/request, the single source of truth, so a
+# card edit mid-run changes nothing; argv carries only the command. It sits outside the job's session as the
+# parent of the session leader, so a signal to the job's session reaches the job but not its recorder.
+
+log() { echo "$(now) $*" >&2; }
+load_request() {
+  rec_dir=$1; sd=$(dirname "$rec_dir"); host=$(this_host)
+  job_id=$(rkey "$rec_dir/request" job_id); run_dir_abs=$(rkey "$rec_dir/request" run_dir)
+  cwd=$(rkey "$rec_dir/request" cwd); log_path=$(rkey "$rec_dir/request" log); gpus=$(rkey "$rec_dir/request" gpus)
+  time_limit=$(rkey "$rec_dir/request" time_limit_seconds); mem_limit_kb=$(gb_kb "$(rkey "$rec_dir/request" mem_limit_gb)")
+  shm=$(rkey "$rec_dir/request" shm); grace=$(rkey "$rec_dir/request" stop_grace_seconds)
+  floor_kb=$(gb_kb "$(rkey "$rec_dir/request" host_min_available_gb)")
+  want="" reason="" elected_detail="" peak=0 low=0 last_beat=0 elapsed=0 charge=0 avail=0
+}
+job_charge_kb() {
+  if [ "${test_mode:-0}" = 1 ] && [ -n "${HPC_LAUNCH_TEST_CHARGE_KB:-}" ]; then echo "$HPC_LAUNCH_TEST_CHARGE_KB"; return; fi
+  local p kb; kb=$(shm_kb "$shm")
+  for p in $(members "$job_id" "$sid"); do kb=$(( kb + $(anon_kb "$p") )); done
+  echo "$kb"
+}
+write_beat() {
+  put_replace "$rec_dir/beat" "time: $(now)
+elapsed_seconds: $elapsed
+mem_gb: $(kb_gb "$charge")
+peak_mem_gb: $(kb_gb "$peak")
+host_available_gb: $(kb_gb "$avail")
+low_polls: $low" || true
+}
+# leader_of <wrapper pid>: the session leader, the wrapper's child once it exists; the wrapper itself when the job
+# is already gone.
+leader_of() {
+  local i p
+  for ((i = 0; i < 30; i++)); do
+    p=$(ps -o pid= --ppid "$1" 2>/dev/null | tr -d ' '); [ -z "$p" ] || { echo "$p"; return; }
+    [ "$(ps -o sid= -p "$1" 2>/dev/null | tr -d ' ')" != "$1" ] && pstat "$1" && [ "${PSTAT[0]}" != Z ] || break
+    sleep 0.1
+  done
+  echo "$1"
+}
+# fd_check <pid>: ok when the job's stdout and stderr are the recorded log, else what they are.
+fd_check() {
+  local o e want; want=$(readlink -f "$log_path")
+  o=$(readlink "/proc/$1/fd/1" 2>/dev/null) || { echo "exited before the check"; return; }
+  e=$(readlink "/proc/$1/fd/2" 2>/dev/null)
+  if [ "$o" = "$want" ] && [ "$e" = "$want" ]; then echo ok; else echo "stdout=$o stderr=$e"; fi
+}
+# elected: under host pressure every supervisor reads the fresh beats of the live local launches and runs the same
+# election: the largest charge stops, ties to the later start. True when this job is the one. A stray that is not
+# a launch cannot be elected; ripples' host-strays names it.
+elected() {
+  local d t gb started best="" bestgb=-1 beststart="" n=0 e; e=$(epoch)
+  for d in "$sd"/*/; do
+    d=${d%/}; [ -f "$d/request" ] && [ -f "$d/beat" ] && [ ! -f "$d/end" ] || continue
+    [ "$(rkey "$d/request" host)" = "$host" ] || continue
+    t=$(iso_epoch "$(rkey "$d/beat" time)"); [ $(( e - t )) -le $(( 3 * POLL )) ] || continue
+    gb=$(rkey "$d/beat" mem_gb); started=$(rkey "$d/start" started); n=$((n+1))
+    if awk -v a="$gb" -v b="$bestgb" -v sa="$started" -v sb="$beststart" 'BEGIN { exit !(a > b || (a == b && sa > sb)) }'; then best=$d; bestgb=$gb; beststart=$started; fi
+  done
+  elected_detail="largest of $n live, $bestgb GB"
+  [ "$best" = "$rec_dir" ]
+}
+# poll_once: one supervisor poll. Measures the job, updates peak, low and the beat, and sets reason to walltime,
+# mem, host-mem, requested, signal or nothing. Under pressure (MemAvailable under twice the floor) the beat is
+# written every poll, so an election reads current charges; otherwise every BEAT_EVERY seconds.
+poll_once() {
+  elapsed=$(( $(epoch) - started_epoch ))
+  charge=$(job_charge_kb); [ "$charge" -le "$peak" ] || peak=$charge
+  avail=$(mem_available_kb)
+  if [ "$avail" -lt "$floor_kb" ]; then low=$((low+1)); else low=0; fi
+  if [ "$avail" -lt $(( 2 * floor_kb )) ] || [ $(( elapsed - last_beat )) -ge "$BEAT_EVERY" ]; then write_beat; last_beat=$elapsed; fi
+  reason=$want
+  [ -n "$reason" ] || if [ "$elapsed" -ge "$time_limit" ]; then reason=walltime
+  elif [ "$charge" -gt "$mem_limit_kb" ]; then reason=mem
+  elif [ "$low" -ge 2 ] && elected; then reason=host-mem
+  else elected_detail=""; fi
+}
+# ladder <kill_below_kb>: INT to every member; wait up to grace for none to remain; TERM; wait grace/2; KILL; wait 5 s.
+# Members are re-read before every signal, so a process born mid-ladder is still signalled. During the INT wait,
+# MemAvailable under <kill_below_kb> skips straight to KILL: the host outranks the checkpoint.
+ladder() {
+  local i
+  log "INT to $(members "$job_id" "$sid" | wc -l) process(es)"; signal_members INT "$job_id" "$sid"
+  for ((i = 0; i < grace * 2; i++)); do
+    [ -n "$(members "$job_id" "$sid")" ] || return 0
+    [ "$(mem_available_kb)" -ge "$1" ] || { log "host under $(kb_gb "$1")G available; KILL now"; break; }
+    sleep 0.5
+  done
+  if [ "$(mem_available_kb)" -ge "$1" ]; then
+    log "TERM"; signal_members TERM "$job_id" "$sid"
+    for ((i = 0; i < grace; i++)); do [ -n "$(members "$job_id" "$sid")" ] || return 0; sleep 0.5; done
+  fi
+  log "KILL"; signal_members KILL "$job_id" "$sid"
+  for ((i = 0; i < 10; i++)); do [ -n "$(members "$job_id" "$sid")" ] || return 0; sleep 0.5; done
+}
+# finish <exit> <writer>: kill what the leader left behind, then write end, retrying until the state dir takes it.
+finish() {
+  local n i text; n=$(members "$job_id" "$sid" | wc -l)
+  if [ "$n" -gt 0 ]; then
+    log "$n process(es) left after the leader; TERM"; signal_members TERM "$job_id" "$sid"
+    for ((i = 0; i < 20; i++)); do [ -n "$(members "$job_id" "$sid")" ] || break; sleep 0.5; done
+    [ -z "$(members "$job_id" "$sid")" ] || { log "KILL leftovers"; signal_members KILL "$job_id" "$sid"; sleep 1; }
+  fi
+  text="ended: $(now)
+elapsed_seconds: $elapsed
+exit: $1
+stop: ${reason:-none}
+peak_mem_gb: $(kb_gb "$peak")
+leftover_killed: $n
+writer: $2"
+  [ -z "$elected_detail" ] || text="$text
+elected: $elected_detail"
+  [ "$reason" != requested ] || text="$text
+reason: $(rkey "$rec_dir/stop" reason)"
+  until put_once "$rec_dir/end" "$text"; do [ -f "$rec_dir/end" ] && break; sleep 30; done
+  log "wrote end"
+}
+stop_job() {  # stop_job: the ladder for $reason, with the skip-to-KILL floor only for the elected host-mem stop
+  local below=0; [ "$reason" != host-mem ] || below=$(( floor_kb / 2 ))
+  log "stop $reason${elected_detail:+ ($elected_detail)}"; ladder "$below"
+}
+cmd_supervise() {
+  local rec_dir=$1 cuda rc sl; shift; [ "${1:-}" != -- ] || shift
+  cd / || exit 1
+  load_request "$rec_dir"
+  trap 'want=${want:-requested}' USR1; trap 'want=${want:-signal}' TERM INT HUP
+  cuda=$gpus; [ "$cuda" != none ] || cuda=""
+  # Job control on for the fork: a plain `&` in a script starts the child with SIGINT ignored, and a shell that
+  # inherits an ignored INT cannot trap it, so the gentle stop would never reach the job's checkpoint handler.
+  # Job control also makes the child a group leader, which setsid would have to fork away from, so the child is a
+  # bash wrapper: its foreground setsid is not a leader, becomes the session leader in place, and the wrapper
+  # reports the leader's status in bash's convention (128+n for a signal). The wrapper is outside the session and
+  # carries no tag, so it is never a member.
+  set -m
+  bash -c 'setsid env HPC_JOB_ID="$1" HPC_RUN_DIR="$2" CUDA_VISIBLE_DEVICES="$3" CUDA_DEVICE_ORDER=PCI_BUS_ID \
+      bash -c "cd -- \"\$1\" && shift && exec \"\$@\"" _ "${@:4}"; rc=$?; exit $rc' _ "$job_id" "$run_dir_abs" "$cuda" "$cwd" "$@" \
+    </dev/null >>"$log_path" 2>&1 &
+  job=$!; set +m; started_epoch=$(epoch); wrapper_start=$(starttime "$job")
+  leader=$(leader_of "$job"); job_start=$(starttime "$leader")
+  sid=$(ps -o sid= -p "$leader" 2>/dev/null | tr -d ' '); sid=${sid:-$leader}
+  log "started job pid $leader in session $sid"
+  put_once "$rec_dir/start" "started: $(now)
+boot_id: $(boot_id)
+supervisor_pid: $$
+supervisor_start: $(starttime $$)
+job_pid: $leader
+job_start: $job_start
+sid: $sid
+log_fd: $(fd_check "$leader")" || log "could not write start"
+  while pid_is "$job" "$wrapper_start"; do
+    poll_once
+    [ -z "$reason" ] || { stop_job; break; }
+    sleep $(( elapsed < FAST_FOR ? POLL_FAST : POLL )) & sl=$!; wait $sl; kill $sl 2>/dev/null
+  done
+  wait "$job"; rc=$?
+  log "job leader exited $rc"
+  finish "$rc" supervisor
+}
+# cmd_tick <record_dir>: one poll on a job that something else started, for tests. The job's exit status is
+# unknown here, so an end written by a tick says so.
+cmd_tick() {
+  test_mode=1
+  load_request "$1"
+  job=$(rkey "$rec_dir/start" job_pid); job_start=$(rkey "$rec_dir/start" job_start); sid=$(rkey "$rec_dir/start" sid)
+  started_epoch=$(iso_epoch "$(rkey "$rec_dir/start" started)")
+  peak=$(gb_kb "$(rkey "$rec_dir/beat" peak_mem_gb)"); low=$(rkey "$rec_dir/beat" low_polls); low=${low:-0}
+  last_beat=$(rkey "$rec_dir/beat" elapsed_seconds); last_beat=${last_beat:--$BEAT_EVERY}
+  [ ! -f "$rec_dir/stop" ] || want=requested
+  poll_once
+  echo "tick: elapsed=$elapsed charge=$(kb_gb "$charge")G available=$(kb_gb "$avail")G low=$low reason=${reason:-none}"
+  [ -n "$reason" ] || return 0
+  stop_job; finish unknown tick
+}
+
 # ---------------------------------------------------------------- dispatch
+
+# The supervisor reads only its request, never the card or git, so it is dispatched first.
+case ${1:-} in
+  --supervise) [ $# -ge 3 ] || usage; shift; cmd_supervise "$@" >>"$1/supervisor.log" 2>&1; exit ;;
+  --tick)      [ $# -eq 2 ] || usage; cmd_tick "$2" 2>>"$2/supervisor.log"; exit ;;
+esac
 
 load_card
 host=$(this_host); sd=$(state_dir) || exit $?; project=$(project_id); this_boot=$(boot_id); start_date=$(card_or_default start_date "")

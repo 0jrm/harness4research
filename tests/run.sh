@@ -208,7 +208,7 @@ ago() { date -u -d "-$1" +%FT%TZ; }
 rec() {  # rec <id> <file>: write one record file by hand from stdin, in the documented format
   mkdir -p "$tmp/state/$1"; cat > "$tmp/state/$1/$2"
 }
-req() {  # req <id> <run_id> <gpus> <time_limit_seconds> <requested> [host]: a request record for this project
+req() {  # req <id> <run_id> <gpus> <time_limit_seconds> <requested> [host] [mem_gb] [shm]: a request record for this project
   rec "$1" request <<REQ
 job_id: $1
 run_id: $2
@@ -224,8 +224,8 @@ cwd_dirty: none
 log: $tmp/scratch/launch-$1.log
 gpus: $3
 time_limit_seconds: $4
-mem_limit_gb: 1
-shm: 
+mem_limit_gb: ${7:-1}
+shm: ${8:-}
 stop_grace_seconds: 1
 host_min_available_gb: 0
 command: sleep 30
@@ -335,6 +335,87 @@ touch "$tmp/scratch/launch-skynet-20260901T090000Z.log"; env HPC_JOB_ID=skynet-2
 printf 'GPU-aaaa, %s\n' "$launch_pid" > "$tmp/apps"
 expect ripples-strays-live-launch fail 'PASS	host-strays	$' -- env MOCK_NVSMI_APPS=$tmp/apps guard/run ripples "$F"
 kill "$stray_pid" "$launch_pid" 2>/dev/null; wait "$stray_pid" "$launch_pid" 2>/dev/null
+
+sup() {  # sup <id> <time_limit_seconds> <mem_gb> <shm> <gpus> -- <command...>: a request plus a detached supervisor, as launch starts it
+  local id=$1; req "$1" 2026-10-02-sup "$5" "$2" "$(date -u +%FT%TZ)" skynet "$3" "$4"; shift 6
+  setsid -f guard/run launch --supervise "$tmp/state/$id" -- "$@"
+}
+wait_end() {  # wait_end <id>...: wait up to 10 s for each end record
+  local id i; for id in "$@"; do for ((i = 0; i < 100; i++)); do [ -f "$tmp/state/$id/end" ] && break; sleep 0.1; done; done
+}
+E=runs/2026-10-02-sup; mkdir -p "$E" "$tmp/shm-m"
+sup s-completed 60 1 "" none -- true
+sup s-failed 60 1 "" none -- false
+sup s-walltime 2 1 "" none -- sleep 30
+sup s-mem 60 0.01 "$tmp/shm-m" none -- bash -c 'head -c 20000000 /dev/zero > "$1/blob"; sleep 30' _ "$tmp/shm-m"
+sup s-mem-pss 60 0.01 "" none -- bash -c 'x=$(head -c 20000000 /dev/zero | tr "\0" a); sleep 30; echo "${#x}"'
+sup s-gentle 1 1 "" none -- bash -c 'trap "echo checkpointed; exit 0" INT; sleep 30 & wait'
+sup s-escalates 1 1 "" none -- bash -c 'trap "" INT TERM; sleep 30'
+sup s-leftovers 60 1 "" none -- bash -c 'sleep 300 & exit 0'
+sup s-escape 60 1 "" none -- bash -c 'setsid sleep 300 & sleep 0.2; exit 0'
+sup s-env 60 1 "" 1 -- env
+sup s-usr1 60 1 "" none -- sleep 30
+sup s-term 60 1 "" none -- bash -c 'trap "echo trapped; exit 0" INT; sleep 30 & wait'
+sup s-caller 60 1 "" none -- bash -c 'sleep 2; echo alive'
+sleep 1
+expect sup-start-written ok '^log_fd: ok$' -- cat "$tmp/state/s-usr1/start"
+expect sup-start-sid ok - -- bash -c '[ "$(grep ^job_pid: "$1" | cut -d" " -f2)" = "$(grep ^sid: "$1" | cut -d" " -f2)" ]' _ "$tmp/state/s-usr1/start"
+expect sup-list-running ok '^s-usr1	RUNNING	[0-9]+	60	0\.[0-9]+	1	none	' -- guard/run launch --list "$E"
+expect sup-supervision-pass ok 'PASS	host-supervision	[0-9]+ live, supervised' -- bash -c 'guard/run ripples "$1" | grep host-supervision' _ "$E"
+kill -USR1 "$(grep ^supervisor_pid: "$tmp/state/s-usr1/start" | cut -d' ' -f2)"
+kill -TERM "$(grep ^supervisor_pid: "$tmp/state/s-term/start" | cut -d' ' -f2)"
+wait_end s-completed s-failed s-walltime s-mem s-mem-pss s-gentle s-escalates s-leftovers s-escape s-env s-usr1 s-term s-caller
+expect sup-completed ok '^stop: none$' -- cat "$tmp/state/s-completed/end"
+expect sup-completed-exit ok '^exit: 0$' -- cat "$tmp/state/s-completed/end"
+expect sup-failed ok '^exit: 1$' -- cat "$tmp/state/s-failed/end"
+expect sup-walltime ok '^stop: walltime$' -- cat "$tmp/state/s-walltime/end"
+expect sup-mem ok '^stop: mem$' -- cat "$tmp/state/s-mem/end"
+expect sup-mem-pss ok '^stop: mem$' -- cat "$tmp/state/s-mem-pss/end"
+expect sup-gentle-log ok '^checkpointed$' -- cat "$tmp/scratch/launch-s-gentle.log"
+expect sup-gentle-end ok '^exit: 0$' -- cat "$tmp/state/s-gentle/end"
+expect sup-escalates ok '^exit: 137$' -- cat "$tmp/state/s-escalates/end"
+expect sup-escalates-log ok ' KILL$' -- cat "$tmp/state/s-escalates/supervisor.log"
+expect sup-leftovers ok '^leftover_killed: 1$' -- cat "$tmp/state/s-leftovers/end"
+expect sup-leftovers-gone fail - -- grep -lzx HPC_JOB_ID=s-leftovers /proc/[0-9]*/environ
+expect sup-escape ok '^leftover_killed: 1$' -- cat "$tmp/state/s-escape/end"
+expect sup-env ok '^HPC_JOB_ID=s-env$' -- cat "$tmp/scratch/launch-s-env.log"
+expect sup-env-cuda ok '^CUDA_VISIBLE_DEVICES=1$' -- cat "$tmp/scratch/launch-s-env.log"
+expect sup-env-order ok '^CUDA_DEVICE_ORDER=PCI_BUS_ID$' -- cat "$tmp/scratch/launch-s-env.log"
+expect sup-usr1 ok '^stop: requested$' -- cat "$tmp/state/s-usr1/end"
+expect sup-term ok '^stop: signal$' -- cat "$tmp/state/s-term/end"
+expect sup-term-trapped ok '^trapped$' -- cat "$tmp/scratch/launch-s-term.log"
+expect sup-caller ok '^alive$' -- cat "$tmp/scratch/launch-s-caller.log"
+states=$(guard/run launch --sacct)
+expect sup-states-completed ok '^s-completed\|2026-10-02-sup\|COMPLETED\|' -- echo "$states"
+expect sup-states-failed ok '^s-failed\|2026-10-02-sup\|FAILED\|' -- echo "$states"
+expect sup-states-timeout ok '^s-walltime\|2026-10-02-sup\|TIMEOUT\|[2-9]\|1$' -- echo "$states"
+expect sup-states-oom ok '^s-mem\|2026-10-02-sup\|OUT_OF_MEMORY\|' -- echo "$states"
+expect sup-states-cancelled ok '^s-usr1\|2026-10-02-sup\|CANCELLED\|' -- echo "$states"
+expect sup-states-preempted ok '^s-term\|2026-10-02-sup\|PREEMPTED\|' -- echo "$states"
+expect sup-no-leftover-processes fail - -- grep -lzE '^HPC_JOB_ID=s-' /proc/[0-9]*/environ
+tick_job() {  # tick_job <id> <mem_gb> <started> <time_limit_seconds>: a running job with a start record and a beat, polled by --tick
+  req "$1" 2026-10-02-tick none "$4" "$(ago '1 hour')" skynet 1000
+  local pid; pid=$( env HPC_JOB_ID="$1" setsid sleep 30 >/dev/null 2>&1 & echo $! ); sleep 0.1
+  start_rec "$1" "$boot" $$ "$(sed 's/^.*) //' /proc/$$/stat | awk '{print $20}')" "$pid" "$(sed 's/^.*) //' "/proc/$pid/stat" | awk '{print $20}')" "$3"
+  beat_rec "$1" 10 "$2" "$(date -u +%FT%TZ)"
+}
+tick_job t-big 400.0 "$(ago '1 hour')" 36000; tick_job t-small 200.0 "$(ago '30 min')" 36000
+expect tick-no-pressure ok 'reason=none$' -- env HPC_LAUNCH_TEST_CHARGE_KB=419430400 HPC_LAUNCH_TEST_AVAILABLE_KB=104857600 guard/run launch --tick "$tmp/state/t-big"
+sed -i 's/^host_min_available_gb: .*/host_min_available_gb: 32/' "$tmp/state/t-big/request" "$tmp/state/t-small/request"
+expect tick-first-low ok 'low=1 reason=none$' -- env HPC_LAUNCH_TEST_CHARGE_KB=419430400 HPC_LAUNCH_TEST_AVAILABLE_KB=10485760 guard/run launch --tick "$tmp/state/t-big"
+expect tick-small-first-low ok 'low=1 reason=none$' -- env HPC_LAUNCH_TEST_CHARGE_KB=209715200 HPC_LAUNCH_TEST_AVAILABLE_KB=10485760 guard/run launch --tick "$tmp/state/t-small"
+expect tick-small-not-elected ok 'low=2 reason=none$' -- env HPC_LAUNCH_TEST_CHARGE_KB=209715200 HPC_LAUNCH_TEST_AVAILABLE_KB=10485760 guard/run launch --tick "$tmp/state/t-small"
+expect tick-big-elected ok 'low=2 reason=host-mem$' -- env HPC_LAUNCH_TEST_CHARGE_KB=419430400 HPC_LAUNCH_TEST_AVAILABLE_KB=10485760 guard/run launch --tick "$tmp/state/t-big"
+expect tick-big-end ok '^stop: host-mem$' -- cat "$tmp/state/t-big/end"
+expect tick-big-elected-detail ok '^elected: largest of 2 live, 400.0 GB$' -- cat "$tmp/state/t-big/end"
+expect tick-big-writer ok '^writer: tick$' -- cat "$tmp/state/t-big/end"
+expect tick-small-alive fail - -- test -f "$tmp/state/t-small/end"
+expect tick-small-state ok '^t-small\|2026-10-02-tick\|RUNNING\|' -- guard/run launch --sacct
+expect tick-big-state ok '^t-big\|2026-10-02-tick\|HOST_OUT_OF_MEMORY\|' -- guard/run launch --sacct
+tick_job t-wall 1.0 "$(ago '2 hours')" 3600
+expect tick-walltime ok 'reason=walltime$' -- guard/run launch --tick "$tmp/state/t-wall"
+expect tick-walltime-end ok '^exit: unknown$' -- cat "$tmp/state/t-wall/end"
+kill -KILL "$(grep ^job_pid: "$tmp/state/t-small/start" | cut -d' ' -f2)" 2>/dev/null
 rm -rf "$tmp/state"; unset HPC_GUARD_REF
 
 echo "== fence"
