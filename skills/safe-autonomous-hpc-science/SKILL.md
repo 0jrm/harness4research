@@ -45,13 +45,13 @@ Never do these:
 A guarded repo has a `guard/` directory, `FACTS.md`, and a `guard-fence` CI check. If `guard/` is missing, work at tier 1 only and tell the human to run `guard init` from the harness4research repo. Never create `guard/` yourself.
 
 - `guard/budget.card` and every path in `guard/watch.list` live on the protected branch, and the human changes them. `guard/run <command>` runs the protected branch's copy of each script, so an edit on your branch has no effect and trips a ripple. The `guard-fence` check blocks the merge of any change to `guard/`, `.github/workflows/`, watched paths, or an existing question card, and of any report evidence row without an artifact path.
-- Submit only through `guard/run preflight <run_dir> <job.sh> [options]`. It fails when guard files differ from `origin/main`, the question card is uncommitted or edited, the date is past `stop_date`, `--time` or `--nodes` is missing or over its cap, spent plus queued plus projected core-hours exceed the budget minus the verification reserve, or concurrency would exceed its cap. It stamps `--job-name=<run_id>` and forces `--account` to the card's account. Verifier jobs set `HPC_SPEND_RESERVE=1`.
+- Submit only through `guard/run preflight <run_dir> <job.sh> [options]`. It fails when guard files differ from `origin/main`, the question card is uncommitted or edited, the date is past `stop_date`, `--time` or `--nodes` is missing or over its cap, spent plus queued plus projected core-hours exceed the budget minus the verification reserve, concurrency would exceed its cap, or `guard/run ripples` for the run exits 1, unless `HPC_SPEND_RESERVE=1`. It stamps `--job-name=<run_id>` and forces `--account` to the card's account. Verifier jobs set `HPC_SPEND_RESERVE=1`.
 - Call `guard/run manifest "$RUN_DIR" "$0" "$@"` at the top of every job script. It records commit, dirty count, modules, container, lockfile hashes, input size and mtime (hashes with `HPC_HASH_INPUTS=1`), and the command, and it never overwrites.
 - Run `guard/run ripples <run_dir>` at every wake. Exit 1 means stop new submissions.
 
 When a guard blocks you, the block is the answer. Report it. Do not route around it.
 
-This text describes guard schema 2. Once per session, read `git show origin/main:guard/VERSION`. If its `schema:` line is missing or lower, tell the human that `guard init <repo> --update` is pending. If it is higher, tell them to pull harness4research, and trust the scripts' output over this text. A usage error from `guard/run` means the project lacks that command. Report it, and never run the harness's own copy instead.
+This text describes guard schema 3. Once per session, read `git show origin/main:guard/VERSION`. If its `schema:` line is missing or lower, tell the human that `guard init <repo> --update` is pending. If it is higher, tell them to pull harness4research, and trust the scripts' output over this text. A usage error from `guard/run` means the project lacks that command. Report it, and never run the harness's own copy instead.
 
 ## Run lifecycle
 

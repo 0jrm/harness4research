@@ -3,6 +3,7 @@
 # Submits only if guard/ matches the protected branch, the question card is committed and frozen,
 # and the job fits guard/budget.card as it exists on the protected branch.
 # HPC_SPEND_RESERVE=1 lets verifier jobs draw on the verification reserve.
+# It also skips the ripples gate, because a ripple pauses new spending, not diagnosis within the reserve.
 # A run_dir named explore-* needs no question card but gets small caps, and the fence keeps its results out of reports.
 set -euo pipefail
 [ $# -ge 2 ] || { echo "usage: guard/run preflight <run_dir> <job_script> [sbatch options...]" >&2; exit 64; }
@@ -62,6 +63,13 @@ if [ $explore = 0 ]; then
   git ls-files --error-unmatch "$q" >/dev/null 2>&1 || fail "$q is not committed"
   git diff --quiet HEAD -- "$q" || fail "$q has uncommitted edits"
   [ "$(git log --format=%H -- "$q" | wc -l)" -le 1 ] || fail "$q was edited after its first commit; start a new run id instead"
+fi
+
+if [ "${HPC_SPEND_RESERVE:-0}" != 1 ]; then
+  ripples=$(git show "$base:guard/bin/ripples.sh" 2>/dev/null) || fail "ripples could not run (no guard/bin/ripples.sh on $base)"
+  rc=0; out=$(bash -c "$ripples" guard/bin/ripples.sh "$run_dir") || rc=$?
+  [ $rc -ne 1 ] || fail "ripples reports $(awk -F'\t' '$1=="RIPPLE" {sub(/ +$/, "", $3); printf "%s%s %s", sep, $2, $3; sep="; "}' <<<"$out"); fix the cause or record it in an incident, or set HPC_SPEND_RESERVE=1 for a diagnostic job"
+  [ $rc -eq 0 ] || fail "ripples could not run (exit $rc)"
 fi
 
 stop=$(need stop_date)
