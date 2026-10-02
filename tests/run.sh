@@ -302,6 +302,10 @@ sed -i 's/^Question: .*/Question: our wording/' runs/_template/report.md
 echo "custom_note: leave this" >> runs/_template/question.card
 git commit -q -am "an older install with site edits"; git push -q -f origin HEAD:main; git -C "$tmp/proj" fetch -q origin
 expect version-old-install ok '^project older' -- "$guard" version
+expect path-runs-project-copy ok 'PASS.guard-untouched' -- "$guard" fence origin/main HEAD
+expect path-not-harness-copy fail - -- bash -c '"$1" fence origin/main HEAD | grep -q hypothesis-line' _ "$guard"
+git init -q "$tmp/plain"
+expect path-refuses-unguarded fail 'runs inside a guarded project' -- bash -c 'cd "$1" && "$2" ripples runs/x' _ "$tmp/plain" "$guard"
 expect update-from-old ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt7"
 expect update-reports-edit ok '^  guard/bin/fence.sh$' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt8" --branch guard/again
 expect update-merged-new-rule ok 'hypothesis-line' -- cat "$tmp/wt7/guard/bin/fence.sh"
