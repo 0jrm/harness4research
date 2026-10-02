@@ -560,6 +560,11 @@ X5=runs/2026-10-02-late; mkdir -p "$X5"; sed 's/^deadline: .*/deadline: 2000-01-
 git add -A; git commit -q -m "run: science, capped and late cards"
 req x-3-fail 2026-10-02-science none 60 "$(ago '1 hour')"; end_rec x-3-fail 10 1 none
 expect launch-after-science-stop fail 'x-3-fail ended FAILED, a science stop; the human decides whether this run continues' -- L "$X3" --time=1 --gpus=none --mem=0.01 -- true
+req x-3-stopped 2026-10-02-science none 60 "$(ago '30 min')"; end_rec x-3-stopped 10 unknown requested
+expect launch-after-cancelled-is-resource fail 'x-3-stopped ended CANCELLED; commit an execution.tsv row \(restart or resume\) citing it' -- L "$X3" --time=1 --gpus=none --mem=0.01 -- true
+printf '2026-10-02-science|CANCELLED by 1000\n' > "$tmp/staterow"
+printf 'id\tts\tfield\tvalue\twhy\tevidence\nx1\tt\trestart\tx-3-stopped\tw\te\nx2\tt\trestart\t12345\tw\te\n' > "$X3/execution.tsv"; git add -A; git commit -q -m "run: science ledger"
+expect ripples-restart-cancelled-rows fail 'PASS	execution-within-envelope	2 rows: restart x1, restart x2' -- env MOCK_SACCT_STATE=$tmp/staterow guard/run ripples "$X3"
 req x-4-spent 2026-10-02-capped 1 3600 "$(ago '2 hours')" skynet 100; end_rec x-4-spent 1800 0 none
 expect launch-run-gpu-budget fail 'this run spent 0.5 \+ running 0.0 \+ this job 1.0 GPU-h exceeds budget_gpu_hours=1' -- L "$X4" --time=1:00:00 --gpus=0 --mem=0.01 -- true
 capped=$(L "$X4" --time=0:30:00 --gpus=0 --mem=0.01 -- true 2>/dev/null)

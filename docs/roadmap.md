@@ -88,7 +88,7 @@ Every ripples run printed `UNCHECKED domain-checks`, which trained people to ign
 
 ## 4. The execution envelope
 
-Freezing the card at first launch was dropped. The card stays frozen at first commit and holds only the design; the execution facts that used to force a new run id (host, GPUs, memory limit, a restart after a resource stop) go in `runs/<id>/execution.tsv`, an append-only ledger with a fixed vocabulary. Ripples checks every committed row against the budget card and the launch records, and the fence keeps the ledger append-only and makes the report cite every row. [compatibility.md](compatibility.md) lists the keys and the rules.
+Freezing the card at first launch was dropped. The card stays frozen at first commit and holds only the design; the execution facts that used to force a new run id (host, GPUs, memory limit, a restart after a resource stop such as OOM, a reboot, preemption, a cancelled or never-started launch; a science stop, FAILED or TIMEOUT, still goes to the human) go in `runs/<id>/execution.tsv`, an append-only ledger with a fixed vocabulary. Ripples checks every committed row against the budget card and the launch records, and the fence keeps the ledger append-only and makes the report cite every row. [compatibility.md](compatibility.md) lists the keys and the rules.
 
 ## 5. Script arguments for preflight
 

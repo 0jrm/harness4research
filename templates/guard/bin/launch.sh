@@ -30,7 +30,8 @@ set -uo pipefail
 
 readonly POLL_FAST=1 POLL=5 FAST_FOR=60 BEAT_EVERY=60 START_WAIT=15
 readonly LOG_ERRORS='Traceback \(most recent call last\)|CUDA out of memory|OutOfMemoryError|CUDA error|NCCL error|Segmentation fault|(^|[^[:alpha:]])[Ll]oss[^[:alnum:]]{0,4}(nan|inf)'
-readonly RESOURCE_STOPS='^(OUT_OF_MEMORY|HOST_OUT_OF_MEMORY|NODE_FAIL|PREEMPTED|SUPERVISOR_FAILED)$'
+# Resource stops: contention or infrastructure, which a ledger row may restart or resume. Science stops are FAILED and TIMEOUT.
+readonly RESOURCE_STOPS='^(OUT_OF_MEMORY|HOST_OUT_OF_MEMORY|NODE_FAIL|PREEMPTED|SUPERVISOR_FAILED|CANCELLED|LAUNCH_FAILED)$'
 readonly ENVELOPE_FIELDS=' host gpus start concurrency workers staging mem_stop_gb stage_minutes resume restart '
 
 base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
@@ -307,7 +308,7 @@ restart_ok() {
   done
   [[ $2 =~ ^[0-9][0-9_]*$ ]] && [ -n "$(type -P sacct)" ] || return 1
   row=$(sacct -j "$2" -X -n -P -o JobName,State 2>/dev/null | head -n1)
-  [ "${row%%|*}" = "$1" ] && [[ ${row#*|} =~ ^(OUT_OF_MEMORY|NODE_FAIL|PREEMPTED) ]]
+  [ "${row%%|*}" = "$1" ] && [[ ${row#*|} =~ ^(OUT_OF_MEMORY|NODE_FAIL|PREEMPTED|CANCELLED) ]]
 }
 # ledger_check <run_dir>: sets bad (the problems, `; ` separated) and summary over the committed ledger.
 ledger_check() {
@@ -742,7 +743,7 @@ gate_restart() {
   state_of "$last"; rk "$last" request job_id
   if [[ $st =~ $RESOURCE_STOPS ]]; then
     grep -q "^$r " <<<"$(cmd_handled "$run_dir")" || fail "$r ended $st; commit an execution.tsv row (restart or resume) citing it, then launch again"
-  elif [[ $st =~ ^(FAILED|TIMEOUT|LAUNCH_FAILED|CANCELLED)$ ]]; then
+  elif [[ $st =~ ^(FAILED|TIMEOUT)$ ]]; then
     fail "$r ended $st, a science stop; the human decides whether this run continues"
   fi
 }
