@@ -498,13 +498,16 @@ expect launch-manifest ok "^job_id: $id$" -- cat "$R2/manifest-$id.txt"
 expect launch-manifest-cuda ok '^cuda_visible_devices: unset$' -- cat "$R2/manifest-$id.txt"
 expect launch-request-cwd-commit ok "^cwd_commit: $(git rev-parse HEAD)$" -- cat "$tmp/state/$id/request"
 expect launch-request-card ok "^card: $(git rev-parse "HEAD:$R2/question.card")$" -- cat "$tmp/state/$id/request"
+expect launch-request-run-dir ok "^run_dir: $PWD/$R2$" -- cat "$tmp/state/$id/request"
+absid=$(L "$PWD/runs/explore-abs" --time=1 --gpus=none --mem=0.01 -- true 2>/dev/null)
+expect launch-request-run-dir-absolute ok "^run_dir: $PWD/runs/explore-abs$" -- cat "$tmp/state/$absid/request"
 idem=$(L runs/explore-idem --time=1 --gpus=none --mem=0.01 -- bash -c 'guard/run manifest "$HPC_RUN_DIR" x' 2>/dev/null)
 cwdid=$(L runs/explore-cwd --time=1 --gpus=none --mem=0.01 --cwd="$tmp/scratch" -- pwd 2>/dev/null)
 caller=$(setsid bash -c 'env HPC_SPEND_RESERVE=1 guard/run launch runs/explore-caller --time=1 --gpus=none --mem=0.01 -- bash -c "sleep 1; echo alive" 2>/dev/null; kill -HUP 0')
 local=$(env HPC_GUARD_LOCAL=1 HPC_SPEND_RESERVE=1 guard/run launch runs/explore-local --time=1 --gpus=none --mem=0.01 -- true 2>/dev/null)
 expect launch-local-copy ok '^skynet-' -- echo "$local"
 failed=$(L runs/explore-ripple --time=1 --gpus=none --mem=0.01 -- false 2>/dev/null)
-wait_end "$id" "$idem" "$cwdid" "$caller" "$local" "$failed"
+wait_end "$id" "$idem" "$cwdid" "$caller" "$local" "$failed" "$absid"
 expect launch-env ok "^HPC_JOB_ID=$id$" -- cat "launch-$id.log"
 expect launch-env-cuda ok '^CUDA_VISIBLE_DEVICES=2$' -- cat "launch-$id.log"
 expect launch-env-run-dir ok "^HPC_RUN_DIR=$PWD/$R2$" -- cat "launch-$id.log"

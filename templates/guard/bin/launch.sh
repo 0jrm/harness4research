@@ -770,7 +770,7 @@ request_text() {
   cat <<REQ
 job_id: $id
 run_id: $run_id
-run_dir: $PWD/$run_dir
+run_dir: $([[ $run_dir == /* ]] && echo "$run_dir" || echo "$PWD/$run_dir")
 project: $project
 origin: $(git remote get-url origin 2>/dev/null || echo none)
 host: $host
