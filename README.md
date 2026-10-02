@@ -71,6 +71,7 @@ guard/bin/preflight.sh            submits a job only if it fits the budget and h
 guard/bin/ripples.sh              reports warning signs; exit 1 stops new submissions
 guard/bin/manifest.sh             records commit, modules, and inputs at the start of each job
 guard/bin/fence.sh                the merge inspector, also run by CI
+guard/bin/launch.sh               runs a job on a GPU box without a scheduler, under a supervisor that enforces its limits
 guard/SURVEY.md                   the survey, for the cleanup
 .github/workflows/guard-fence.yml runs the fence on every pull request
 runs/_template/                   question card and report templates
@@ -109,8 +110,10 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 | `guard/run manifest <run_dir> "$0" "$@"` | inside a job | provenance record |
 | `guard/run fence [base] [head]` | anywhere, CI | merge inspector |
 | `guard/run code <repo> <commit>` | cluster | absolute path of a clean worktree at that commit |
+| `guard/run launch <run_dir> --time=T --gpus=I,J\|none --mem=GB -- <cmd>` | a host in `launch_hosts` | run a job under a supervisor, or refuse |
+| `guard/run launch --stop <job_id> [--reason=<text>]` | that host | stop a launched job gently; `--list [run_dir]` shows them |
 
-`guard preflight`, `guard ripples`, `guard manifest`, `guard fence`, and `guard code` on PATH run the enclosing project's `guard/run` from its protected branch, and refuse outside a guarded project.
+`guard preflight`, `guard ripples`, `guard manifest`, `guard fence`, `guard code`, and `guard launch` on PATH run the enclosing project's `guard/run` from its protected branch, and refuse outside a guarded project.
 
 ## Updating a guarded project
 
