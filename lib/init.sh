@@ -1,27 +1,38 @@
 #!/usr/bin/env bash
-# usage: guard init <repo> [--branch NAME] [--worktree DIR] [--update]
+# usage: guard init <repo> [--branch NAME] [--worktree DIR] [--update [--force]]
 # Surveys the repo, then proposes guard/ and its companions on a new branch in a separate worktree.
 # Never touches the repo's checked-out tree, never overwrites a file, never pushes.
 # --update refreshes guard/bin/ and guard/run, and inserts a missing setting or hypothesis
-# line into the run templates without changing any other line.
+# line into the run templates without changing any other line. It refuses when this harness is older
+# than the one that installed the project, unless --force.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-repo=""; branch=guard/init; wt=""; update=0; agents_note=""
+# shellcheck source=lib/version.sh
+. "$here/lib/version.sh"
+repo=""; branch=guard/init; wt=""; update=0; force=0; agents_note=""
 while [ $# -gt 0 ]; do
   case $1 in
     --branch) branch=$2; shift 2 ;;
     --worktree) wt=$2; shift 2 ;;
     --update) update=1; branch=guard/update; shift ;;
+    --force) force=1; shift ;;
     -*) echo "unknown option $1" >&2; exit 64 ;;
     *) repo=$1; shift ;;
   esac
 done
-[ -n "$repo" ] || { echo "usage: guard init <repo> [--branch NAME] [--worktree DIR] [--update]" >&2; exit 64; }
+[ -n "$repo" ] || { echo "usage: guard init <repo> [--branch NAME] [--worktree DIR] [--update [--force]]" >&2; exit 64; }
 repo=$(cd "$repo" && git rev-parse --show-toplevel)
 name=$(basename "$repo")
 git -C "$repo" fetch -q origin 2>/dev/null || echo "note: could not fetch origin; using local refs" >&2
-base=$(git -C "$repo" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
+project_version "$repo"; base=$p_base
 git -C "$repo" rev-parse --verify -q "$base" >/dev/null || { echo "cannot find $base in $repo. Set origin/HEAD with: git -C $repo remote set-head origin -a" >&2; exit 2; }
+if [ $update = 0 ] && [ $p_guarded = 1 ]; then echo "$name is already guarded on $base. Use guard init $repo --update." >&2; exit 2; fi
+if [ $update = 1 ] && [ $p_guarded = 0 ]; then echo "$name has no guard/run on $base yet. Run guard init $repo without --update." >&2; exit 2; fi
+if [ $update = 1 ] && [ $force = 0 ] && [ "$(skew)" = harness-older ]; then
+  echo "This harness ($(harness_release), schema $h_schema) does not contain the one that installed $name (${p_from}, schema $p_schema)." >&2
+  echo "Update the harness with git -C $here pull, then rerun. --force proposes this harness's scripts anyway." >&2
+  exit 2
+fi
 git -C "$repo" rev-parse --verify -q "refs/heads/$branch" >/dev/null && { echo "branch $branch already exists in $repo. Delete it or pass --branch." >&2; exit 2; }
 wt=${wt:-$(dirname "$repo")/$name.$(echo "$branch" | tr / -)}
 [ -e "$wt" ] && { echo "worktree path exists: $wt. Pass --worktree." >&2; exit 2; }
@@ -75,13 +86,15 @@ else
   fi
 fi
 {
-  echo "installer: $(git -C "$here" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  echo "schema: $h_schema"
+  echo "installer: $(git -C "$here" rev-parse HEAD 2>/dev/null || echo unknown)"
+  echo "release: $(harness_release)"
   echo "pstack: $(git -C "$here/vendor/pstack" rev-parse --short HEAD 2>/dev/null || echo not-installed)"
   echo "installed: $(date -u +%F)"
 } > "$wt/guard/VERSION"; added+=(guard/VERSION)
 
 git -C "$wt" add -A
-if [ $update = 1 ] && git -C "$wt" diff --cached --quiet -- guard/bin guard/run runs/_template/question.card runs/_template/report.md; then
+if [ $update = 1 ] && [ "$(skew)" = current ] && git -C "$wt" diff --cached --quiet -- . ':!guard/VERSION'; then
   git -C "$repo" worktree remove --force "$wt"; git -C "$repo" branch -q -D "$branch"
   echo "guard scripts in $name are already current. Nothing proposed."; exit 0
 fi
