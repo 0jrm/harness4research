@@ -16,6 +16,10 @@ Verdict against kill criteria: <continue | kill | escalate>
 
 ## Deviations from the question card
 
+## Execution history
+
+<one line per execution.tsv row, citing its id, e.g. `x2` stage 1 resumed at epoch 48 after a resource stop>
+
 ## Spend
 
 ## What this rules out

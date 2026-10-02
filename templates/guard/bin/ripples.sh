@@ -38,6 +38,8 @@ if command -v sacct >/dev/null; then
   declare -A incident=() acked=()
   while IFS=: read -r _ path line; do id=${line#job:}; incident[${id// /}]=incidents/$(basename "$path")
   done < <(git grep -E '^job: *[0-9A-Za-z][0-9A-Za-z_.-]* *$' HEAD -- "$run_dir/incidents/" 2>/dev/null)
+  # A committed execution.tsv restart or resume row citing a job handles it the same way.
+  [ -z "$launch" ] || while read -r id ref; do [ -n "${incident[$id]+x}" ] || incident[$id]=$ref; done < <(launched --handled "$run_dir")
   sort_out() {  # sort_out <check> "<id>:<detail> ...": HANDLED for entries with an incident, RIPPLE for the rest
     local open="" done="" e id
     for e in $2; do id=${e%%:*}

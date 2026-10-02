@@ -120,6 +120,16 @@ git reset -q --hard HEAD~1
 expect explore-no-card ok 'SBATCH .*--job-name=explore-sketch' -- guard/run preflight runs/explore-sketch job.sh --nodes=1 --time=00:30:00
 expect explore-capped fail 'exceeds max_nodes_per_job=1' -- guard/run preflight runs/explore-sketch job.sh
 expect explore-one-task fail 'one task at a time' -- guard/run preflight runs/explore-sketch job.sh --nodes=1 --time=00:30:00 --array=0-3
+R3=runs/2026-09-29-budget; mkdir -p "$R3"; sed 's/^budget_core_hours: .*/budget_core_hours: 1100/' runs/_template/question.card > "$R3/question.card"
+R4=runs/2026-09-29-late; mkdir -p "$R4"; sed 's/^deadline: .*/deadline: 2000-01-01/' runs/_template/question.card > "$R4/question.card"
+git add -A; git commit -q -m "run: budget and deadline cards"
+expect preflight-run-budget-fits ok 'SBATCH .*--job-name=2026-09-29-budget' -- guard/run preflight "$R3" job.sh
+printf '2026-09-29-budget|360000\nother|999999\n' > "$tmp/runrows"
+expect preflight-run-budget fail 'this run spent 100 \+ this job 1024 core-h exceeds budget_core_hours=1100' -- env MOCK_SACCT_RUNROWS=$tmp/runrows guard/run preflight "$R3" job.sh
+expect preflight-deadline fail 'past deadline 2000-01-01 in runs/2026-09-29-late/question.card' -- guard/run preflight "$R4" job.sh
+echo "default_run_core_hours: 10" >> guard/budget.card; git commit -q -am "default run budget"
+expect preflight-default-run-budget fail 'this job 64 core-h exceeds budget_core_hours=10' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-sketch job.sh --nodes=1 --time=00:30:00
+git reset -q --hard HEAD~1
 printf '100|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
 expect preflight-refuses-on-ripple fail '^PREFLIGHT FAIL: ripples reports job-states 100:FAILED; fix the cause' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
 expect preflight-reserve-skips-ripples ok 'SBATCH .*--job-name=2026-09-29-demo' -- env MOCK_SACCT_ROWS="$tmp/rows" HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
@@ -511,6 +521,49 @@ expect crash-stop-unsupervised-writer ok '^writer: stop$' -- cat "$tmp/state/$cr
 expect crash-stop-supervision-pass ok 'PASS	host-supervision	0 live, supervised' -- bash -c 'guard/run ripples runs/explore-crash | grep host-supervision'
 wait_end "$(cat "$tmp/race1" "$tmp/race2" | grep -o 'job=skynet-[0-9TZ]*' | cut -d= -f2)"
 expect launch-no-job-left fail - -- grep -lzE '^HPC_JOB_ID=skynet-' /proc/[0-9]*/environ
+X=runs/2026-10-02-ledger; mkdir -p "$X"; cp runs/_template/question.card "$X/"
+req x-1-done 2026-10-02-ledger 1 3600 "$(ago '2 hours')" skynet 100; end_rec x-1-done 1800 0 none
+req x-2-oom 2026-10-02-ledger 1 3600 "$(ago '1 hour')" skynet 100; end_rec x-2-oom 1200 130 mem
+git add -A; git commit -q -m "run: ledger card"
+expect ripples-no-ledger-no-line fail - -- bash -c 'guard/run ripples "$1" | grep -q execution-within-envelope' _ "$X"
+expect launch-after-resource-stop fail 'x-2-oom ended OUT_OF_MEMORY; commit an execution.tsv row \(restart or resume\) citing it, then launch again' -- L "$X" --time=1 --gpus=none --mem=0.01 -- true
+printf 'id\tts\tfield\tvalue\twhy\tevidence\nx1\t2026-10-02T12:00:00Z\thost\tskynet\tthe A100 box\tnone\nx2\t2026-10-02T12:01:00Z\tmem_stop_gb\t300\tshm staging\tnone\nx3\t2026-10-02T12:02:00Z\trestart\tx-2-oom\tOOM at epoch 3\tlaunch-x-2-oom.log\nx4\t2026-10-02T12:03:00Z\tresume\t%s/scratch/ckpt/epoch3.pt\tcheckpoint\tnone\n' "$tmp" > "$X/execution.tsv"
+expect ripples-ledger-uncommitted fail - -- bash -c 'guard/run ripples "$1" | grep -q execution-within-envelope' _ "$X"
+git add -A; git commit -q -m "run: ledger"
+rip=$(guard/run ripples "$X")
+expect ripples-envelope-pass ok 'PASS	execution-within-envelope	4 rows: host x1, mem_stop_gb x2, restart x3, resume x4' -- echo "$rip"
+expect ripples-restart-handles ok 'HANDLED	job-states	x-2-oom:OUT_OF_MEMORY->execution.tsv:x3' -- echo "$rip"
+expect ripples-restart-counts ok 'PASS	handled-failures	1 of 2' -- echo "$rip"
+expect ripples-envelope-without-launch fail 'RIPPLE	execution-within-envelope	x1: host skynet is not in launch_hosts \(none\)' -- env HPC_GUARD_REF=origin/main guard/run ripples "$X"
+expect launch-after-restart-row ok '^skynet-' -- guard/run launch "$X" --time=1 --gpus=none --mem=0.01 -- true
+X2=runs/2026-10-02-badledger; mkdir -p "$X2"; cp runs/_template/question.card "$X2/"
+printf 'id\tts\tfield\tvalue\twhy\tevidence\nx1\tt\tsetting\tfloat32\tw\te\nx3\tt\thost\tlogin1\tw\te\nx3\tt\tmem_stop_gb\t2000\tw\te\nx4\tt\trestart\tx-1-done\tw\te\nx5\tt\tresume\t/nowhere/ckpt\tw\te\n' > "$X2/execution.tsv"
+git add -A; git commit -q -m "run: bad ledger"
+rip=$(guard/run ripples "$X2")
+expect ripples-envelope-design fail 'RIPPLE	execution-within-envelope	x1: setting is design; a change to it needs a new card' -- guard/run ripples "$X2"
+expect ripples-envelope-order ok 'x3: ids run x1, x2, \.\.\. in order; this is row 2' -- echo "$rip"
+expect ripples-envelope-host ok 'x3: host login1 is not in launch_hosts \(skynet\)' -- echo "$rip"
+expect ripples-envelope-mem ok 'x3: mem_stop_gb 2000 is over host_max_mem_gb=1000' -- echo "$rip"
+expect ripples-envelope-restart ok 'x4: restart x-1-done is not a resource stop of this run' -- echo "$rip"
+expect ripples-envelope-resume ok 'x5: resume /nowhere/ckpt is under no launch cwd of this run' -- echo "$rip"
+X3=runs/2026-10-02-science; mkdir -p "$X3"; cp runs/_template/question.card "$X3/"
+X4=runs/2026-10-02-capped; mkdir -p "$X4"; sed 's/^budget_gpu_hours: .*/budget_gpu_hours: 1/' runs/_template/question.card > "$X4/question.card"
+X5=runs/2026-10-02-late; mkdir -p "$X5"; sed 's/^deadline: .*/deadline: 2000-01-01/' runs/_template/question.card > "$X5/question.card"
+git add -A; git commit -q -m "run: science, capped and late cards"
+req x-3-fail 2026-10-02-science none 60 "$(ago '1 hour')"; end_rec x-3-fail 10 1 none
+expect launch-after-science-stop fail 'x-3-fail ended FAILED, a science stop; the human decides whether this run continues' -- L "$X3" --time=1 --gpus=none --mem=0.01 -- true
+req x-4-spent 2026-10-02-capped 1 3600 "$(ago '2 hours')" skynet 100; end_rec x-4-spent 1800 0 none
+expect launch-run-gpu-budget fail 'this run spent 0.5 \+ running 0.0 \+ this job 1.0 GPU-h exceeds budget_gpu_hours=1' -- L "$X4" --time=1:00:00 --gpus=0 --mem=0.01 -- true
+capped=$(L "$X4" --time=0:30:00 --gpus=0 --mem=0.01 -- true 2>/dev/null)
+expect launch-run-gpu-budget-fits ok '^skynet-' -- echo "$capped"
+req x-5-more 2026-10-02-capped 1 3600 "$(ago '1 hour')" skynet 100; end_rec x-5-more 1900 0 none
+printf 'id\tts\tfield\tvalue\twhy\tevidence\nx1\tt\tgpus\t0\tw\te\n' > "$X4/execution.tsv"; git add -A; git commit -q -m "run: capped ledger"
+expect ripples-envelope-spend fail 'execution-within-envelope	.*spent 1.0 GPU-h over budget_gpu_hours=1' -- guard/run ripples "$X4"
+expect launch-deadline fail 'past deadline 2000-01-01 in runs/2026-10-02-late/question.card' -- L "$X5" --time=1 --gpus=none --mem=0.01 -- true
+git switch -q -c launch-default; echo "default_run_gpu_hours: 1" >> guard/budget.card; git commit -q -am "default run budget"
+expect launch-default-run-budget fail 'this job 2.0 GPU-h exceeds budget_gpu_hours=1' -- env HPC_GUARD_REF=HEAD HPC_SPEND_RESERVE=1 guard/run launch "$X" --time=2:00:00 --gpus=0 --mem=0.01 -- true
+git switch -q launch/agent
+wait_end "$capped"
 rm -f launch-*.log; rm -rf runs/explore-*; git checkout -q -- .
 rm -rf "$tmp/state"; unset HPC_GUARD_REF
 
@@ -608,6 +661,32 @@ git add -A; git commit -q -m x
 expect fence-legacy-setting ok 'PASS.setting-key' -- guard/run fence origin/pr-legacy-card HEAD
 expect fence-legacy-hypothesis ok 'PASS.hypothesis-line' -- guard/run fence origin/pr-legacy-card HEAD
 
+git switch -q -c pr/ledger origin/main; mkdir -p runs/lg; cp runs/_template/question.card runs/lg/
+printf 'id\tts\tfield\tvalue\twhy\tevidence\nx1\tt\thost\tskynet\tw\te\n' > runs/lg/execution.tsv; git add -A; git commit -q -m x
+expect fence-ledger-added ok 'PASS.execution-ledger' -- guard/run fence origin/main HEAD
+expect fence-history-no-report ok 'PASS.execution-history' -- guard/run fence origin/main HEAD
+cp runs/_template/report.md runs/lg/report.md; git add -A; git commit -q -m x
+expect fence-history-placeholder fail 'FAIL.execution-history.*runs/lg/report.md' -- guard/run fence origin/main HEAD
+sed -i 's/^<one line per execution.tsv row.*/`x1` ran on skynet/' runs/lg/report.md; git commit -q -am x
+expect fence-history-cited ok 'PASS.execution-history' -- guard/run fence origin/main HEAD
+git push -q origin pr/ledger:refs/heads/pr-ledger
+git switch -q -c pr/ledger-append origin/pr-ledger; printf 'x2\tt\tgpus\t0,1\tw\te\n' >> runs/lg/execution.tsv; echo "A note." >> runs/lg/report.md; git commit -q -am x
+expect fence-ledger-appended fail 'PASS.execution-ledger' -- guard/run fence origin/pr-ledger HEAD
+expect fence-history-uncited fail 'FAIL.execution-history.*runs/lg/report.md' -- guard/run fence origin/pr-ledger HEAD
+sed -i '/^`x1` ran on skynet$/a `x2` took GPUs 0,1' runs/lg/report.md; git commit -q -am x
+expect fence-history-appended ok 'PASS.execution-history' -- guard/run fence origin/pr-ledger HEAD
+git switch -q -c pr/ledger-rewrite origin/pr-ledger; sed -i 's/skynet/login1/' runs/lg/execution.tsv; git commit -q -am x
+expect fence-ledger-rewritten fail 'FAIL.execution-ledger.*runs/lg/execution.tsv \(rows changed or removed\)' -- guard/run fence origin/pr-ledger HEAD
+git switch -q -c pr/ledger-delete origin/pr-ledger; git rm -q runs/lg/execution.tsv; git commit -q -m x
+expect fence-ledger-deleted fail 'FAIL.execution-ledger.*runs/lg/execution.tsv \(deleted\)' -- guard/run fence origin/pr-ledger HEAD
+git switch -q -c pr/ledger-design origin/pr-ledger; printf 'x2\tt\tsetting\tfloat64\tw\te\n' >> runs/lg/execution.tsv; git commit -q -am x
+expect fence-ledger-design fail 'FAIL.execution-ledger.*runs/lg/execution.tsv$' -- guard/run fence origin/pr-ledger HEAD
+git switch -q -c pr/legacy-ledger origin/main; mkdir -p runs/ll; printf 'bad header\nx1\tt\tsetting\tx\tw\te\n' > runs/ll/execution.tsv; git add -A; git commit -q -m x
+expect fence-ledger-bad-header fail 'FAIL.execution-ledger.*runs/ll/execution.tsv$' -- guard/run fence origin/main HEAD
+git push -q origin pr/legacy-ledger:refs/heads/pr-legacy-ledger
+git switch -q -c pr/legacy-ledger-edit origin/pr-legacy-ledger; printf 'x2\tt\tgpus\t0\tw\te\n' >> runs/ll/execution.tsv; git commit -q -am x
+expect fence-legacy-ledger ok 'PASS.execution-ledger' -- guard/run fence origin/pr-legacy-ledger HEAD
+
 git switch -q -c pr/old-report origin/main; mkdir -p runs/old
 cp runs/_template/question.card runs/_template/report.md runs/old/
 sed -i '/^hypothesis:/d' runs/old/report.md
@@ -671,7 +750,11 @@ expect update-workflow-fixed ok 'x-access-token' -- cat "$tmp/wt7/.github/workfl
 expect update-keeps-card ok '^account: gom$' -- cat "$tmp/wt7/guard/budget.card"
 expect update-adds-key ok '^max_handled_failures: 2$' -- cat "$tmp/wt7/guard/budget.card"
 expect update-skips-removed-key fail - -- grep '^explore_max_nodes' "$tmp/wt7/guard/budget.card"
-expect update-filled-setting ok '^setting: <dataset, geometry, code, and pinned commits>$' -- grep '^setting:' "$tmp/wt7/runs/_template/question.card"
+expect update-filled-setting ok '^setting: <dataset, geometry, code, and pinned commits; hosts, GPUs and memory limits go in execution.tsv>$' -- grep '^setting:' "$tmp/wt7/runs/_template/question.card"
+expect update-adds-envelope-keys ok '^deadline: <' -- grep '^deadline:' "$tmp/wt7/runs/_template/question.card"
+expect update-adds-run-defaults ok '^default_run_gpu_hours: 0$' -- grep '^default_run_gpu_hours:' "$tmp/wt7/guard/budget.card"
+expect update-adds-launch ok '^launch_hosts: none$' -- grep '^launch_hosts:' "$tmp/wt7/guard/budget.card"
+expect update-adds-launch-script ok 'cmd_supervise' -- cat "$tmp/wt7/guard/bin/launch.sh"
 expect update-filled-note ok '^custom_note: leave this$' -- grep '^custom_note:' "$tmp/wt7/runs/_template/question.card"
 expect update-filled-hypothesis ok '^hypothesis: n/a$' -- sed -n 4p "$tmp/wt7/runs/_template/report.md"
 expect update-kept-question ok '^Question: our wording$' -- grep '^Question:' "$tmp/wt7/runs/_template/report.md"

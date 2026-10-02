@@ -19,4 +19,6 @@ host_min_available_gb: 32
 host_stop_grace_seconds: 60
 host_state_dir: ~/.local/state/guard/launches
 explore_max_gpus: 1
+default_run_gpu_hours: 0
+default_run_core_hours: 0
 stray_ignore: none

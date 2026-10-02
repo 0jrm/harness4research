@@ -263,21 +263,101 @@ cmd_list() {
 # Nothing prints while launch_hosts is none, so a project that never opted in sees no new line.
 # Scope: job lines follow the run ripples was given, host lines cover the host, spend covers the project.
 
-# gpu_seconds <run_id or ''>: sets spent, running (GPU-seconds) and nrun over this project's records since start_date.
+# gpu_seconds <run_id or ''>: sets spent, running, remaining (GPU-seconds) and nrun over this project's records
+# since start_date; remaining is what the running launches may still hold under their --time.
 gpu_seconds() {
-  local d st el n; spent=0 running=0 nrun=0
+  local d st el n; spent=0 running=0 remaining=0 nrun=0
   for d in $(records "$project"); do
     since_start_date "$d" || continue
     rk "$d" request run_id; [ -z "$1" ] || [ "$r" = "$1" ] || continue
     state_of "$d"; elapsed_of "$d" "$st"; rk "$d" request gpus; n=$(gpu_n "$r")
     spent=$(( spent + n * el ))
-    [ "$st" = RUNNING ] && { running=$(( running + n * el )); nrun=$((nrun+1)); }
+    [ "$st" = RUNNING ] || continue
+    running=$(( running + n * el )); nrun=$((nrun+1)); rk "$d" request time_limit_seconds
+    [ "$el" -ge "$r" ] || remaining=$(( remaining + n * (r - el) ))
   done
 }
 gpu_h() { printf '%d.%d' $(( $1 / 3600 )) $(( $1 % 3600 * 10 / 3600 )); }
+# qval <key>: the run's committed question card value, empty when absent or a placeholder. load_qcard <run_dir> first.
+load_qcard() { qcard=$(git show "HEAD:${1%/}/question.card" 2>/dev/null) || qcard=""; }
+qval() { local v; v=$(awk -F': *' -v k="$1" '$1==k{print $2; exit}' <<<"$qcard"); if [ -z "$v" ] || [[ $v == *"<"* ]]; then echo ""; else echo "$v"; fi; }
+# run_budget <card key> <budget.card default key>: the run's cap, the workspace default when the card is silent, 0 for none.
+run_budget() { local v; v=$(qval "$1"); [ -n "$v" ] || v=$(card_or_default "$2" 0); if [[ $v =~ ^[0-9]+$ ]]; then echo "$v"; else echo 0; fi; }
+
+# ---------------------------------------------------------------- the execution envelope
+# The question card is design, frozen at first commit. Execution facts go in runs/<id>/execution.tsv, an
+# append-only ledger the agent commits: `id ts field value why evidence`, ids x1, x2, ... in order. Only committed
+# rows count. The vocabulary is ENVELOPE_FIELDS, fixed here and in fence.sh, not in a card, so an agent cannot extend it.
+
+ledger_rows() { git show "HEAD:${1%/}/execution.tsv" 2>/dev/null; }
+# resume_owner <run_id> <path>: the latest launch of the run whose cwd contains <path>; prints its job id.
+resume_owner() {
+  local d
+  for d in $(run_records "$1"); do rk "$d" request cwd; [[ $2 == "$r"/* ]] && { rk "$d" request job_id; echo "$r"; return 0; }; done
+  return 1
+}
+# restart_ok <run_id> <job id>: the job belongs to the run and ended in a resource stop, by launch record or by sacct.
+restart_ok() {
+  local d row
+  for d in $(run_records "$1"); do
+    rk "$d" request job_id; [ "$r" = "$2" ] || continue
+    state_of "$d"; [[ $st =~ $RESOURCE_STOPS ]]; return
+  done
+  [[ $2 =~ ^[0-9][0-9_]*$ ]] && [ -n "$(type -P sacct)" ] || return 1
+  row=$(sacct -j "$2" -X -n -P -o JobName,State 2>/dev/null | head -n1)
+  [ "${row%%|*}" = "$1" ] && [[ ${row#*|} =~ ^(OUT_OF_MEMORY|NODE_FAIL|PREEMPTED) ]]
+}
+# ledger_check <run_dir>: sets bad (the problems, `; ` separated) and summary over the committed ledger.
+ledger_check() {
+  local rd=${1%/} rid id ts field value why evidence n=0 header=0 cap
+  bad="" summary=""; rid=$(basename "$rd")
+  while IFS=$'\t' read -r id ts field value why evidence; do
+    if [ $header = 0 ]; then
+      header=1; [ "$id	$ts	$field	$value	$why	$evidence" = "id	ts	field	value	why	evidence" ] || bad="$bad; header must be id, ts, field, value, why, evidence"
+      continue
+    fi
+    [ -n "$id" ] || continue
+    n=$((n+1)); summary="$summary, $field $id"
+    [ "$id" = "x$n" ] || bad="$bad; $id: ids run x1, x2, ... in order; this is row $n"
+    [[ $ENVELOPE_FIELDS == *" $field "* ]] || { bad="$bad; $id: $field is design; a change to it needs a new card"; continue; }
+    case $field in
+      host) [[ " $(launch_hosts) " == *" $value "* ]] || bad="$bad; $id: host $value is not in launch_hosts ($(launch_hosts))" ;;
+      mem_stop_gb) cap=$(card_or_default host_max_mem_gb 64)
+        [[ $value =~ ^[0-9]+(\.[0-9]+)?$ ]] && [ "$(gb_kb "$value")" -le "$(gb_kb "$cap")" ] || bad="$bad; $id: mem_stop_gb $value is over host_max_mem_gb=$cap" ;;
+      resume) resume_owner "$rid" "$value" >/dev/null || bad="$bad; $id: resume $value is under no launch cwd of this run" ;;
+      restart) restart_ok "$rid" "$value" || bad="$bad; $id: restart $value is not a resource stop of this run" ;;
+    esac
+  done < <(ledger_rows "$rd")
+  summary="$n rows: ${summary#, }"
+  load_qcard "$rd"
+  cap=$(run_budget budget_gpu_hours default_run_gpu_hours)
+  if [ "$cap" != 0 ]; then gpu_seconds "$rid"; [ "$spent" -le $(( cap * 3600 )) ] || bad="$bad; spent $(gpu_h "$spent") GPU-h over budget_gpu_hours=$cap"; fi
+  cap=$(run_budget budget_core_hours default_run_core_hours)
+  if [ "$cap" != 0 ] && [ -n "$(type -P sacct)" ]; then
+    n=$(sacct -A "$(card_or_default account "")" -u "$USER" -S "$(card_or_default start_date "")" -X -n -P -o JobName,CPUTimeRAW 2>/dev/null \
+      | awk -F'|' -v r="$rid" '$1==r {s+=$2} END{printf "%d", s/3600}')
+    [ "${n:-0}" -le "$cap" ] || bad="$bad; spent $n core-h over budget_core_hours=$cap"
+  fi
+}
+# cmd_handled <run_dir>: "<job id> execution.tsv:<row id>" for every valid restart or resume row, so ripples treats
+# the job as handled, exactly like an incident naming it.
+cmd_handled() {
+  local rd=${1%/} rid id ts field value rest owner; rid=$(basename "$rd")
+  while IFS=$'\t' read -r id ts field value rest; do
+    case $field in
+      restart) restart_ok "$rid" "$value" && echo "$value execution.tsv:$id" ;;
+      resume) owner=$(resume_owner "$rid" "$value") && echo "$owner execution.tsv:$id" ;;
+    esac
+  done < <(ledger_rows "$rd" | tail -n +2)
+  return 0
+}
 
 cmd_checks() {
-  local rd=${1%/} rid; rid=$(basename "$rd")
+  local rd=${1%/} rid bad summary; rid=$(basename "$rd")
+  if ledger_rows "$rd" >/dev/null; then
+    ledger_check "$rd"
+    if [ -n "$bad" ]; then say RIPPLE execution-within-envelope "${bad#; }"; else say PASS execution-within-envelope "$summary"; fi
+  fi
   [ "$(launch_hosts)" != none ] || return 0
   local spent running nrun cap live=0 ent="" d id st el kb lim log m avail floor remote=0 hosts="" i sup
   if [ -d "$sd" ] && ! timeout 10 ls "$sd" >/dev/null 2>&1; then say UNCHECKED gpu-hours "cannot read $sd"
@@ -579,10 +659,11 @@ gate_static() {
     git ls-files --error-unmatch "$q" >/dev/null 2>&1 || fail "$q is not committed"
     git diff --quiet HEAD -- "$q" || fail "$q has uncommitted edits"
     [ "$(git log --format=%H -- "$q" | wc -l)" -le 1 ] || fail "$q was edited after its first commit; start a new run id instead"
-    qcard=$(git show "HEAD:$q")
+    load_qcard "$run_dir"
   fi
   stop=$(need stop_date) || exit $?
   [[ ! $(date +%F) > $stop ]] || fail "past stop_date $stop"
+  stop=$(qval deadline); [ -z "$stop" ] || [[ ! $(date +%F) > $stop ]] || fail "past deadline $stop in $run_dir/question.card"
   max_wall=$(( $(card_or_default host_max_walltime_minutes 720) * 60 ))
   if [ $explore = 1 ]; then
     [ "$time_s" -le $(( $(card_or_default explore_max_walltime_minutes 60) * 60 )) ] || fail "--time=$(( time_s / 60 )) min exceeds explore_max_walltime_minutes=$(card_or_default explore_max_walltime_minutes 60)"
@@ -611,15 +692,13 @@ gate_ripples() {
 #   GPUs:      each index exists, holds no compute app, and is not in a live local launch's --gpus
 #   GPU-hours: project spent + remaining time of running launches + this job fits max_gpu_hours
 gate_host() {
-  local d st el avail floor reserved=0 nlive=0 lim beat i uuid line busy="" held cap n
-  left=0; avail=$(mem_available_kb); floor=$(gb_kb "$(card_or_default host_min_available_gb 32)")
+  local d st avail floor reserved=0 nlive=0 lim beat i uuid line busy="" held cap n
+  avail=$(mem_available_kb); floor=$(gb_kb "$(card_or_default host_min_available_gb 32)")
   for d in $(records); do
     [ -f "$d/end" ] && continue; rk "$d" request host; [ "$r" = "$host" ] || continue
     state_of "$d"; [ "$st" = RUNNING ] || [ "$st" = PENDING ] || continue
     nlive=$((nlive+1)); rk "$d" request mem_limit_gb; lim=$(gb_kb "$r"); rk "$d" beat mem_gb; beat=$(gb_kb "${r:-0}")
     [ "$beat" -ge "$lim" ] || reserved=$(( reserved + lim - beat ))
-    elapsed_of "$d" "$st"; rk "$d" request gpus; n=$(gpu_n "$r"); rk "$d" request time_limit_seconds
-    [ "$el" -ge "$r" ] || left=$(( left + n * (r - el) ))
   done
   [ $(( avail - reserved )) -ge $(( mem_kb + floor )) ] \
     || fail "MemAvailable $(kb_gb "$avail")G minus $(kb_gb "$reserved")G reserved by $nlive live launch(es) leaves less than --mem=${mem_gb}G plus host_min_available_gb=$(card_or_default host_min_available_gb 32)"
@@ -635,9 +714,29 @@ gate_host() {
       held=$(held_by "$i"); [ -z "$held" ] || fail "GPU $i is held by $held"
     done
   fi
-  cap=$(card_or_default max_gpu_hours 0); gpu_seconds ""; n=$(gpu_n "$gpus")
-  [ $(( spent + left + n * time_s )) -le $(( cap * 3600 )) ] \
-    || fail "spent $(gpu_h "$spent") + running $(gpu_h "$left") + this job $(gpu_h $(( n * time_s ))) GPU-h exceeds $cap GPU-h (max_gpu_hours)"
+  n=$(gpu_n "$gpus"); cap=$(run_budget budget_gpu_hours default_run_gpu_hours)
+  if [ "$cap" != 0 ]; then
+    gpu_seconds "$run_id"
+    [ $(( spent + remaining + n * time_s )) -le $(( cap * 3600 )) ] \
+      || fail "this run spent $(gpu_h "$spent") + running $(gpu_h "$remaining") + this job $(gpu_h $(( n * time_s ))) GPU-h exceeds budget_gpu_hours=$cap"
+  fi
+  cap=$(card_or_default max_gpu_hours 0); gpu_seconds ""
+  [ $(( spent + remaining + n * time_s )) -le $(( cap * 3600 )) ] \
+    || fail "spent $(gpu_h "$spent") + running $(gpu_h "$remaining") + this job $(gpu_h $(( n * time_s ))) GPU-h exceeds $cap GPU-h (max_gpu_hours)"
+}
+# gate_restart: a carded run whose latest launch ended in a resource stop continues only through a committed
+# restart or resume row citing that job; after a science stop the human decides; after COMPLETED nothing is needed.
+gate_restart() {
+  local d last="" st
+  [ $explore = 0 ] || return 0
+  for d in $(run_records "$run_id"); do last=$d; break; done
+  [ -n "$last" ] || return 0
+  state_of "$last"; rk "$last" request job_id
+  if [[ $st =~ $RESOURCE_STOPS ]]; then
+    grep -q "^$r " <<<"$(cmd_handled "$run_dir")" || fail "$r ended $st; commit an execution.tsv row (restart or resume) citing it, then launch again"
+  elif [[ $st =~ ^(FAILED|TIMEOUT|LAUNCH_FAILED|CANCELLED)$ ]]; then
+    fail "$r ended $st, a science stop; the human decides whether this run continues"
+  fi
 }
 held_by() {  # held_by <gpu index>: the live launch whose --gpus names the index, if any
   local d g
@@ -698,6 +797,7 @@ cmd_launch() {
   exec 9>"${TMPDIR:-/tmp}/guard-launch-$USER.lock"
   flock -w 30 9 || fail "another launch has held the host lock for 30 s"
   index_records; index_procs
+  gate_restart
   gate_host
   id=$(new_job_id) || exit $?; rdir=$sd/$id
   put_once "$rdir/request" "$(request_text)" || fail "could not write $rdir/request"
@@ -708,7 +808,7 @@ cmd_launch() {
   spawn_supervisor "$rdir" -- "${cmd[@]}"
   for ((i = 0; i < START_WAIT * 10; i++)); do [ -f "$rdir/start" ] && break; sleep 0.1; done
   [ -f "$rdir/start" ] || fail "the supervisor did not start the job within ${START_WAIT}s; see $rdir/supervisor.log"
-  echo "LAUNCH OK: $run_id job=$id gpus=$gpus time=$(( time_s / 60 ))m mem=${mem_gb}G gpu_h_spent=$(gpu_h "$spent") available=$(gpu_h $(( $(card_or_default max_gpu_hours 0) * 3600 - spent - left ))) log=$cwd/launch-$id.log" >&2
+  echo "LAUNCH OK: $run_id job=$id gpus=$gpus time=$(( time_s / 60 ))m mem=${mem_gb}G gpu_h_spent=$(gpu_h "$spent") available=$(gpu_h $(( $(card_or_default max_gpu_hours 0) * 3600 - spent - remaining ))) log=$cwd/launch-$id.log" >&2
   echo "$id"
 }
 
@@ -760,13 +860,14 @@ grace_wait=$(( $(card_or_default host_stop_grace_seconds 60) * 3 / 2 + 20 ))
 case ${1:-} in
   --here)      on_launch_host; exit ;;
   --sacct)     on_launch_host || exit 0 ;;
-  --list|--checks|--stop) ;;
+  --list|--checks|--stop|--handled) ;;
   ""|-*)       usage ;;
 esac
 case $1 in
   --list)      index_records; index_procs; cmd_list "${2:-}" ;;
   --sacct)     index_records; index_procs; cmd_sacct ;;
   --checks)    [ $# -eq 2 ] || usage; index_records; index_procs; cmd_checks "$2" ;;
+  --handled)   [ $# -eq 2 ] || usage; index_records; index_procs; cmd_handled "$2" ;;
   --stop)      reason_arg=${3:---reason=}; [ $# -ge 2 ] && [ $# -le 3 ] && [[ $reason_arg == --reason=* ]] || usage
                index_records; index_procs; cmd_stop "$2" "${reason_arg#--reason=}" ;;
   *)           cmd_launch "$@" ;;
