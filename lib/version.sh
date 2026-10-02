@@ -1,3 +1,4 @@
+# shellcheck shell=bash disable=SC2034,SC2154  # sourced: the caller sets $here and reads the p_* results
 # Sourced by bin/guard and lib/init.sh, after they set $here to the harness root.
 # A guard/VERSION without a schema line was written by schema 1.
 h_schema=$(cat "$here/SCHEMA")
