@@ -265,6 +265,29 @@ expect fence-legacy-report-modified ok 'PASS.hypothesis-line' -- guard/run fence
 echo "== init --update"
 git -C "$tmp/proj" fetch -q origin
 expect update-noop ok 'already current' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt3"
+expect init-refuses-guarded fail 'already guarded' -- "$guard" init "$tmp/proj" --worktree "$tmp/wt6"
+expect version-current ok '^current$' -- "$guard" version
+good=$(git rev-parse origin/main)
+set_version() {  # set_version <sed expression>: commit an edited guard/VERSION straight to main
+  git switch -q --detach origin/main; sed -i "$1" guard/VERSION; git commit -q -am "version: $1"
+  git push -q origin HEAD:main; git -C "$tmp/proj" fetch -q origin
+}
+set_version 's/^installer: .*/installer: 0000000000000000000000000000000000000000/'
+expect version-harness-older ok '^harness older' -- "$guard" version
+expect update-refuses-unknown-installer fail 'does not contain the one that installed' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt6"
+expect update-force ok 'guard/VERSION' -- "$guard" init "$tmp/proj" --update --force --worktree "$tmp/wt6"
+expect update-force-records ok "^installer: $(git -C "$here" rev-parse HEAD)$" -- grep '^installer:' "$tmp/wt6/guard/VERSION"
+git -C "$tmp/proj" worktree remove --force "$tmp/wt6"; git -C "$tmp/proj" branch -q -D guard/update
+git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
+set_version 's/^schema: .*/schema: 99/'
+expect update-refuses-newer-schema fail 'schema 99' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt6"
+git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
+set_version '/^schema:/d'
+expect version-project-older ok '^project older' -- "$guard" version
+expect update-schema-1 ok 'guard/VERSION' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt6"
+expect update-writes-schema ok "^schema: $(cat "$here/SCHEMA")$" -- grep '^schema:' "$tmp/wt6/guard/VERSION"
+git -C "$tmp/proj" worktree remove --force "$tmp/wt6"; git -C "$tmp/proj" branch -q -D guard/update
+git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
 git switch -q -c old origin/main; echo "# older fence" >> guard/bin/fence.sh; git commit -q -am old; git push -q origin old:main
 git -C "$tmp/proj" fetch -q origin
 expect update-refreshes ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt3"
