@@ -416,6 +416,102 @@ tick_job t-wall 1.0 "$(ago '2 hours')" 3600
 expect tick-walltime ok 'reason=walltime$' -- guard/run launch --tick "$tmp/state/t-wall"
 expect tick-walltime-end ok '^exit: unknown$' -- cat "$tmp/state/t-wall/end"
 kill -KILL "$(grep ^job_pid: "$tmp/state/t-small/start" | cut -d' ' -f2)" 2>/dev/null
+
+rm -rf "$tmp/state"
+R2=runs/2026-10-02-launch; mkdir -p "$R2"; cp runs/_template/question.card "$R2/"; git add -A; git commit -q -m "run: launch card"
+L() { env HPC_SPEND_RESERVE=1 guard/run launch "$@"; }
+expect launch-off-by-default fail '^LAUNCH FAIL: skynet is not in launch_hosts \(none\)' -- env HPC_GUARD_REF=origin/main HPC_SPEND_RESERVE=1 guard/run launch "$R2" --time=1 --gpus=none --mem=0.01 -- true
+expect launch-other-host fail 'login1 is not in launch_hosts' -- env MOCK_HOSTNAME=login1 HPC_SPEND_RESERVE=1 guard/run launch "$R2" --time=1 --gpus=none --mem=0.01 -- true
+expect launch-usage-no-command fail 'usage: guard/run launch' -- L "$R2" --time=1 --gpus=none --mem=0.01
+expect launch-needs-time fail 'state --time' -- L "$R2" --gpus=none --mem=0.01 -- true
+expect launch-needs-gpus fail 'state --gpus' -- L "$R2" --time=1 --mem=0.01 -- true
+expect launch-needs-mem fail 'state --mem' -- L "$R2" --time=1 --gpus=none -- true
+expect launch-bad-time fail 'is not a Slurm time' -- L "$R2" --time=abc --gpus=none --mem=0.01 -- true
+expect launch-shm-relative fail 'absolute' -- L "$R2" --time=1 --gpus=none --mem=0.01 --shm=shm -- true
+expect launch-cwd-missing fail 'not a writable directory' -- L "$R2" --time=1 --gpus=none --mem=0.01 --cwd="$tmp/nope" -- true
+expect launch-no-card fail 'runs/2026-10-02-nocard/question.card is not committed' -- L runs/2026-10-02-nocard --time=1 --gpus=none --mem=0.01 -- true
+echo "metric: changed" >> "$R2/question.card"; git commit -q -am "edit card"
+expect launch-card-frozen fail 'edited after its first commit' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
+git reset -q --hard HEAD~1
+sed -i 's/^max_gpu_hours: .*/max_gpu_hours: 999/' guard/budget.card; git commit -q -am "raise"
+expect launch-guard-touched fail 'guard/ differs' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
+same_refusal() {  # same_refusal <name> <preflight args...> -- <launch args...>: the text after the two prefixes is identical
+  local name=$1 p l; shift; local pre=(); while [ "$1" != -- ]; do pre+=("$1"); shift; done; shift
+  p=$(guard/run preflight "${pre[@]}" 2>&1); l=$(L "$@" 2>&1)
+  expect "$name" ok - -- test "${p#PREFLIGHT FAIL: }" = "${l#LAUNCH FAIL: }"
+}
+same_refusal launch-gates-match-guard "$R2" job.sh -- "$R2" --time=1 --gpus=none --mem=0.01 -- true
+git reset -q --hard HEAD~1
+same_refusal launch-gates-match-no-card runs/2026-10-02-nocard job.sh -- runs/2026-10-02-nocard --time=1 --gpus=none --mem=0.01 -- true
+echo "metric: changed" >> "$R2/question.card"; git commit -q -am "edit card"
+same_refusal launch-gates-match-frozen "$R2" job.sh -- "$R2" --time=1 --gpus=none --mem=0.01 -- true
+git reset -q --hard HEAD~1
+git switch -q -c launch-past; sed -i 's/^stop_date: .*/stop_date: 2000-01-01/' guard/budget.card; git commit -q -am "past"
+export HPC_GUARD_REF=HEAD
+expect launch-past-stop fail 'past stop_date 2000-01-01' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
+same_refusal launch-gates-match-stop-date "$R2" job.sh -- "$R2" --time=1 --gpus=none --mem=0.01 -- true
+git switch -q -c launch-floor launch/agent; sed -i 's/^host_min_available_gb: .*/host_min_available_gb: 999999/' guard/budget.card; git commit -q -am "floor"
+expect launch-host-memory fail 'MemAvailable .* leaves less than --mem=0.01G plus host_min_available_gb=999999' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
+export HPC_GUARD_REF=origin/launch-base; git switch -q launch/agent
+expect launch-walltime-cap fail 'exceeds host_max_walltime_minutes=720' -- L "$R2" --time=13:00:00 --gpus=none --mem=0.01 -- true
+expect launch-explore-gpus fail 'exceeds explore_max_gpus=1' -- L runs/explore-l --time=1 --gpus=0,1 --mem=0.01 -- true
+expect launch-explore-time fail 'exceeds explore_max_walltime_minutes=60' -- L runs/explore-l --time=02:00:00 --gpus=none --mem=0.01 -- true
+expect launch-mem-cap fail 'exceeds host_max_mem_gb=1000' -- L "$R2" --time=1 --gpus=none --mem=1001 -- true
+expect launch-gpu-unknown fail 'no GPU 7 on skynet' -- L "$R2" --time=1 --gpus=7 --mem=0.01 -- true
+printf 'GPU-aaaa, 999\n' > "$tmp/apps"
+expect launch-gpu-busy fail 'GPU 0 is busy \(pid 999\)' -- env MOCK_NVSMI_APPS=$tmp/apps HPC_SPEND_RESERVE=1 guard/run launch "$R2" --time=1 --gpus=0 --mem=0.01 -- true
+expect launch-gpu-budget fail 'this job 12.0 GPU-h exceeds 10 GPU-h' -- L "$R2" --time=06:00:00 --gpus=0,1 --mem=0.01 -- true
+expect launch-no-nvidia-smi fail 'nvidia-smi not found' -- env PATH="$(path_without nvidia-smi)" HPC_SPEND_RESERVE=1 guard/run launch "$R2" --time=1 --gpus=0 --mem=0.01 -- true
+expect launch-cpu-without-nvidia-smi ok '^skynet-' -- env PATH="$(path_without nvidia-smi)" HPC_SPEND_RESERVE=1 guard/run launch runs/explore-cpu --time=1 --gpus=none --mem=0.01 -- true
+held=$(L runs/explore-held --time=1 --gpus=1 --mem=0.01 -- sleep 30 2>/dev/null)
+expect launch-gpu-held fail "GPU 1 is held by $held" -- L "$R2" --time=1 --gpus=1 --mem=0.01 -- true
+L runs/explore-race --time=1 --gpus=3 --mem=0.01 -- sleep 1 >"$tmp/race1" 2>&1 &
+L runs/explore-race --time=1 --gpus=3 --mem=0.01 -- sleep 1 >"$tmp/race2" 2>&1 &
+wait
+expect launch-gpu-race ok '^1$' -- bash -c 'grep -c "^LAUNCH OK" "$1" "$2" | awk -F: "{s+=\$2} END{print s}"' _ "$tmp/race1" "$tmp/race2"
+expect launch-gpu-race-loser ok 'GPU 3 is held by skynet-' -- cat "$tmp/race1" "$tmp/race2"
+id=$(L "$R2" --time=1 --gpus=2 --mem=0.01 -- env 2>"$tmp/launch.err")
+expect launch-prints-id ok '^skynet-[0-9]{8}T[0-9]{6}Z$' -- echo "$id"
+expect launch-ok-line ok '^LAUNCH OK: 2026-10-02-launch job=skynet-.* gpus=2 time=1m mem=0.01G gpu_h_spent=0.0 available=[0-9.]+ log=' -- cat "$tmp/launch.err"
+expect launch-manifest ok "^job_id: $id$" -- cat "$R2/manifest-$id.txt"
+expect launch-manifest-cuda ok '^cuda_visible_devices: unset$' -- cat "$R2/manifest-$id.txt"
+expect launch-request-cwd-commit ok "^cwd_commit: $(git rev-parse HEAD)$" -- cat "$tmp/state/$id/request"
+expect launch-request-card ok "^card: $(git rev-parse "HEAD:$R2/question.card")$" -- cat "$tmp/state/$id/request"
+idem=$(L runs/explore-idem --time=1 --gpus=none --mem=0.01 -- bash -c 'guard/run manifest "$HPC_RUN_DIR" x' 2>/dev/null)
+cwdid=$(L runs/explore-cwd --time=1 --gpus=none --mem=0.01 --cwd="$tmp/scratch" -- pwd 2>/dev/null)
+caller=$(setsid bash -c 'env HPC_SPEND_RESERVE=1 guard/run launch runs/explore-caller --time=1 --gpus=none --mem=0.01 -- bash -c "sleep 1; echo alive" 2>/dev/null; kill -HUP 0')
+local=$(env HPC_GUARD_LOCAL=1 HPC_SPEND_RESERVE=1 guard/run launch runs/explore-local --time=1 --gpus=none --mem=0.01 -- true 2>/dev/null)
+expect launch-local-copy ok '^skynet-' -- echo "$local"
+failed=$(L runs/explore-ripple --time=1 --gpus=none --mem=0.01 -- false 2>/dev/null)
+wait_end "$id" "$idem" "$cwdid" "$caller" "$local" "$failed"
+expect launch-env ok "^HPC_JOB_ID=$id$" -- cat "launch-$id.log"
+expect launch-env-cuda ok '^CUDA_VISIBLE_DEVICES=2$' -- cat "launch-$id.log"
+expect launch-env-run-dir ok "^HPC_RUN_DIR=$PWD/$R2$" -- cat "launch-$id.log"
+expect launch-manifest-idempotent ok 'manifest exists' -- cat "launch-$idem.log"
+expect launch-cwd-log ok "^$tmp/scratch$" -- cat "$tmp/scratch/launch-$cwdid.log"
+expect launch-survives-caller ok '^alive$' -- cat "launch-$caller.log"
+expect launch-completed ok "^$local	COMPLETED	" -- guard/run launch --list runs/explore-local
+expect launch-ripples-gate fail "ripples reports job-states: $failed:FAILED" -- guard/run launch runs/explore-ripple --time=1 --gpus=none --mem=0.01 -- true
+expect launch-ripples-reserve ok '^skynet-' -- L runs/explore-ripple --time=1 --gpus=none --mem=0.01 -- true
+expect launch-stop ok '^CANCELLED$' -- guard/run launch --stop "$held" --reason=done
+expect launch-stop-end ok '^stop: requested$' -- cat "$tmp/state/$held/end"
+expect launch-stop-reason ok '^reason: done$' -- cat "$tmp/state/$held/end"
+expect launch-stop-writer ok '^writer: supervisor$' -- cat "$tmp/state/$held/end"
+expect launch-stop-again ok '^already ended: CANCELLED$' -- guard/run launch --stop "$held"
+req foreign-1 other none 60 "$(date -u +%FT%TZ)"; sed -i 's/^project: .*/project: 0000000000000000000000000000000000000000/' "$tmp/state/foreign-1/request"
+expect launch-stop-foreign fail 'belongs to another project' -- guard/run launch --stop foreign-1
+expect launch-stop-unknown fail 'no launch nope-1' -- guard/run launch --stop nope-1
+crash=$(L runs/explore-crash --time=1 --gpus=none --mem=0.01 -- sleep 30 2>/dev/null)
+kill -9 "$(grep ^supervisor_pid: "$tmp/state/$crash/start" | cut -d' ' -f2)"
+expect crash-supervisor-killed fail "RIPPLE	host-supervision	$crash:pid[0-9]+-has-no-supervisor" -- guard/run ripples runs/explore-crash
+expect crash-supervisor-killed-list ok "^$crash	RUNNING	" -- guard/run launch --list runs/explore-crash
+expect crash-stop-unsupervised ok '^CANCELLED$' -- guard/run launch --stop "$crash"
+expect crash-stop-unsupervised-end ok '^exit: unknown$' -- cat "$tmp/state/$crash/end"
+expect crash-stop-unsupervised-writer ok '^writer: stop$' -- cat "$tmp/state/$crash/end"
+expect crash-stop-supervision-pass ok 'PASS	host-supervision	0 live, supervised' -- bash -c 'guard/run ripples runs/explore-crash | grep host-supervision'
+wait_end "$(cat "$tmp/race1" "$tmp/race2" | grep -o 'job=skynet-[0-9TZ]*' | cut -d= -f2)"
+expect launch-no-job-left fail - -- grep -lzE '^HPC_JOB_ID=skynet-' /proc/[0-9]*/environ
+rm -f launch-*.log; rm -rf runs/explore-*; git checkout -q -- .
 rm -rf "$tmp/state"; unset HPC_GUARD_REF
 
 echo "== fence"

@@ -538,6 +538,214 @@ cmd_tick() {
   stop_job; finish unknown tick
 }
 
+# ---------------------------------------------------------------- launch
+
+# parse_launch_args <run_dir> [options] -- <command...>: sets run_dir, run_id, time_s, gpus, mem_gb, mem_kb, shm, cwd, cmd.
+# Boundary validation lives here and only here.
+parse_launch_args() {
+  run_dir=${1%/}; shift; run_id=$(basename "$run_dir")
+  time_s="" gpus="" mem_gb="" shm="" cwd=$PWD; cmd=()
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --time=*) time_s=$(to_sec "${1#*=}"); [ -n "$time_s" ] || fail "--time=${1#*=} is not a Slurm time (M, M:S, H:M:S, D-H, D-H:M, D-H:M:S)" ;;
+      --gpus=*) gpus=${1#*=} ;;
+      --mem=*) mem_gb=${1#*=} ;;
+      --shm=*) [[ ${1#*=} == /* ]] || fail "--shm must be an absolute path: ${1#*=}"; shm=${shm:+$shm,}${1#*=} ;;
+      --cwd=*) cwd=${1#*=}; [[ $cwd == /* ]] || cwd=${HPC_CALLER_DIR:-$PWD}/$cwd ;;
+      --) shift; cmd=("$@"); break ;;
+      *) usage ;;
+    esac; shift
+  done
+  [ ${#cmd[@]} -gt 0 ] || usage
+  [ -n "$time_s" ] || fail "state --time=... explicitly"
+  [ -n "$gpus" ] || fail "state --gpus=<i,j> or --gpus=none explicitly"
+  [ -n "$mem_gb" ] || fail "state --mem=<GB> explicitly"
+  [[ $gpus == none || $gpus =~ ^[0-9]+(,[0-9]+)*$ ]] || fail "--gpus takes comma-separated indices or none: $gpus"
+  [[ $mem_gb =~ ^[0-9]+(\.[0-9]+)?$ ]] || fail "--mem takes GB as a number: $mem_gb"
+  [ -d "$cwd" ] && [ -w "$cwd" ] || fail "--cwd=$cwd is not a writable directory"
+  cwd=$(cd "$cwd" && pwd -P); mem_kb=$(gb_kb "$mem_gb")
+}
+
+# gate_static: the cheap refusals, in preflight's order and words where preflight has the same gate.
+gate_static() {
+  local changed q stop max_wall
+  on_launch_host || fail "$host is not in launch_hosts ($(launch_hosts)) on $base; compute here needs a human to opt in"
+  changed=$( { git diff --name-only "$base"...HEAD -- guard; git status --porcelain --untracked-files=all -- guard; } | sort -u)
+  [ -z "$changed" ] || fail "guard/ differs from $base: $(echo $changed)"
+  explore=0; [[ $run_id == explore-* ]] && explore=1
+  qcard=""
+  if [ $explore = 0 ]; then
+    q="$run_dir/question.card"
+    git ls-files --error-unmatch "$q" >/dev/null 2>&1 || fail "$q is not committed"
+    git diff --quiet HEAD -- "$q" || fail "$q has uncommitted edits"
+    [ "$(git log --format=%H -- "$q" | wc -l)" -le 1 ] || fail "$q was edited after its first commit; start a new run id instead"
+    qcard=$(git show "HEAD:$q")
+  fi
+  stop=$(need stop_date) || exit $?
+  [[ ! $(date +%F) > $stop ]] || fail "past stop_date $stop"
+  max_wall=$(( $(card_or_default host_max_walltime_minutes 720) * 60 ))
+  if [ $explore = 1 ]; then
+    [ "$time_s" -le $(( $(card_or_default explore_max_walltime_minutes 60) * 60 )) ] || fail "--time=$(( time_s / 60 )) min exceeds explore_max_walltime_minutes=$(card_or_default explore_max_walltime_minutes 60)"
+    [ "$(gpu_n "$gpus")" -le "$(card_or_default explore_max_gpus 1)" ] || fail "--gpus=$gpus exceeds explore_max_gpus=$(card_or_default explore_max_gpus 1)"
+  fi
+  [ "$time_s" -le "$max_wall" ] || fail "--time=$(( time_s / 60 )) min exceeds host_max_walltime_minutes=$(card_or_default host_max_walltime_minutes 720)"
+  [ "$mem_kb" -le "$(gb_kb "$(card_or_default host_max_mem_gb 64)")" ] || fail "--mem=$mem_gb exceeds host_max_mem_gb=$(card_or_default host_max_mem_gb 64)"
+}
+
+# gate_ripples: launch refuses when ripples for the run exits 1, as preflight does. Ripples calls this file only
+# through --here, --sacct, --handled and --checks, so there is no recursion. HPC_SPEND_RESERVE=1 skips the gate.
+gate_ripples() {
+  local script out rc
+  [ "${HPC_SPEND_RESERVE:-0}" != 1 ] || return 0
+  script=$(git show "$base:guard/bin/ripples.sh" 2>/dev/null) || fail "ripples could not run: no guard/bin/ripples.sh on $base"
+  out=$(bash -c "$script" guard/bin/ripples.sh "$run_dir" 2>&1); rc=$?
+  case $rc in
+    0) ;;
+    1) fail "ripples reports $(awk -F'\t' '$1=="RIPPLE" { printf "%s%s: %s", (n++ ? "; " : ""), $2, $3 }' <<<"$out"); fix the cause, record it, or set HPC_SPEND_RESERVE=1 for a diagnostic run" ;;
+    *) fail "ripples could not run (exit $rc): $(tail -n1 <<<"$out")" ;;
+  esac
+}
+
+# gate_host: memory, GPUs and GPU-hours, under the host lock so two launches cannot claim the same resource.
+#   memory:    MemAvailable minus the unused headroom of live local launches covers --mem plus the floor
+#   GPUs:      each index exists, holds no compute app, and is not in a live local launch's --gpus
+#   GPU-hours: project spent + remaining time of running launches + this job fits max_gpu_hours
+gate_host() {
+  local d st el avail floor reserved=0 nlive=0 lim beat i uuid line busy="" held cap n
+  left=0; avail=$(mem_available_kb); floor=$(gb_kb "$(card_or_default host_min_available_gb 32)")
+  for d in $(records); do
+    [ -f "$d/end" ] && continue; rk "$d" request host; [ "$r" = "$host" ] || continue
+    state_of "$d"; [ "$st" = RUNNING ] || [ "$st" = PENDING ] || continue
+    nlive=$((nlive+1)); rk "$d" request mem_limit_gb; lim=$(gb_kb "$r"); rk "$d" beat mem_gb; beat=$(gb_kb "${r:-0}")
+    [ "$beat" -ge "$lim" ] || reserved=$(( reserved + lim - beat ))
+    elapsed_of "$d" "$st"; rk "$d" request gpus; n=$(gpu_n "$r"); rk "$d" request time_limit_seconds
+    [ "$el" -ge "$r" ] || left=$(( left + n * (r - el) ))
+  done
+  [ $(( avail - reserved )) -ge $(( mem_kb + floor )) ] \
+    || fail "MemAvailable $(kb_gb "$avail")G minus $(kb_gb "$reserved")G reserved by $nlive live launch(es) leaves less than --mem=${mem_gb}G plus host_min_available_gb=$(card_or_default host_min_available_gb 32)"
+  if [ "$gpus" != none ]; then
+    command -v nvidia-smi >/dev/null || fail "nvidia-smi not found on PATH; --gpus=none runs a CPU job"
+    declare -A uuid_of=()
+    while IFS=, read -r i uuid; do uuid_of[${i// /}]=${uuid// /}; done < <(timeout 20 nvidia-smi --query-gpu=index,uuid --format=csv,noheader 2>/dev/null)
+    [ ${#uuid_of[@]} -gt 0 ] || fail "nvidia-smi listed no GPU on $host"
+    busy=$(timeout 20 nvidia-smi --query-compute-apps=gpu_uuid,pid --format=csv,noheader 2>/dev/null)
+    for i in ${gpus//,/ }; do
+      [ -n "${uuid_of[$i]+x}" ] || fail "no GPU $i on $host (nvidia-smi lists ${#uuid_of[@]})"
+      line=$(grep -m1 "^${uuid_of[$i]}," <<<"$busy") && fail "GPU $i is busy (pid ${line#*, })"
+      held=$(held_by "$i"); [ -z "$held" ] || fail "GPU $i is held by $held"
+    done
+  fi
+  cap=$(card_or_default max_gpu_hours 0); gpu_seconds ""; n=$(gpu_n "$gpus")
+  [ $(( spent + left + n * time_s )) -le $(( cap * 3600 )) ] \
+    || fail "spent $(gpu_h "$spent") + running $(gpu_h "$left") + this job $(gpu_h $(( n * time_s ))) GPU-h exceeds $cap GPU-h (max_gpu_hours)"
+}
+held_by() {  # held_by <gpu index>: the live launch whose --gpus names the index, if any
+  local d g
+  for d in $(records); do
+    [ -f "$d/end" ] && continue; rk "$d" request host; [ "$r" = "$host" ] || continue
+    state_of "$d"; [ "$st" = RUNNING ] || [ "$st" = PENDING ] || continue
+    rk "$d" request gpus; for g in ${r//,/ }; do [ "$g" = "$1" ] && { rk "$d" request job_id; echo "$r"; return; }; done
+  done
+}
+
+# new_job_id: <host>-<UTC stamp>, claimed by mkdir under the host lock; on a collision wait a second and retry.
+new_job_id() {
+  local id
+  mkdir -p "$sd" || fail "cannot create host_state_dir $sd"
+  while :; do id=$host-$(date -u +%Y%m%dT%H%M%SZ); mkdir "$sd/$id" 2>/dev/null && { echo "$id"; return; }; sleep 1; done
+}
+request_text() {
+  local cc=none cd=none
+  if git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    cc=$(git -C "$cwd" rev-parse HEAD 2>/dev/null || echo none); cd=$(git -C "$cwd" status --porcelain 2>/dev/null | wc -l)
+  fi
+  cat <<REQ
+job_id: $id
+run_id: $run_id
+run_dir: $PWD/$run_dir
+project: $project
+origin: $(git remote get-url origin 2>/dev/null || echo none)
+host: $host
+guard_commit: $(git rev-parse "$base")
+card: $([ -n "$qcard" ] && git rev-parse "HEAD:$run_dir/question.card" || echo none)
+cwd: $cwd
+cwd_commit: $cc
+cwd_dirty: $cd
+log: $cwd/launch-$id.log
+gpus: $gpus
+time_limit_seconds: $time_s
+mem_limit_gb: $mem_gb
+shm: $shm
+stop_grace_seconds: $(card_or_default host_stop_grace_seconds 60)
+host_min_available_gb: $(card_or_default host_min_available_gb 32)
+command: ${cmd[*]}
+requested: $(now)
+REQ
+}
+# spawn_supervisor <record_dir> -- <command...>: the supervisor runs the same bytes launch ran, detached in its own session.
+spawn_supervisor() {
+  if [ -n "${BASH_EXECUTION_STRING:-}" ]; then setsid -f bash -c "$BASH_EXECUTION_STRING" "$0" --supervise "$@" </dev/null >/dev/null 2>&1
+  else setsid -f bash "$0" --supervise "$@" </dev/null >/dev/null 2>&1; fi
+}
+# cmd_launch: gates, claim, request, manifest, supervisor, handshake. Prints the job id alone on stdout.
+# Crash points: before mkdir nothing exists; after it an empty dir that --list shows as incomplete; after request
+# a record that reads LAUNCH_FAILED once PENDING expires; after the spawn the supervisor carries on without us.
+cmd_launch() {
+  local id rdir i
+  parse_launch_args "$@"
+  gate_static
+  gate_ripples
+  exec 9>"${TMPDIR:-/tmp}/guard-launch-$USER.lock"
+  flock -w 30 9 || fail "another launch has held the host lock for 30 s"
+  index_records; index_procs
+  gate_host
+  id=$(new_job_id) || exit $?; rdir=$sd/$id
+  put_once "$rdir/request" "$(request_text)" || fail "could not write $rdir/request"
+  flock -u 9
+  mkdir -p "$run_dir"
+  HPC_JOB_ID=$id bash -c "$(git show "$base:guard/bin/manifest.sh")" guard/bin/manifest.sh "$run_dir" "${cmd[@]}" >/dev/null 2>&1 \
+    || echo "launch: manifest not written for $run_dir" >&2
+  spawn_supervisor "$rdir" -- "${cmd[@]}"
+  for ((i = 0; i < START_WAIT * 10; i++)); do [ -f "$rdir/start" ] && break; sleep 0.1; done
+  [ -f "$rdir/start" ] || fail "the supervisor did not start the job within ${START_WAIT}s; see $rdir/supervisor.log"
+  echo "LAUNCH OK: $run_id job=$id gpus=$gpus time=$(( time_s / 60 ))m mem=${mem_gb}G gpu_h_spent=$(gpu_h "$spent") available=$(gpu_h $(( $(card_or_default max_gpu_hours 0) * 3600 - spent - left ))) log=$cwd/launch-$id.log" >&2
+  echo "$id"
+}
+
+# ---------------------------------------------------------------- stop
+
+# cmd_stop <job_id> <reason>: stop this project's job gently, wait for its end record, print its state.
+#   ended already                  -> "already ended: <state>", exit 0
+#   another project's record       -> LAUNCH FAIL (the skill: never cancel what the run did not submit)
+#   supervisor alive               -> USR1 to the supervisor; it runs the ladder with stop: requested
+#   supervisor dead, members alive -> the ladder runs here, then end with exit: unknown and writer: stop;
+#                                     put_once loses cleanly if a slow supervisor wrote end first
+cmd_stop() {
+  local d=$sd/$1 sup i
+  [ -f "$d/request" ] || fail "no launch $1 in $sd"
+  rk "$d" request project; [ "$r" = "$project" ] || fail "$1 belongs to another project; never cancel what the run did not submit"
+  state_of "$d"
+  case $st in
+    RUNNING|PENDING) ;;
+    REMOTE) rk "$d" request host; fail "$1 runs on $r; stop it there" ;;
+    *) echo "already ended: $st"; return 0 ;;
+  esac
+  put_once "$d/stop" "requested: $(now)
+reason: $2
+by: $USER pid $$" || true
+  rk "$d" start supervisor_pid; sup=$r; rk "$d" start supervisor_start
+  if pid_is "$sup" "$r"; then kill -USR1 "$sup"
+  else
+    load_request "$d"; sid=$(rkey "$d/start" sid); reason=requested
+    rk "$d" start started; [ -n "$r" ] || rk "$d" request requested; started_epoch=$(iso_epoch "$r"); elapsed=$(( $(epoch) - started_epoch ))
+    rk "$d" beat peak_mem_gb; peak=$(gb_kb "${r:-0}")
+    stop_job; finish unknown stop
+  fi
+  for ((i = 0; i < grace_wait * 5; i++)); do [ -f "$d/end" ] && break; sleep 0.2; done
+  [ -f "$d/end" ] || fail "$1 has not ended after ${grace_wait}s; see $d/supervisor.log"
+  index_records; unset "state_cache[$d]"; state_of "$d"; echo "$st"
+}
+
 # ---------------------------------------------------------------- dispatch
 
 # The supervisor reads only its request, never the card or git, so it is dispatched first.
@@ -548,15 +756,18 @@ esac
 
 load_card
 host=$(this_host); sd=$(state_dir) || exit $?; project=$(project_id); this_boot=$(boot_id); start_date=$(card_or_default start_date "")
+grace_wait=$(( $(card_or_default host_stop_grace_seconds 60) * 3 / 2 + 20 ))
 case ${1:-} in
   --here)      on_launch_host; exit ;;
   --sacct)     on_launch_host || exit 0 ;;
-  --list|--checks) ;;
-  *)           usage ;;
+  --list|--checks|--stop) ;;
+  ""|-*)       usage ;;
 esac
-index_records; index_procs
 case $1 in
-  --list)      cmd_list "${2:-}" ;;
-  --sacct)     cmd_sacct ;;
-  --checks)    [ $# -eq 2 ] || usage; cmd_checks "$2" ;;
+  --list)      index_records; index_procs; cmd_list "${2:-}" ;;
+  --sacct)     index_records; index_procs; cmd_sacct ;;
+  --checks)    [ $# -eq 2 ] || usage; index_records; index_procs; cmd_checks "$2" ;;
+  --stop)      reason_arg=${3:---reason=}; [ $# -ge 2 ] && [ $# -le 3 ] && [[ $reason_arg == --reason=* ]] || usage
+               index_records; index_procs; cmd_stop "$2" "${reason_arg#--reason=}" ;;
+  *)           cmd_launch "$@" ;;
 esac
