@@ -459,7 +459,7 @@ load_request() {
   time_limit=$(rkey "$rec_dir/request" time_limit_seconds); mem_limit_kb=$(gb_kb "$(rkey "$rec_dir/request" mem_limit_gb)")
   shm=$(rkey "$rec_dir/request" shm); grace=$(rkey "$rec_dir/request" stop_grace_seconds)
   floor_kb=$(gb_kb "$(rkey "$rec_dir/request" host_min_available_gb)")
-  want="" reason="" elected_detail="" peak=0 low=0 last_beat=0 elapsed=0 charge=0 avail=0
+  want="" reason="" elected_detail="" stopping="" peak=0 low=0 last_beat=0 elapsed=0 charge=0 avail=0
 }
 job_charge_kb() {
   if [ "${test_mode:-0}" = 1 ] && [ -n "${HPC_LAUNCH_TEST_CHARGE_KB:-}" ]; then echo "$HPC_LAUNCH_TEST_CHARGE_KB"; return; fi
@@ -473,7 +473,8 @@ elapsed_seconds: $elapsed
 mem_gb: $(kb_gb "$charge")
 peak_mem_gb: $(kb_gb "$peak")
 host_available_gb: $(kb_gb "$avail")
-low_polls: $low" || true
+low_polls: $low${stopping:+
+stopping: $stopping}" || true
 }
 # leader_of <wrapper pid>: the session leader, the wrapper's child once it exists; the wrapper itself when the job
 # is already gone.
@@ -494,7 +495,8 @@ fd_check() {
   if [ "$o" = "$want" ] && [ "$e" = "$want" ]; then echo ok; else echo "stdout=$o stderr=$e"; fi
 }
 # elected: under host pressure every supervisor reads the fresh beats of the live local launches and runs the same
-# election: the largest charge stops, ties to the later start. True when this job is the one. A stray that is not
+# election: the largest charge stops, ties to the later start. True when this job is the one. A launch whose fresh
+# beat says it is already stopping settles the election for everyone else: one cause, one stop. A stray that is not
 # a launch cannot be elected; ripples' host-strays names it.
 elected() {
   local d t gb started best="" bestgb=-1 beststart="" n=0 e; e=$(epoch)
@@ -502,6 +504,7 @@ elected() {
     d=${d%/}; [ -f "$d/request" ] && [ -f "$d/beat" ] && [ ! -f "$d/end" ] || continue
     [ "$(rkey "$d/request" host)" = "$host" ] || continue
     t=$(iso_epoch "$(rkey "$d/beat" time)"); [ $(( e - t )) -le $(( 3 * POLL )) ] || continue
+    gb=$(rkey "$d/beat" stopping); [ -z "$gb" ] || { elected_detail="$(basename "$d") is already stopping ($gb)"; return 1; }
     gb=$(rkey "$d/beat" mem_gb); started=$(rkey "$d/start" started); n=$((n+1))
     if awk -v a="$gb" -v b="$bestgb" -v sa="$started" -v sb="$beststart" 'BEGIN { exit !(a > b || (a == b && sa > sb)) }'; then best=$d; bestgb=$gb; beststart=$started; fi
   done
@@ -526,21 +529,22 @@ poll_once() {
 }
 # ladder <kill_below_kb>: INT to every member; wait up to grace for none to remain; TERM; wait grace/2; KILL; wait 5 s.
 # Members are re-read before every signal, so a process born mid-ladder is still signalled. During the INT wait,
-# MemAvailable under <kill_below_kb> skips straight to KILL: the host outranks the checkpoint.
+# MemAvailable under <kill_below_kb> skips straight to KILL: the host outranks the checkpoint. Every wait writes the
+# beat with `stopping:`, so the other supervisors' elections see this stop instead of a stale beat.
 ladder() {
   local i
   log "INT to $(members "$job_id" "$sid" | wc -l) process(es)"; signal_members INT "$job_id" "$sid"
   for ((i = 0; i < grace * 2; i++)); do
     [ -n "$(members "$job_id" "$sid")" ] || return 0
     [ "$(mem_available_kb)" -ge "$1" ] || { log "host under $(kb_gb "$1")G available; KILL now"; break; }
-    sleep 0.5
+    write_beat; sleep 0.5
   done
   if [ "$(mem_available_kb)" -ge "$1" ]; then
     log "TERM"; signal_members TERM "$job_id" "$sid"
-    for ((i = 0; i < grace; i++)); do [ -n "$(members "$job_id" "$sid")" ] || return 0; sleep 0.5; done
+    for ((i = 0; i < grace; i++)); do [ -n "$(members "$job_id" "$sid")" ] || return 0; write_beat; sleep 0.5; done
   fi
   log "KILL"; signal_members KILL "$job_id" "$sid"
-  for ((i = 0; i < 10; i++)); do [ -n "$(members "$job_id" "$sid")" ] || return 0; sleep 0.5; done
+  for ((i = 0; i < 10; i++)); do [ -n "$(members "$job_id" "$sid")" ] || return 0; write_beat; sleep 0.5; done
 }
 # finish <exit> <writer>: kill what the leader left behind, then write end, retrying until the state dir takes it.
 finish() {
@@ -566,6 +570,7 @@ reason: $(rkey "$rec_dir/stop" reason)"
 }
 stop_job() {  # stop_job: the ladder for $reason, with the skip-to-KILL floor only for the elected host-mem stop
   local below=0; [ "$reason" != host-mem ] || below=$(( floor_kb / 2 ))
+  stopping=$reason; write_beat
   log "stop $reason${elected_detail:+ ($elected_detail)}"; ladder "$below"
 }
 cmd_supervise() {

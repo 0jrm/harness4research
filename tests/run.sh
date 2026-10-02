@@ -265,14 +265,15 @@ leftover_killed: 0
 writer: supervisor
 END
 }
-beat_rec() {  # beat_rec <id> <elapsed> <mem_gb> [time]
+beat_rec() {  # beat_rec <id> <elapsed> <mem_gb> [time] [extra line]
   rec "$1" beat <<BEAT
 time: ${4:-$(ago '1 min')}
 elapsed_seconds: $2
 mem_gb: $3
 peak_mem_gb: $3
 host_available_gb: 100.0
-low_polls: 0
+low_polls: 0${5:+
+$5}
 BEAT
 }
 mkdir -p "$tmp/scratch"
@@ -422,6 +423,13 @@ expect tick-big-writer ok '^writer: tick$' -- cat "$tmp/state/t-big/end"
 expect tick-small-alive fail - -- test -f "$tmp/state/t-small/end"
 expect tick-small-state ok '^t-small\|2026-10-02-tick\|RUNNING\|' -- guard/run launch --sacct
 expect tick-big-state ok '^t-big\|2026-10-02-tick\|HOST_OUT_OF_MEMORY\|' -- guard/run launch --sacct
+tick_job t-stopping 400.0 "$(ago '1 hour')" 36000; tick_job t-other 200.0 "$(ago '30 min')" 36000
+beat_rec t-stopping 10 400.0 "$(date -u +%FT%TZ)" "stopping: host-mem"; sed -i 's/^host_min_available_gb: .*/host_min_available_gb: 32/' "$tmp/state/t-other/request"
+expect tick-other-first-low ok 'low=1 reason=none$' -- env HPC_LAUNCH_TEST_CHARGE_KB=209715200 HPC_LAUNCH_TEST_AVAILABLE_KB=10485760 guard/run launch --tick "$tmp/state/t-other"
+expect tick-yields-to-stopping ok 'low=2 reason=none$' -- env HPC_LAUNCH_TEST_CHARGE_KB=209715200 HPC_LAUNCH_TEST_AVAILABLE_KB=10485760 guard/run launch --tick "$tmp/state/t-other"
+expect tick-stopping-not-elected fail - -- bash -c 'test -e "$1/t-other/end" || test -e "$1/t-stopping/end"' _ "$tmp/state"
+expect tick-big-beat-stopping ok '^stopping: host-mem$' -- cat "$tmp/state/t-big/beat"
+kill -KILL "$(grep ^job_pid: "$tmp/state/t-stopping/start" | cut -d' ' -f2)" "$(grep ^job_pid: "$tmp/state/t-other/start" | cut -d' ' -f2)" 2>/dev/null
 tick_job t-wall 1.0 "$(ago '2 hours')" 3600
 expect tick-walltime ok 'reason=walltime$' -- guard/run launch --tick "$tmp/state/t-wall"
 expect tick-walltime-end ok '^exit: unknown$' -- cat "$tmp/state/t-wall/end"
