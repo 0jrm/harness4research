@@ -865,6 +865,14 @@ oldest=$(cat "$here/tests/oldest-supported")
 releases=$(git -C "$here" tag -l 'v*' --contains "$oldest" --merged HEAD 2>/dev/null)
 if [ -z "$releases" ]; then fail=$((fail+1)); echo "FAIL compat-releases (no tags from $oldest; fetch them with git fetch --tags)"; fi
 for tag in $releases; do upgrade_from "$tag"; done
+echo "== atlas"
+mkdir -p "$tmp/atlas"; bash "$here/tests/atlas-fixture.sh" "$tmp/atlas" > "$tmp/atlas/env.sh"
+expect atlas-renders ok '6 runs, 1 branch' -- bash -c '. "$1"; "$2" atlas --out "$3/atlas.html" --json "$3/atlas.json"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-catches-early-compute ok 'started before the card was committed' -- cat "$tmp/atlas/atlas.html"
+expect atlas-broken-receipt ok 'link broken.*commit</b> deadbee' -- cat "$tmp/atlas/atlas.html"
+expect atlas-drawer-key-diff ok 'max_walltime_minutes 240 to 600' -- cat "$tmp/atlas/atlas.html"
+expect atlas-read-only ok '^$' -- git -C "$tmp/atlas/casts-v4-training" status --porcelain
+expect atlas-refuses-unguarded fail 'no guard/run' -- "$guard" atlas "$tmp/agents"
 
 echo; echo "$pass passed, $fail failed"
 [ $fail -eq 0 ]
