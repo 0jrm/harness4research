@@ -51,6 +51,7 @@ kb_gb() {
   if [ $m -ge 1000 ]; then printf '%d.%d' $(( m / 1000 )) $(( m % 1000 / 100 )); else printf '0.%03d' $m; fi
 }
 gb_kb() { local g=${1%%.*} f=${1#*.}; [ "$f" != "$1" ] || f=0; f=${f}000; echo $(( 10#${g:-0} * 1048576 + 10#${f:0:3} * 1048576 / 1000 )); }
+fmt_time() { if [ $(( $1 % 60 )) -eq 0 ]; then echo "$(( $1 / 60 ))m"; else echo "${1}s"; fi; }
 gpu_n() { local IFS=,; if [ "${1:-none}" = none ] || [ -z "${1:-}" ]; then echo 0; else set -- $1; echo $#; fi; }
 
 # Card access, the same rules as preflight: first match wins, `<...>` is unset. Copied, not shared, so
@@ -692,10 +693,10 @@ gate_static() {
   stop=$(qval deadline); [ -z "$stop" ] || [[ ! $(date +%F) > $stop ]] || fail "past deadline $stop in $run_dir/question.card"
   max_wall=$(( $(card_or_default host_max_walltime_minutes 720) * 60 ))
   if [ $explore = 1 ]; then
-    [ "$time_s" -le $(( $(card_or_default explore_max_walltime_minutes 60) * 60 )) ] || fail "--time=$(( time_s / 60 )) min exceeds explore_max_walltime_minutes=$(card_or_default explore_max_walltime_minutes 60)"
+    [ "$time_s" -le $(( $(card_or_default explore_max_walltime_minutes 60) * 60 )) ] || fail "--time=$(fmt_time "$time_s") exceeds explore_max_walltime_minutes=$(card_or_default explore_max_walltime_minutes 60)"
     [ "$(gpu_n "$gpus")" -le "$(card_or_default explore_max_gpus 1)" ] || fail "--gpus=$gpus exceeds explore_max_gpus=$(card_or_default explore_max_gpus 1)"
   fi
-  [ "$time_s" -le "$max_wall" ] || fail "--time=$(( time_s / 60 )) min exceeds host_max_walltime_minutes=$(card_or_default host_max_walltime_minutes 720)"
+  [ "$time_s" -le "$max_wall" ] || fail "--time=$(fmt_time "$time_s") exceeds host_max_walltime_minutes=$(card_or_default host_max_walltime_minutes 720)"
   [ "$mem_kb" -le "$(gb_kb "$(card_or_default host_max_mem_gb 64)")" ] || fail "--mem=$mem_gb exceeds host_max_mem_gb=$(card_or_default host_max_mem_gb 64)"
 }
 
@@ -834,7 +835,7 @@ cmd_launch() {
   spawn_supervisor "$rdir" -- "${cmd[@]}"
   for ((i = 0; i < START_WAIT * 10; i++)); do [ -f "$rdir/start" ] && break; sleep 0.1; done
   [ -f "$rdir/start" ] || fail "the supervisor did not start the job within ${START_WAIT}s; see $rdir/supervisor.log"
-  echo "LAUNCH OK: $run_id job=$id gpus=$gpus time=$(( time_s / 60 ))m mem=${mem_gb}G gpu_h_spent=$(gpu_h "$spent") available=$(gpu_h $(( $(card_or_default max_gpu_hours 0) * 3600 - spent - remaining ))) log=$cwd/launch-$id.log" >&2
+  echo "LAUNCH OK: $run_id job=$id gpus=$gpus time=$(fmt_time "$time_s") mem=${mem_gb}G gpu_h_spent=$(gpu_h "$spent") available=$(gpu_h $(( $(card_or_default max_gpu_hours 0) * 3600 - spent - remaining ))) log=$cwd/launch-$id.log" >&2
   echo "$id"
 }
 

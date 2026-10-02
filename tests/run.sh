@@ -512,8 +512,10 @@ cwdid=$(L runs/explore-cwd --time=1 --gpus=none --mem=0.01 --cwd="$tmp/scratch" 
 caller=$(setsid bash -c 'env HPC_SPEND_RESERVE=1 guard/run launch runs/explore-caller --time=1 --gpus=none --mem=0.01 -- bash -c "sleep 1; echo alive" 2>/dev/null; kill -HUP 0')
 local=$(env HPC_GUARD_LOCAL=1 HPC_SPEND_RESERVE=1 guard/run launch runs/explore-local --time=1 --gpus=none --mem=0.01 -- true 2>/dev/null)
 expect launch-local-copy ok '^skynet-' -- echo "$local"
+secs=$(L runs/explore-secs --time=0:15 --gpus=none --mem=0.01 -- true 2>"$tmp/secs.err")
+expect launch-ok-seconds ok ' time=15s ' -- cat "$tmp/secs.err"
 failed=$(L runs/explore-ripple --time=1 --gpus=none --mem=0.01 -- false 2>/dev/null)
-wait_end "$id" "$idem" "$cwdid" "$caller" "$local" "$failed" "$absid"
+wait_end "$id" "$idem" "$cwdid" "$caller" "$local" "$failed" "$absid" "$secs"
 expect launch-env ok "^HPC_JOB_ID=$id$" -- cat "launch-$id.log"
 expect launch-env-cuda ok '^CUDA_VISIBLE_DEVICES=2$' -- cat "launch-$id.log"
 expect launch-env-run-dir ok "^HPC_RUN_DIR=$PWD/$R2$" -- cat "launch-$id.log"
