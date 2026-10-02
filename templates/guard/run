@@ -4,14 +4,20 @@
 # HPC_GUARD_LOCAL=1 runs the working-tree copy instead, for the bootstrap before guard/ is merged.
 set -euo pipefail
 cmd=${1:-}; shift || true
+base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
 case $cmd in
   preflight|ripples|manifest|fence) ;;
-  *) echo "usage: guard/run <preflight|ripples|manifest|fence> [args...]" >&2; exit 64 ;;
+  *) echo "usage: guard/run <preflight|ripples|manifest|fence> [args...]" >&2
+     schema=$(git show "$base:guard/VERSION" 2>/dev/null | awk -F': *' '$1=="schema" {print $2; exit}' || true)
+     echo "This project's guard is schema ${schema:-1} (guard/VERSION on $base). A command it lacks needs a human to run guard init --update." >&2
+     exit 64 ;;
 esac
 top=$(git rev-parse --show-toplevel)
 if [ "${HPC_GUARD_LOCAL:-0}" = 1 ]; then exec bash "$top/guard/bin/$cmd.sh" "$@"; fi
-base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
 script=$(git show "$base:guard/bin/$cmd.sh" 2>/dev/null) \
   || { echo "guard/bin/$cmd.sh is not on $base yet. Merge the guard PR, or set HPC_GUARD_LOCAL=1 for a first test." >&2; exit 2; }
+if grep -qE '^(<{7}|>{7}|\|{7})( |$)' <<<"$script" || ! bash -n <<<"$script" 2>/dev/null; then
+  echo "guard/bin/$cmd.sh on $base has unresolved conflicts or does not parse. A human fixes guard/ in a pull request." >&2; exit 2
+fi
 cd "$top"
 exec bash -c "$script" "guard/bin/$cmd.sh" "$@"

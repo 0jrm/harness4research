@@ -2,9 +2,10 @@
 # usage: guard init <repo> [--branch NAME] [--worktree DIR] [--update [--force]]
 # Surveys the repo, then proposes guard/ and its companions on a new branch in a separate worktree.
 # Never touches the repo's checked-out tree, never overwrites a file, never pushes.
-# --update refreshes guard/bin/ and guard/run, and inserts a missing setting or hypothesis
-# line into the run templates without changing any other line. It refuses when this harness is older
-# than the one that installed the project, unless --force.
+# --update three-way merges each installer-owned file, with the template this project was installed from
+# as the base, so a human's edits survive and an overlap becomes conflict markers. It adds template keys
+# that are new since that install and changes no other line of a human-owned file. It refuses when this
+# harness is older than the one that installed the project, unless --force.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=lib/version.sh
@@ -38,7 +39,8 @@ wt=${wt:-$(dirname "$repo")/$name.$(echo "$branch" | tr / -)}
 [ -e "$wt" ] && { echo "worktree path exists: $wt. Pass --worktree." >&2; exit 2; }
 git -C "$repo" worktree add -q -b "$branch" "$wt" "$base"
 
-added=(); skipped=()
+added=(); skipped=(); edited=(); unbased=(); conflicts=(); keys=(); optional=()
+from=$p_from; [ "$from" = unknown ] && from=""
 place() {
   local src=$1 dst=$2 mode=${3:-keep}
   if [ -e "$wt/$dst" ] && [ "$mode" = keep ]; then skipped+=("$dst"); return; fi
@@ -59,10 +61,42 @@ insert_line() {
   ' "$file" > "$tmp"
   mv "$tmp" "$file"
 }
+# merge_in <path under templates/> <dst>: three-way merge with the template at $from as the base.
+merge_in() {
+  local src=$1 dst=$2 b
+  [ -e "$wt/$dst" ] || { place "$t/$src" "$dst"; return; }
+  b=$(mktemp)
+  if [ -z "$from" ] || ! git -C "$here" show "$from:templates/$src" > "$b" 2>/dev/null; then : > "$b"; unbased+=("$dst"); fi
+  [ -s "$b" ] && ! cmp -s "$b" "$wt/$dst" && edited+=("$dst")
+  if git merge-file --diff3 -L "$dst (yours)" -L "harness ${from:-unknown}" -L "harness $(harness_release)" "$wt/$dst" "$b" "$t/$src"; then
+    git -C "$wt" diff --quiet -- "$dst" || added+=("$dst")
+  else conflicts+=("$dst"); fi
+  rm -f "$b"
+}
+key_of() { [[ $1 =~ ^([A-Za-z_]+): ]] && echo "${BASH_REMATCH[1]}:"; }
+# add_keys <path under templates/> <dst> <placeholders allowed: 0|1>: insert template keys that are new since $from.
+# A key the template already had at $from and the project lacks was removed on purpose, so it stays out.
+add_keys() {
+  local src=$1 dst=$2 ph=$3 i line key old prev next
+  [ -f "$wt/$dst" ] || return 0
+  old=$( { [ -n "$from" ] && git -C "$here" show "$from:templates/$src" 2>/dev/null; } || true)
+  mapfile -t tl < "$t/$src"
+  for i in "${!tl[@]}"; do
+    line=${tl[i]}; key=$(key_of "$line") || continue
+    awk -v k="$key" 'index($0, k)==1 { f=1 } END { exit f ? 0 : 1 }' <<<"$old" && continue
+    if [ "$ph" = 0 ] && [[ $line == *"<"* ]]; then
+      grep -q "^$key" "$wt/$dst" || optional+=("$dst: ${line}"); continue
+    fi
+    prev=""; [ "$i" -gt 0 ] && prev=$(key_of "${tl[i-1]}" || echo "${tl[i-1]}")
+    next=$(key_of "${tl[i+1]:-}" || echo "${tl[i+1]:-}")
+    insert_line "$wt/$dst" "$line" "$key" "$prev" "$next" && keys+=("$dst: ${line}")
+  done
+  git -C "$wt" diff --quiet -- "$dst" || added+=("$dst")
+}
 t=$here/templates
-for f in preflight ripples manifest fence; do place "$t/guard/bin/$f.sh" "guard/bin/$f.sh" replace; done
-place "$t/guard/run" guard/run replace
 if [ $update = 0 ]; then
+  for f in preflight ripples manifest fence; do place "$t/guard/bin/$f.sh" "guard/bin/$f.sh" replace; done
+  place "$t/guard/run" guard/run replace
   place "$t/guard/budget.card" guard/budget.card
   place "$t/guard/watch.list" guard/watch.list
   place "$t/guard/README.md" guard/README.md
@@ -76,14 +110,13 @@ if [ $update = 0 ]; then
   place "$t/CLAUDE.md" CLAUDE.md
   "$here/lib/survey.sh" "$repo" > "$wt/guard/SURVEY.md"; added+=(guard/SURVEY.md)
 else
-  card="$wt/runs/_template/question.card"
-  report="$wt/runs/_template/report.md"
-  if insert_line "$card" "setting: <dataset, geometry, code, and pinned commits>" "setting:" "decision_this_informs:" "hypothesis:"; then
-    added+=(runs/_template/question.card)
-  fi
-  if insert_line "$report" "hypothesis: n/a" "hypothesis:" "Question:" "## "; then
-    added+=(runs/_template/report.md)
-  fi
+  for f in preflight ripples manifest fence; do merge_in "guard/bin/$f.sh" "guard/bin/$f.sh"; done
+  merge_in guard/run guard/run; chmod +x "$wt/guard/run"
+  merge_in guard/README.md guard/README.md
+  merge_in github/workflows/guard-fence.yml .github/workflows/guard-fence.yml
+  add_keys guard/budget.card guard/budget.card 0
+  add_keys runs/_template/question.card runs/_template/question.card 1
+  add_keys runs/_template/report.md runs/_template/report.md 1
 fi
 {
   echo "schema: $h_schema"
@@ -98,15 +131,29 @@ if [ $update = 1 ] && [ "$(skew)" = current ] && git -C "$wt" diff --cached --qu
   git -C "$repo" worktree remove --force "$wt"; git -C "$repo" branch -q -D "$branch"
   echo "guard scripts in $name are already current. Nothing proposed."; exit 0
 fi
-if [ $update = 1 ]; then msg="chore(guard): refresh guard scripts and fill missing template lines"; else msg="feat(guard): add agent guard, facts file, and survey"; fi
+if [ $update = 1 ]; then msg="chore(guard): update the guard from harness4research $(harness_release)"; else msg="feat(guard): add agent guard, facts file, and survey"; fi
 git -C "$wt" -c user.name="${GIT_AUTHOR_NAME:-$(git -C "$repo" config user.name || echo guard)}" \
   -c user.email="${GIT_AUTHOR_EMAIL:-$(git -C "$repo" config user.email || echo guard@localhost)}" \
   commit -q -m "$msg" -m "Installed by harness4research. Nothing outside the listed files changed."
 
 echo "Proposed on branch $branch in worktree $wt"
-echo; echo "Added:"; printf '  %s\n' "${added[@]}"
-if [ ${#skipped[@]} -gt 0 ]; then echo; echo "Left alone because they already exist:"; printf '  %s\n' "${skipped[@]}"; fi
-[ $update = 1 ] && exit 0
+list() { local head=$1; shift; [ $# -gt 0 ] || return 0; echo; echo "$head"; printf '  %s\n' "$@"; }
+if [ $update = 0 ]; then list "Added:" "${added[@]}"; else list "Changed:" "${added[@]}"; fi
+list "Left alone because they already exist:" "${skipped[@]}"
+list "Your edits were kept in:" "${edited[@]}"
+list "Keys added from the templates:" "${keys[@]}"
+list "Optional keys you may set:" "${optional[@]}"
+list "No recorded install commit, so these were merged as whole files:" "${unbased[@]}"
+if [ $update = 1 ]; then
+  [[ " ${added[*]} " == *" .github/workflows/"* ]] && { echo; echo "Pushing a change under .github/workflows needs a token with the workflow scope: gh auth refresh -s workflow"; }
+  [ -n "$from" ] && ! git -C "$here" diff --quiet "$from" HEAD -- templates/AGENTS.md \
+    && { echo; echo "templates/AGENTS.md changed since your install. Compare by hand: git -C $here diff $from HEAD -- templates/AGENTS.md"; }
+  if [ ${#conflicts[@]} -gt 0 ]; then
+    list "CONFLICTS. Your edits and the harness changed the same lines. Resolve the marked lines in $wt, commit, then push:" "${conflicts[@]}"
+    exit 3
+  fi
+  exit 0
+fi
 cat <<NEXT
 
 Next steps. Only you can do these.

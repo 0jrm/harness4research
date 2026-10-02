@@ -288,34 +288,50 @@ expect update-schema-1 ok 'guard/VERSION' -- "$guard" init "$tmp/proj" --update 
 expect update-writes-schema ok "^schema: $(cat "$here/SCHEMA")$" -- grep '^schema:' "$tmp/wt6/guard/VERSION"
 git -C "$tmp/proj" worktree remove --force "$tmp/wt6"; git -C "$tmp/proj" branch -q -D guard/update
 git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
-git switch -q -c old origin/main; echo "# older fence" >> guard/bin/fence.sh; git commit -q -am old; git push -q origin old:main
-git -C "$tmp/proj" fetch -q origin
-expect update-refreshes ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt3"
-expect update-keeps-card ok 'account: gom' -- cat "$tmp/wt3/guard/budget.card"
-git -C "$tmp/proj" worktree remove --force "$tmp/wt3"
-git -C "$tmp/proj" branch -D guard/update
-git switch -q -c keep-lines origin/main
-sed -i 's/^setting: .*/setting: our tank/' runs/_template/question.card
-sed -i 's/^hypothesis: .*/hypothesis: kept/' runs/_template/report.md
-git add -A; git commit -q -m x; git push -q origin keep-lines:main
-git -C "$tmp/proj" fetch -q origin
-expect update-keeps-lines ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt5"
-expect update-kept-setting ok '^setting: our tank$' -- grep '^setting:' "$tmp/wt5/runs/_template/question.card"
-expect update-kept-hypothesis ok '^hypothesis: kept$' -- grep '^hypothesis:' "$tmp/wt5/runs/_template/report.md"
-git -C "$tmp/proj" worktree remove --force "$tmp/wt5"
-git -C "$tmp/proj" branch -D guard/update
-git switch -q -c fill-lines origin/main
-sed -i '/^setting:/d' runs/_template/question.card
-printf 'custom_note: leave this\n' >> runs/_template/question.card
-sed -i '/^hypothesis:/d' runs/_template/report.md
-printf 'group: ocean\n' >> runs/_template/report.md
-git add -A; git commit -q -m x; git push -q origin fill-lines:main
-git -C "$tmp/proj" fetch -q origin
-expect update-fills ok 'runs/_template/question.card' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt4"
-expect update-filled-setting ok '^setting: <dataset, geometry, code, and pinned commits>$' -- grep '^setting:' "$tmp/wt4/runs/_template/question.card"
-expect update-filled-note ok '^custom_note: leave this$' -- grep '^custom_note:' "$tmp/wt4/runs/_template/question.card"
-expect update-filled-hypothesis ok '^hypothesis: n/a$' -- grep '^hypothesis:' "$tmp/wt4/runs/_template/report.md"
-expect update-filled-group ok '^group: ocean$' -- grep '^group:' "$tmp/wt4/runs/_template/report.md"
+old_rev=$(git -C "$here" rev-parse "$(git -C "$here" log -1 --format=%H -S'hypothesis: n/a' -- templates/runs/_template/report.md)^")
+old_install() {  # old_install: commit to main the guard files as the harness at $old_rev installed them
+  git switch -q --detach "$good"
+  for f in guard/bin/preflight.sh guard/bin/ripples.sh guard/bin/manifest.sh guard/bin/fence.sh guard/run guard/README.md \
+    runs/_template/question.card runs/_template/report.md; do git -C "$here" show "$old_rev:templates/$f" > "$f"; done
+  git -C "$here" show "$old_rev:templates/github/workflows/guard-fence.yml" > .github/workflows/guard-fence.yml
+  sed -i "s/^installer: .*/installer: $old_rev/; /^schema:/d" guard/VERSION
+}
+old_install
+sed -i 's/-le 150 \]/-le 200 ]/' guard/bin/fence.sh
+sed -i 's/^Question: .*/Question: our wording/' runs/_template/report.md
+echo "custom_note: leave this" >> runs/_template/question.card
+git commit -q -am "an older install with site edits"; git push -q -f origin HEAD:main; git -C "$tmp/proj" fetch -q origin
+expect version-old-install ok '^project older' -- "$guard" version
+expect update-from-old ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt7"
+expect update-reports-edit ok '^  guard/bin/fence.sh$' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt8" --branch guard/again
+expect update-merged-new-rule ok 'hypothesis-line' -- cat "$tmp/wt7/guard/bin/fence.sh"
+expect update-kept-site-edit ok '-le 200 \]' -- cat "$tmp/wt7/guard/bin/fence.sh"
+expect update-scripts-current ok '^$' -- git -C "$tmp/wt7" diff --no-index --stat "$here/templates/guard/bin/preflight.sh" guard/bin/preflight.sh
+expect update-run-executable ok - -- test -x "$tmp/wt7/guard/run"
+expect update-workflow-fixed ok 'x-access-token' -- cat "$tmp/wt7/.github/workflows/guard-fence.yml"
+expect update-keeps-card ok '^account: gom$' -- cat "$tmp/wt7/guard/budget.card"
+expect update-adds-key ok '^max_handled_failures: 2$' -- cat "$tmp/wt7/guard/budget.card"
+expect update-skips-removed-key fail - -- grep '^explore_max_nodes' "$tmp/wt7/guard/budget.card"
+expect update-filled-setting ok '^setting: <dataset, geometry, code, and pinned commits>$' -- grep '^setting:' "$tmp/wt7/runs/_template/question.card"
+expect update-filled-note ok '^custom_note: leave this$' -- grep '^custom_note:' "$tmp/wt7/runs/_template/question.card"
+expect update-filled-hypothesis ok '^hypothesis: n/a$' -- sed -n 4p "$tmp/wt7/runs/_template/report.md"
+expect update-kept-question ok '^Question: our wording$' -- grep '^Question:' "$tmp/wt7/runs/_template/report.md"
+expect update-writes-version ok "^schema: $(cat "$here/SCHEMA")$" -- grep '^schema:' "$tmp/wt7/guard/VERSION"
+git -C "$tmp/proj" worktree remove --force "$tmp/wt7"; git -C "$tmp/proj" branch -q -D guard/update
+git -C "$tmp/proj" worktree remove --force "$tmp/wt8"; git -C "$tmp/proj" branch -q -D guard/again
+
+old_install
+sed -i 's/max_ch=$(need max_core_hours)/max_ch=$(need max_core_hours)  # site/' guard/bin/preflight.sh
+git commit -q -am "an older install with an overlapping edit"; git push -q -f origin HEAD:main; git -C "$tmp/proj" fetch -q origin
+expect update-conflicts fail '^CONFLICTS' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt7"
+expect update-conflict-named ok '^<<<<<<< guard/bin/preflight.sh \(yours\)$' -- grep '^<<<<<<<' "$tmp/wt7/guard/bin/preflight.sh"
+expect update-conflict-others-clean ok 'hypothesis-line' -- cat "$tmp/wt7/guard/bin/fence.sh"
+git -C "$tmp/wt7" push -q origin guard/update:refs/heads/conflicted
+git fetch -q origin; git switch -q --detach "$good"
+expect run-refuses-conflicted fail 'unresolved conflicts or does not parse' -- env HPC_GUARD_REF=origin/conflicted guard/run preflight "$R" job.sh
+expect run-names-schema fail 'guard is schema 2' -- env HPC_GUARD_REF=origin/conflicted guard/run launch
+git -C "$tmp/proj" worktree remove --force "$tmp/wt7"; git -C "$tmp/proj" branch -q -D guard/update
+git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
 
 echo; echo "$pass passed, $fail failed"
 [ $fail -eq 0 ]
