@@ -170,6 +170,9 @@ git add -A; git commit -q -m "run: incident 3"
 expect ripples-handled-cap fail 'RIPPLE.handled-failures.3 handled, over max_handled_failures=2' -- guard/run ripples "$R"
 git reset -q --hard "$pre"
 unset MOCK_SACCT_ROWS
+git switch -q -c marker; printf '#!/usr/bin/env bash\necho ran >> %s\n' "$tmp/marker" > guard/bin/launch.sh; git commit -q -am "launch that leaves a marker"
+expect ripples-slurm-skips-launch fail - -- bash -c 'env HPC_GUARD_REF=HEAD guard/run ripples "$1" >/dev/null; test -e "$2"' _ "$R" "$tmp/marker"
+git switch -q agent/run; git branch -q -D marker
 
 echo "== manifest"
 echo "$tmp/rows" > "$R/inputs.list"

@@ -25,7 +25,11 @@ if [ ${#watch[@]} -gt 0 ]; then
   if [ -z "$w" ]; then say PASS watched-paths ""; else say RIPPLE watched-paths "$(echo $w)"; fi
 else say UNCHECKED watched-paths "list verifier, test and threshold paths in guard/watch.list"; fi
 
-launch=$(git show "$base:guard/bin/launch.sh" 2>/dev/null)
+# launch.sh runs only for a project that opted in or a run with a ledger, so a Slurm project pays nothing for it.
+launch=""; lh=$(get launch_hosts)
+if { [ -n "$lh" ] && [ "$lh" != none ] && [[ $lh != *"<"* ]]; } || git cat-file -e "HEAD:$run_dir/execution.tsv" 2>/dev/null; then
+  launch=$(git show "$base:guard/bin/launch.sh" 2>/dev/null)
+fi
 launched() { bash -c "$launch" guard/bin/launch.sh "$@"; }
 # On a launch host, launch records answer sacct's row query, so the job checks below cover launched jobs too.
 if [ -n "$launch" ] && launched --here; then
