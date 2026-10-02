@@ -48,6 +48,7 @@ A guarded repo has a `guard/` directory, `FACTS.md`, and a `guard-fence` CI chec
 - Submit only through `guard/run preflight <run_dir> <job.sh> [options]`. It fails when guard files differ from `origin/main`, the question card is uncommitted or edited, the date is past `stop_date`, `--time` or `--nodes` is missing or over its cap, spent plus queued plus projected core-hours exceed the budget minus the verification reserve, concurrency would exceed its cap, or `guard/run ripples` for the run exits 1, unless `HPC_SPEND_RESERVE=1`. It stamps `--job-name=<run_id>` and forces `--account` to the card's account. Verifier jobs set `HPC_SPEND_RESERVE=1`.
 - Call `guard/run manifest "$RUN_DIR" "$0" "$@"` at the top of every job script. It records commit, dirty count, modules, container, lockfile hashes, input size and mtime (hashes with `HPC_HASH_INPUTS=1`), and the command, and it never overwrites.
 - Run `guard/run ripples <run_dir>` at every wake. Exit 1 means stop new submissions.
+- Run frozen code from `cwd=$(guard/run code <repo> <commit>)` and pass the printed absolute path as the job's working directory. Never build worktree paths by hand.
 
 When a guard blocks you, the block is the answer. Report it. Do not route around it.
 
