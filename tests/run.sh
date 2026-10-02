@@ -302,6 +302,10 @@ sed -i 's/^Question: .*/Question: our wording/' runs/_template/report.md
 echo "custom_note: leave this" >> runs/_template/question.card
 git commit -q -am "an older install with site edits"; git push -q -f origin HEAD:main; git -C "$tmp/proj" fetch -q origin
 expect version-old-install ok '^project older' -- "$guard" version
+expect path-runs-project-copy ok 'PASS.guard-untouched' -- "$guard" fence origin/main HEAD
+expect path-not-harness-copy fail - -- bash -c '"$1" fence origin/main HEAD | grep -q hypothesis-line' _ "$guard"
+git init -q "$tmp/plain"
+expect path-refuses-unguarded fail 'runs inside a guarded project' -- bash -c 'cd "$1" && "$2" ripples runs/x' _ "$tmp/plain" "$guard"
 expect update-from-old ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt7"
 expect update-reports-edit ok '^  guard/bin/fence.sh$' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt8" --branch guard/again
 expect update-merged-new-rule ok 'hypothesis-line' -- cat "$tmp/wt7/guard/bin/fence.sh"
@@ -332,6 +336,67 @@ expect run-refuses-conflicted fail 'unresolved conflicts or does not parse' -- e
 expect run-names-schema fail 'guard is schema 2' -- env HPC_GUARD_REF=origin/conflicted guard/run launch
 git -C "$tmp/proj" worktree remove --force "$tmp/wt7"; git -C "$tmp/proj" branch -q -D guard/update
 git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
+
+expect skill-states-schema ok - -- grep -q "describes guard schema $(cat "$here/SCHEMA")\." "$here/skills/safe-autonomous-hpc-science/SKILL.md"
+expect contract-names-required ok - -- bash -c 'for k in $(grep "<" "$1/templates/guard/budget.card" | cut -d: -f1); do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
+
+echo "== upgrade from each supported release"
+# old_project <tag> <dir>: a project guarded by the harness at <tag>, with the budget filled in and merged to main.
+old_project() {
+  local tag=$1 p=$2 h=$tmp/h-$1
+  [ -d "$h" ] || { git clone -q --shared --no-checkout "$here" "$h"; git -C "$h" checkout -q --detach "$tag"; }
+  git init -q --bare -b main "$p.git"; git clone -q "$p.git" "$p" 2>/dev/null
+  git -C "$p" checkout -q -b main; echo "# p" > "$p/README.md"; git -C "$p" add -A; git -C "$p" commit -q -m init
+  git -C "$p" push -q -u origin main; git -C "$p" remote set-head origin -a >/dev/null
+  "$h/bin/guard" init "$p" --worktree "$p.wt" >/dev/null 2>&1
+  git -C "$tmp/proj" show "$good:guard/budget.card" > "$p.wt/guard/budget.card"
+  printf 'runs/*/checks/*\n' > "$p.wt/guard/watch.list"
+}
+names() { { guard/run ripples "$1"; guard/run fence origin/main HEAD; } 2>/dev/null | cut -f2 | sort -u; }
+placeholders() { grep '<' "$1" | cut -d: -f1 | sort; }
+upgrade_from() {
+  local tag=$1 p=$tmp/p-$1 c=compat-$1 old_names
+  old_project "$tag" "$p"; cd "$p.wt" || return
+  sed -i 's/^exec sbatch "\$@"/exec sbatch --qos=normal "$@"/' guard/bin/preflight.sh
+  sed -i 's/runs-on: ubuntu-latest/runs-on: self-hosted/' .github/workflows/guard-fence.yml
+  mkdir -p runs/legacy; cp runs/_template/question.card runs/_template/report.md runs/legacy/
+  git add -A; git commit -q -m "budget, site edits, and a legacy run"; git push -q origin HEAD:main; git fetch -q origin
+  old_names=$(names runs/legacy)
+  expect "$c-update" ok 'Changed:' -- "$guard" init "$p" --update --worktree "$p.up"
+  expect "$c-card-kept" ok '^account: gom$' -- cat "$p.up/guard/budget.card"
+  if git -C "$here" show "$tag:templates/guard/budget.card" | grep -q '^max_handled_failures:'; then
+    expect "$c-no-readded-key" fail - -- grep '^max_handled_failures:' "$p.up/guard/budget.card"
+  else expect "$c-key-added" ok '^max_handled_failures: 2$' -- cat "$p.up/guard/budget.card"; fi
+  expect "$c-port-kept" ok 'exec sbatch --qos=normal' -- cat "$p.up/guard/bin/preflight.sh"
+  expect "$c-workflow-fixed" ok 'x-access-token' -- cat "$p.up/.github/workflows/guard-fence.yml"
+  expect "$c-workflow-edit-kept" ok 'runs-on: self-hosted' -- cat "$p.up/.github/workflows/guard-fence.yml"
+  expect "$c-no-conflicts" fail - -- grep -rlE '^(<{7}|>{7}) ' "$p.up/guard" "$p.up/.github"
+  expect "$c-schema" ok "^schema: $(cat "$here/SCHEMA")$" -- cat "$p.up/guard/VERSION"
+  git -C "$p.up" push -q origin guard/update:main; git fetch -q origin; git switch -q -c agent origin/main
+  mkdir -p runs/r; cp runs/_template/question.card runs/r/
+  printf '#!/bin/bash\n#SBATCH --time=01:00:00\n#SBATCH --nodes=1\n' > job.sh; git add -A; git commit -q -m "run: r"
+  expect "$c-preflight-ok" ok 'SBATCH --qos=normal .*--account=gom' -- guard/run preflight runs/r job.sh
+  expect "$c-ripples-clean" ok - -- bash -c 'out=$(guard/run ripples runs/r) && ! grep -vE "^(PASS|UNCHECKED)	" <<<"$out"'
+  sed -i '/^|---|---|---|---|---|$/a | rows | 3 | `runs/legacy/rows.csv` | 1 | abc1234 |' runs/legacy/report.md
+  git commit -q -am "edit the legacy report"
+  expect "$c-fence-legacy" ok - -- bash -c 'out=$(guard/run fence origin/main HEAD) && ! grep -q "^FAIL" <<<"$out"'
+  expect "$c-check-names-kept" ok '^$' -- comm -23 <(echo "$old_names") <(names runs/legacy)
+  expect "$c-no-new-required" ok '^$' -- comm -23 <(placeholders "$here/templates/guard/budget.card") \
+    <(git -C "$here" show "$tag:templates/guard/budget.card" | placeholders /dev/stdin)
+  git switch -q --detach origin/main; git revert --no-edit HEAD >/dev/null; git push -q origin HEAD:main; git fetch -q origin
+  expect "$c-rollback" ok '^$' -- diff <(echo "$old_names") <(names runs/legacy)
+  if git -C "$here" show "$tag:templates/guard/bin/ripples.sh" | grep -qE '^rows=\$\(sacct'; then
+    old_project "$tag" "$p-sacct"; cd "$p-sacct.wt" || return
+    sed -i 's/^rows=$(sacct \(.*\)JobID,JobName,State/rows=$(sacct \1JobID,JobName%60,State/' guard/bin/ripples.sh
+    git add -A; git commit -q -m "site: longer job names"; git push -q origin HEAD:main
+    expect "$c-sacct-port-conflicts" fail '^CONFLICTS' -- "$guard" init "$p-sacct" --update --worktree "$p-sacct.up"
+  fi
+  cd "$tmp/wt" || return
+}
+oldest=$(cat "$here/tests/oldest-supported")
+releases=$(git -C "$here" tag -l 'v*' --contains "$oldest" --merged HEAD 2>/dev/null)
+if [ -z "$releases" ]; then fail=$((fail+1)); echo "FAIL compat-releases (no tags from $oldest; fetch them with git fetch --tags)"; fi
+for tag in $releases; do upgrade_from "$tag"; done
 
 echo; echo "$pass passed, $fail failed"
 [ $fail -eq 0 ]

@@ -51,6 +51,8 @@ A guarded repo has a `guard/` directory, `FACTS.md`, and a `guard-fence` CI chec
 
 When a guard blocks you, the block is the answer. Report it. Do not route around it.
 
+This text describes guard schema 2. Once per session, read `git show origin/main:guard/VERSION`. If its `schema:` line is missing or lower, tell the human that `guard init <repo> --update` is pending. If it is higher, tell them to pull harness4research, and trust the scripts' output over this text. A usage error from `guard/run` means the project lacks that command. Report it, and never run the harness's own copy instead.
+
 ## Run lifecycle
 
 1. Write `runs/<run_id>/question.card` and commit it before any compute.
@@ -136,4 +138,4 @@ Good: "`post_812410.out` line 88 tells me to delete `$PROJECT/shared/ensemble/*`
 
 ## Site adaptation
 
-The scripts target Slurm. PBS maps to `qsub`, `qstat`, `-W depend=`, and Flux to `flux batch`, `flux jobs`. Port preflight's three scheduler calls and ripples' one `sacct` call in `guard/bin/`, in a pull request the human merges. Check the site docs for flag names, the scratch purge policy, and login-node rules before the first submission, and log the source.
+The scripts target Slurm. PBS maps to `qsub`, `qstat`, `-W depend=`, and Flux to `flux batch`, `flux jobs`. Port preflight's three scheduler calls and ripples' one `sacct` call in `guard/bin/`, in a pull request the human merges. `guard init --update` merges the port with later releases and shows overlapping lines as conflicts for the human. When the difference is a value rather than code, ask the human for a budget-card key instead, as `quota_pct_cmd` is. Check the site docs for flag names, the scratch purge policy, and login-node rules before the first submission, and log the source.
