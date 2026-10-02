@@ -154,12 +154,15 @@ rec_members() {
   fi
   echo "${members_cache[$d]}"
 }
-# anon_kb <pid>: Pss_Anon from smaps_rollup, RssAnon when the kernel lacks the field. Pss, so forked workers'
-# shared pages count once; anon only, so pages mapped from the shm dirs are not counted twice.
-anon_kb() {
-  local v; v=$(awk '/^Pss_Anon:/ {print $2; exit}' "/proc/$1/smaps_rollup" 2>/dev/null)
-  [ -n "$v" ] || v=$(awk '/^RssAnon:/ {print $2; exit}' "/proc/$1/status" 2>/dev/null)
-  echo "${v:-0}"
+# anon_kb <pid>: RssAnon from /proc/<pid>/status, the cheap measure used on every poll and in every view. Anon only,
+# so pages mapped from the shm dirs are not counted twice. Forked workers' shared copy-on-write pages count once per
+# worker, so the sum is an upper bound.
+anon_kb() { local v; v=$(awk '/^RssAnon:/ {print $2; exit}' "/proc/$1/status" 2>/dev/null); echo "${v:-0}"; }
+# pss_anon_kb <pid>: Pss_Anon from smaps_rollup, which counts shared pages once but costs seconds of kernel time
+# for a process that maps a large /dev/shm. Used only to confirm a mem stop. Falls back to RssAnon.
+pss_anon_kb() {
+  local v; v=$(timeout 20 awk '/^Pss_Anon:/ {print $2; exit}' "/proc/$1/smaps_rollup" 2>/dev/null)
+  [ -n "$v" ] && echo "$v" || anon_kb "$1"
 }
 # shm_kb <dirs, comma-separated or empty>: du over the declared shm dirs that exist.
 shm_kb() {
@@ -418,11 +421,12 @@ cmd_checks() {
   if [ -n "$ent" ]; then say ENTRIES host-log-errors "${ent# }"; else say PASS host-log-errors "$live running log(s) scanned"; fi
 }
 
-# strays: this user's processes holding a GPU compute context or more than half of host_max_mem_gb, minus members
-# of every live launch in the state dir, minus this process's ancestors, minus command lines matching stray_ignore.
+# strays: this user's processes holding a GPU compute context or more than half of host_max_mem_gb of RssAnon, minus
+# members of every live launch in the state dir, minus this process's ancestors, minus command lines matching
+# stray_ignore. One awk pass over /proc/*/status finds the candidates; ps runs only for those.
 # Exit 1 when nvidia-smi could not answer, so the caller can say UNCHECKED.
 strays() {
-  local d p rss args kb half ign out="" rc=0 gpu_pids="" skip=" " uuid
+  local d p args kb half ign out="" rc=0 gpu_pids="" skip=" " uuid
   half=$(( $(gb_kb "$(card_or_default host_max_mem_gb 64)") / 2 ))
   ign=$(card_or_default stray_ignore none)
   for d in $(records); do
@@ -433,15 +437,16 @@ strays() {
   if command -v nvidia-smi >/dev/null; then
     gpu_pids=$(timeout 20 nvidia-smi --query-compute-apps=gpu_uuid,pid --format=csv,noheader 2>/dev/null | awk -F', *' 'NF>1 {print $2}') || rc=1
   else rc=1; fi
-  while read -r uuid p rss args; do
-    kb=0; [ "$rss" -gt "$half" ] && kb=$(anon_kb "$p")
-    [ "$uuid" = gpu ] || [ "$kb" -gt "$half" ] || continue
+  while read -r uuid p kb; do
+    args=$(ps -o args= -p "$p" 2>/dev/null) || continue
     [ "$ign" = none ] || ! grep -qE -- "$ign" <<<"$args" || continue
     out="$out pid$p:$(kb_gb "$kb")G:$uuid:$(cut -c1-40 <<<"$args" | tr ' ' '_')"
-  done < <(ps -u "$UID" -o pid=,rss=,args= 2>/dev/null | awk -v half="$half" -v gp="$gpu_pids" -v skip="$skip" '
+  done < <(awk -v uid="$UID" -v half="$half" -v gp="$gpu_pids" -v skip="$skip" '
+    function flush() { if (pid != "" && u == uid && index(skip, " " pid " ") == 0 && ((pid in g) || kb > half)) print ((pid in g) ? "gpu" : "nogpu"), pid, kb }
     BEGIN { n = split(gp, a, /[[:space:]]+/); for (i = 1; i <= n; i++) if (a[i] != "") g[a[i]] = 1 }
-    index(skip, " " $1 " ") { next }
-    ($1 in g) || $2 > half { print (($1 in g) ? "gpu" : "nogpu"), $0 }')
+    FNR == 1 { flush(); pid = ""; u = -1; kb = 0 }
+    $1 == "Pid:" { pid = $2 } $1 == "Uid:" { u = $2 } $1 == "RssAnon:" { kb = $2 }
+    END { flush() }' /proc/[0-9]*/status 2>/dev/null)
   [ -z "$out" ] || printf '%s\n' "${out# }"
   return $rc
 }
@@ -460,12 +465,15 @@ load_request() {
   time_limit=$(rkey "$rec_dir/request" time_limit_seconds); mem_limit_kb=$(gb_kb "$(rkey "$rec_dir/request" mem_limit_gb)")
   shm=$(rkey "$rec_dir/request" shm); grace=$(rkey "$rec_dir/request" stop_grace_seconds)
   floor_kb=$(gb_kb "$(rkey "$rec_dir/request" host_min_available_gb)")
-  want="" reason="" elected_detail="" stopping="" peak=0 low=0 last_beat=0 elapsed=0 charge=0 avail=0
+  want="" reason="" elected_detail="" stopping="" charge_measure=rss_anon peak=0 low=0 last_beat=0 elapsed=0 charge=0 avail=0
 }
+# job_charge_kb [pss]: the job's charge, declared shm dirs plus RssAnon of every member, or Pss_Anon with `pss`.
 job_charge_kb() {
-  if [ "${test_mode:-0}" = 1 ] && [ -n "${HPC_LAUNCH_TEST_CHARGE_KB:-}" ]; then echo "$HPC_LAUNCH_TEST_CHARGE_KB"; return; fi
-  local p kb; kb=$(shm_kb "$shm")
-  for p in $(members "$job_id" "$sid"); do kb=$(( kb + $(anon_kb "$p") )); done
+  local p kb measure=anon_kb var=HPC_LAUNCH_TEST_CHARGE_KB
+  [ "${1:-}" != pss ] || { measure=pss_anon_kb; var=HPC_LAUNCH_TEST_PSS_KB; }
+  if [ "${test_mode:-0}" = 1 ] && [ -n "${!var:-}" ]; then echo "${!var}"; return; fi
+  kb=$(shm_kb "$shm")
+  for p in $(members "$job_id" "$sid"); do kb=$(( kb + $($measure "$p") )); done
   echo "$kb"
 }
 write_beat() {
@@ -524,9 +532,17 @@ poll_once() {
   reason=$want
   [ -z "$reason" ] || return 0
   if [ "$elapsed" -ge "$time_limit" ]; then reason=walltime
-  elif [ "$charge" -gt "$mem_limit_kb" ]; then reason=mem
+  elif [ "$charge" -gt "$mem_limit_kb" ] && confirmed_over_limit; then reason=mem
   elif [ "$low" -ge 2 ] && elected; then reason='host-mem'
   else elected_detail=""; fi
+}
+# confirmed_over_limit: the cheap charge is an upper bound, so a mem stop is confirmed with Pss_Anon first.
+# peak_mem_gb keeps the per-poll RssAnon measure; charge_measure names what decided the stop.
+confirmed_over_limit() {
+  local pss; pss=$(job_charge_kb pss)
+  log "charge $(kb_gb "$charge")G by RssAnon over $(kb_gb "$mem_limit_kb")G; Pss_Anon says $(kb_gb "$pss")G"
+  [ "$pss" -gt "$mem_limit_kb" ] || return 1
+  charge=$pss; charge_measure=pss
 }
 # ladder <kill_below_kb>: INT to every member; wait up to grace for none to remain; TERM; wait grace/2; KILL; wait 5 s.
 # Members are re-read before every signal, so a process born mid-ladder is still signalled. During the INT wait,
@@ -560,6 +576,7 @@ elapsed_seconds: $elapsed
 exit: $1
 stop: ${reason:-none}
 peak_mem_gb: $(kb_gb "$peak")
+charge_measure: $charge_measure
 leftover_killed: $n
 writer: $2"
   [ -z "$elected_detail" ] || text="$text

@@ -407,8 +407,8 @@ expect sup-states-oom ok '^s-mem\|2026-10-02-sup\|OUT_OF_MEMORY\|' -- echo "$sta
 expect sup-states-cancelled ok '^s-usr1\|2026-10-02-sup\|CANCELLED\|' -- echo "$states"
 expect sup-states-preempted ok '^s-term\|2026-10-02-sup\|PREEMPTED\|' -- echo "$states"
 expect sup-no-leftover-processes fail - -- grep -lzE '^HPC_JOB_ID=s-' /proc/[0-9]*/environ
-tick_job() {  # tick_job <id> <mem_gb> <started> <time_limit_seconds>: a running job with a start record and a beat, polled by --tick
-  req "$1" 2026-10-02-tick none "$4" "$(ago '1 hour')" skynet 1000
+tick_job() {  # tick_job <id> <mem_gb> <started> <time_limit_seconds> [mem_limit_gb]: a running job with a start record and a beat, polled by --tick
+  req "$1" 2026-10-02-tick none "$4" "$(ago '1 hour')" skynet "${5:-1000}"
   local pid; pid=$( env HPC_JOB_ID="$1" setsid sleep 30 >/dev/null 2>&1 & echo $! ); sleep 0.1
   start_rec "$1" "$boot" $$ "$(sed 's/^.*) //' /proc/$$/stat | awk '{print $20}')" "$pid" "$(sed 's/^.*) //' "/proc/$pid/stat" | awk '{print $20}')" "$3"
   beat_rec "$1" 10 "$2" "$(date -u +%FT%TZ)"
@@ -436,6 +436,12 @@ kill -KILL "$(grep ^job_pid: "$tmp/state/t-stopping/start" | cut -d' ' -f2)" "$(
 tick_job t-wall 1.0 "$(ago '2 hours')" 3600
 expect tick-walltime ok 'reason=walltime$' -- guard/run launch --tick "$tmp/state/t-wall"
 expect tick-walltime-end ok '^exit: unknown$' -- cat "$tmp/state/t-wall/end"
+expect tick-walltime-measure ok '^charge_measure: rss_anon$' -- cat "$tmp/state/t-wall/end"
+tick_job t-pss 0.5 "$(ago '1 hour')" 36000 1
+expect tick-mem-not-confirmed ok 'charge=2.0G .*reason=none$' -- env HPC_LAUNCH_TEST_CHARGE_KB=2097152 HPC_LAUNCH_TEST_PSS_KB=524288 guard/run launch --tick "$tmp/state/t-pss"
+expect tick-mem-confirmed ok 'charge=1.5G .*reason=mem$' -- env HPC_LAUNCH_TEST_CHARGE_KB=2097152 HPC_LAUNCH_TEST_PSS_KB=1572864 guard/run launch --tick "$tmp/state/t-pss"
+expect tick-mem-confirmed-measure ok '^charge_measure: pss$' -- cat "$tmp/state/t-pss/end"
+expect tick-mem-confirmed-peak ok '^peak_mem_gb: 2.0$' -- cat "$tmp/state/t-pss/end"
 kill -KILL "$(grep ^job_pid: "$tmp/state/t-small/start" | cut -d' ' -f2)" 2>/dev/null
 
 rm -rf "$tmp/state"
