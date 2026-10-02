@@ -186,6 +186,157 @@ expect code-refuses-relative-root fail 'not absolute' -- env HPC_CODE_ROOT=rel/d
 expect code-not-inside-repo fail 'is inside' -- env HPC_CODE_ROOT="$tmp/model/frozen" guard/run code "$tmp/model" "$code_sha"
 unset HPC_CODE_ROOT
 
+echo "== launch"
+expect ripples-not-opted-in fail - -- bash -c 'guard/run ripples "$1" | grep -q "gpu-hours"' _ "$R"
+git switch -q -c launch-base origin/main
+cat >> guard/budget.card <<CARD
+launch_hosts: skynet
+max_gpu_hours: 10
+host_max_walltime_minutes: 720
+host_max_mem_gb: 1000
+host_min_available_gb: 0
+host_stop_grace_seconds: 1
+host_state_dir: $tmp/state
+explore_max_gpus: 1
+CARD
+git commit -q -am "chore(guard): opt skynet in"; git push -q origin launch-base; git fetch -q origin
+git switch -q -c launch/agent origin/launch-base
+export HPC_GUARD_REF=origin/launch-base
+proj_id=$(git rev-list --max-parents=0 origin/main | tail -n1)
+boot=$(cat /proc/sys/kernel/random/boot_id)
+ago() { date -u -d "-$1" +%FT%TZ; }
+rec() {  # rec <id> <file>: write one record file by hand from stdin, in the documented format
+  mkdir -p "$tmp/state/$1"; cat > "$tmp/state/$1/$2"
+}
+req() {  # req <id> <run_id> <gpus> <time_limit_seconds> <requested> [host]: a request record for this project
+  rec "$1" request <<REQ
+job_id: $1
+run_id: $2
+run_dir: $PWD/runs/$2
+project: $proj_id
+origin: $tmp/origin.git
+host: ${6:-skynet}
+guard_commit: $(git rev-parse origin/launch-base)
+card: none
+cwd: $tmp/scratch
+cwd_commit: none
+cwd_dirty: none
+log: $tmp/scratch/launch-$1.log
+gpus: $3
+time_limit_seconds: $4
+mem_limit_gb: 1
+shm: 
+stop_grace_seconds: 1
+host_min_available_gb: 0
+command: sleep 30
+requested: $5
+REQ
+}
+start_rec() {  # start_rec <id> <boot_id> <supervisor_pid> <supervisor_start> <job_pid> <job_start> [started]
+  rec "$1" start <<START
+started: ${7:-$(ago '1 hour')}
+boot_id: $2
+supervisor_pid: $3
+supervisor_start: $4
+job_pid: $5
+job_start: $6
+sid: $5
+log_fd: ok
+START
+}
+end_rec() {  # end_rec <id> <elapsed> <exit> <stop>
+  rec "$1" end <<END
+ended: $(ago '1 min')
+elapsed_seconds: $2
+exit: $3
+stop: $4
+peak_mem_gb: 0.5
+leftover_killed: 0
+writer: supervisor
+END
+}
+beat_rec() {  # beat_rec <id> <elapsed> <mem_gb> [time]
+  rec "$1" beat <<BEAT
+time: ${4:-$(ago '1 min')}
+elapsed_seconds: $2
+mem_gb: $3
+peak_mem_gb: $3
+host_available_gb: 100.0
+low_polls: 0
+BEAT
+}
+mkdir -p "$tmp/scratch"
+F=runs/2026-10-02-fixtures; mkdir -p "$F"
+expect launch-usage fail 'usage: guard/run launch' -- guard/run launch
+req skynet-20260901T000000Z 2026-10-02-fixtures 0,1 36000 "$(ago '10 hours')"; end_rec skynet-20260901T000000Z 33966 0 none
+req skynet-20260901T010000Z 2026-10-02-fixtures 2 21600 "$(ago '9 hours')"; end_rec skynet-20260901T010000Z 1276 130 mem
+req skynet-20260901T020000Z 2026-10-02-fixtures 0,1 36000 "$(ago '8 hours')"
+start_rec skynet-20260901T020000Z 00000000-0000-0000-0000-000000000000 1 1 1 1; beat_rec skynet-20260901T020000Z 3600 10.0
+req skynet-20260901T030000Z 2026-10-02-fixtures none 60 "$(ago '10 min')"
+req skynet-20260901T040000Z 2026-10-02-fixtures none 60 "$(date -u +%FT%TZ)"
+req skynet-20260901T050000Z 2026-10-02-fixtures none 60 "$(ago '5 min')"
+touch "$tmp/scratch/launch-skynet-20260901T050000Z.log"; env HPC_JOB_ID=skynet-20260901T050000Z sleep 30 & alive_pid=$!
+req skynet-20260901T060000Z 2026-10-02-fixtures none 3600 "$(ago '2 hours')"
+start_rec skynet-20260901T060000Z "$boot" 2 999999999 3 999999999; printf 'ended: half' > "$tmp/state/skynet-20260901T060000Z/end.tmp.123"
+req skynet-20260901T070000Z 2026-10-02-fixtures 1 3600 "$(ago '1 hour')"; end_rec skynet-20260901T070000Z 3300 0 none
+mkdir -p "$tmp/state/skynet-20260901T080000Z"
+req gpu2-20260901T000000Z 2026-10-02-fixtures 1 3600 "$(ago '1 hour')" gpu2
+req gpu2-20260901T010000Z 2026-10-02-fixtures 1 3600 "$(ago '1 hour')" gpu2; end_rec gpu2-20260901T010000Z 10 1 none
+req skynet-20260801T000000Z 2026-10-02-fixtures 3 36000 "2026-08-01T00:00:00Z"; end_rec skynet-20260801T000000Z 36000 0 none
+sacct_rows=$(guard/run launch --sacct)
+expect sacct-completed ok '^skynet-20260901T000000Z\|2026-10-02-fixtures\|COMPLETED\|33966\|600$' -- echo "$sacct_rows"
+expect sacct-oom ok '^skynet-20260901T010000Z\|2026-10-02-fixtures\|OUT_OF_MEMORY\|1276\|360$' -- echo "$sacct_rows"
+expect crash-reboot ok '^skynet-20260901T020000Z\|2026-10-02-fixtures\|NODE_FAIL\|3600\|600$' -- echo "$sacct_rows"
+expect crash-no-start-stale ok '^skynet-20260901T030000Z\|2026-10-02-fixtures\|LAUNCH_FAILED\|0\|1$' -- echo "$sacct_rows"
+expect crash-no-start-fresh ok '^skynet-20260901T040000Z\|2026-10-02-fixtures\|PENDING\|0\|1$' -- echo "$sacct_rows"
+expect crash-no-start-alive ok '^skynet-20260901T050000Z\|2026-10-02-fixtures\|RUNNING\|[0-9]+\|1$' -- echo "$sacct_rows"
+expect crash-half-written ok '^skynet-20260901T060000Z\|2026-10-02-fixtures\|SUPERVISOR_FAILED\|0\|60$' -- echo "$sacct_rows"
+expect crash-empty-dir fail - -- grep skynet-20260901T080000Z <<<"$sacct_rows"
+expect crash-remote-unended fail - -- grep gpu2-20260901T000000Z <<<"$sacct_rows"
+expect crash-remote-ended ok '^gpu2-20260901T010000Z\|2026-10-02-fixtures\|FAILED\|10\|60$' -- echo "$sacct_rows"
+expect sacct-before-start-date fail - -- grep skynet-20260801 <<<"$sacct_rows"
+expect list-header ok '^job	state	elapsed	limit	mem_gb	mem_limit_gb	gpus	log$' -- guard/run launch --list
+expect list-incomplete ok '^skynet-20260901T080000Z	incomplete$' -- guard/run launch --list
+expect list-remote ok '^gpu2-20260901T000000Z	REMOTE	0	3600	-	1	1	' -- guard/run launch --list "$F"
+expect list-running ok '^skynet-20260901T050000Z	RUNNING	[0-9]+	60	0\.[0-9]+	1	none	' -- guard/run launch --list "$F"
+rip=$(env PATH="$(path_without sacct)" guard/run ripples "$F")
+expect ripples-launch-states ok 'RIPPLE	job-states	skynet-20260901T060000Z:SUPERVISOR_FAILED skynet-20260901T030000Z:LAUNCH_FAILED skynet-20260901T020000Z:NODE_FAIL skynet-20260901T010000Z:OUT_OF_MEMORY gpu2-20260901T010000Z:FAILED' -- echo "$rip"
+expect ripples-launch-walltime ok 'RIPPLE	walltime-headroom	skynet-20260901T070000Z:91%' -- echo "$rip"
+expect ripples-launch-retries ok 'RIPPLE	retries	5 not completed' -- echo "$rip"
+expect ripples-launch-budget-unchanged ok '^UNCHECKED	budget	sacct not found on PATH on this host$' -- echo "$rip"
+expect ripples-gpu-hours ok 'RIPPLE	gpu-hours	22\.1 of 10 GPU-h \(0\.0 in 1 running\)' -- echo "$rip"
+expect ripples-supervision-alive ok 'RIPPLE	host-supervision	skynet-20260901T050000Z:no-supervisor-started-it' -- echo "$rip"
+expect ripples-host-memory-pass ok 'PASS	host-memory	[0-9.]+G available; 1 live, at most 80% of --mem' -- echo "$rip"
+expect ripples-strays-pass ok 'PASS	host-strays	$' -- echo "$rip"
+expect ripples-log-errors-pass ok 'PASS	host-log-errors	1 running log\(s\) scanned' -- echo "$rip"
+printf '100|2026-10-02-fixtures|TIMEOUT|14400|240\n' > "$tmp/rows"
+expect ripples-launch-plus-sacct fail 'RIPPLE	job-states	100:TIMEOUT skynet-20260901T060000Z:SUPERVISOR_FAILED' -- env MOCK_SACCT_ROWS=$tmp/rows guard/run ripples "$F"
+expect ripples-launch-plus-budget fail 'PASS	budget	30 of 10000 core-h' -- env MOCK_SACCT_ROWS=$tmp/rows guard/run ripples "$F"
+expect ripples-other-host fail 'UNCHECKED	host-strays	login1 is not in launch_hosts \(skynet\)' -- env MOCK_HOSTNAME=login1 PATH="$(path_without sacct)" guard/run ripples "$F"
+expect ripples-other-host-gpu-hours fail 'RIPPLE	gpu-hours	22\.1 of 10' -- env MOCK_HOSTNAME=login1 PATH="$(path_without sacct)" guard/run ripples "$F"
+expect ripples-other-host-no-rows fail 'UNCHECKED	job-states	sacct not found' -- env MOCK_HOSTNAME=login1 PATH="$(path_without sacct)" guard/run ripples "$F"
+kill "$alive_pid" 2>/dev/null; wait "$alive_pid" 2>/dev/null
+rip=$(env PATH="$(path_without sacct)" guard/run ripples "$F")
+expect ripples-alive-gone ok 'skynet-20260901T050000Z:LAUNCH_FAILED' -- echo "$rip"
+expect ripples-remote-unended ok 'UNCHECKED	host-supervision	1 launch\(es\) unended on gpu2; run ripples there' -- echo "$rip"
+mkdir -p "$F/incidents"; printf '# Incident 1\njob: skynet-20260901T010000Z\n' > "$F/incidents/1.md"; printf '# Incident 2\njob: ../x\n' > "$F/incidents/2.md"
+git add -A; git commit -q -m "run: incidents"
+expect ripples-incident-alnum fail 'HANDLED	job-states	skynet-20260901T010000Z:OUT_OF_MEMORY->incidents/1.md' -- env PATH="$(path_without sacct)" guard/run ripples "$F"
+git reset -q --hard HEAD~1
+sleep 60 & stray_pid=$!
+printf 'GPU-aaaa, %s\n' "$stray_pid" > "$tmp/apps"
+expect ripples-strays-gpu fail "RIPPLE	host-strays	pid$stray_pid:0\.[0-9]+G:gpu:sleep_60" -- env MOCK_NVSMI_APPS=$tmp/apps guard/run ripples "$F"
+expect ripples-strays-no-nvsmi fail 'UNCHECKED	host-strays	no memory strays; GPU strays unchecked' -- env PATH="$(path_without nvidia-smi)" guard/run ripples "$F"
+git switch -q -c launch-ignore origin/launch-base; echo 'stray_ignore: ^sleep 60$' >> guard/budget.card; git commit -q -am "ignore"
+expect ripples-strays-ignore fail 'PASS	host-strays	$' -- env HPC_GUARD_REF=HEAD MOCK_NVSMI_APPS=$tmp/apps guard/run ripples "$F"
+git switch -q launch/agent
+req skynet-20260901T090000Z 2026-10-02-fixtures none 60 "$(ago '5 min')"
+touch "$tmp/scratch/launch-skynet-20260901T090000Z.log"; env HPC_JOB_ID=skynet-20260901T090000Z sleep 60 & launch_pid=$!
+printf 'GPU-aaaa, %s\n' "$launch_pid" > "$tmp/apps"
+expect ripples-strays-live-launch fail 'PASS	host-strays	$' -- env MOCK_NVSMI_APPS=$tmp/apps guard/run ripples "$F"
+kill "$stray_pid" "$launch_pid" 2>/dev/null; wait "$stray_pid" "$launch_pid" 2>/dev/null
+rm -rf "$tmp/state"; unset HPC_GUARD_REF
+
 echo "== fence"
 git switch -q -c pr/clean origin/main; mkdir -p runs/r1; cp runs/_template/question.card runs/r1/; git add -A; git commit -q -m "run: r1"
 expect fence-clean ok 'PASS.guard-untouched' -- guard/run fence origin/main HEAD
@@ -360,7 +511,7 @@ expect update-conflict-others-clean ok 'hypothesis-line' -- cat "$tmp/wt7/guard/
 git -C "$tmp/wt7" push -q origin guard/update:refs/heads/conflicted
 git fetch -q origin; git switch -q --detach "$good"
 expect run-refuses-conflicted fail 'unresolved conflicts or does not parse' -- env HPC_GUARD_REF=origin/conflicted guard/run preflight "$R" job.sh
-expect run-names-schema fail "guard is schema $(cat "$here/SCHEMA")" -- env HPC_GUARD_REF=origin/conflicted guard/run launch
+expect run-names-schema fail "guard is schema $(cat "$here/SCHEMA")" -- env HPC_GUARD_REF=origin/conflicted guard/run frobnicate
 git -C "$tmp/proj" worktree remove --force "$tmp/wt7"; git -C "$tmp/proj" branch -q -D guard/update
 git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
 

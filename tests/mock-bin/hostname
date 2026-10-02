@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Mock: the short name is MOCK_HOSTNAME, default skynet, with or without -s.
+echo "${MOCK_HOSTNAME:-skynet}"

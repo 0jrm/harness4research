@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Mock: --query-gpu prints MOCK_NVSMI_GPUS (index, uuid lines); --query-compute-apps prints the file MOCK_NVSMI_APPS (uuid, pid lines).
+case "$*" in
+  *--query-gpu=index,uuid*) printf '%s\n' "${MOCK_NVSMI_GPUS:-0, GPU-aaaa
+1, GPU-bbbb
+2, GPU-cccc
+3, GPU-dddd}" ;;
+  *--query-compute-apps=*) cat "${MOCK_NVSMI_APPS:-/dev/null}" ;;
+  *) echo "mock nvidia-smi: unsupported $*" >&2; exit 1 ;;
+esac
