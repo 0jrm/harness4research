@@ -120,6 +120,15 @@ git reset -q --hard HEAD~1
 expect explore-no-card ok 'SBATCH .*--job-name=explore-sketch' -- guard/run preflight runs/explore-sketch job.sh --nodes=1 --time=00:30:00
 expect explore-capped fail 'exceeds max_nodes_per_job=1' -- guard/run preflight runs/explore-sketch job.sh
 expect explore-one-task fail 'one task at a time' -- guard/run preflight runs/explore-sketch job.sh --nodes=1 --time=00:30:00 --array=0-3
+printf '100|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
+expect preflight-refuses-on-ripple fail '^PREFLIGHT FAIL: ripples reports job-states 100:FAILED; fix the cause' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
+expect preflight-reserve-skips-ripples ok 'SBATCH .*--job-name=2026-09-29-demo' -- env MOCK_SACCT_ROWS="$tmp/rows" HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
+mkdir -p "$R/incidents"; printf '# Incident 0\njob: 100\n' > "$R/incidents/0.md"; git add -A; git commit -q -m "run: incident 0"
+expect preflight-handled-ripple-passes ok 'SBATCH .*--job-name=2026-09-29-demo' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
+git reset -q --hard HEAD~1
+printf '#!/usr/bin/env bash\nexit 3\n' > guard/bin/ripples.sh; git commit -q -am "ripples errors"
+expect preflight-ripples-error-fails-closed fail '^PREFLIGHT FAIL: ripples could not run \(exit 3\)$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+git reset -q --hard HEAD~1
 
 echo "== ripples"
 mkdir -p "$R/checks"; printf '#!/bin/bash\necho "nan count 3"; exit 1\n' > "$R/checks/nan.sh"; chmod +x "$R/checks/nan.sh"
@@ -333,7 +342,7 @@ expect update-conflict-others-clean ok 'hypothesis-line' -- cat "$tmp/wt7/guard/
 git -C "$tmp/wt7" push -q origin guard/update:refs/heads/conflicted
 git fetch -q origin; git switch -q --detach "$good"
 expect run-refuses-conflicted fail 'unresolved conflicts or does not parse' -- env HPC_GUARD_REF=origin/conflicted guard/run preflight "$R" job.sh
-expect run-names-schema fail 'guard is schema 2' -- env HPC_GUARD_REF=origin/conflicted guard/run launch
+expect run-names-schema fail "guard is schema $(cat "$here/SCHEMA")" -- env HPC_GUARD_REF=origin/conflicted guard/run launch
 git -C "$tmp/proj" worktree remove --force "$tmp/wt7"; git -C "$tmp/proj" branch -q -D guard/update
 git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
 
