@@ -466,7 +466,7 @@ load_request() {
   time_limit=$(rkey "$rec_dir/request" time_limit_seconds); mem_limit_kb=$(gb_kb "$(rkey "$rec_dir/request" mem_limit_gb)")
   shm=$(rkey "$rec_dir/request" shm); grace=$(rkey "$rec_dir/request" stop_grace_seconds)
   floor_kb=$(gb_kb "$(rkey "$rec_dir/request" host_min_available_gb)")
-  want="" reason="" elected_detail="" stopping="" charge_measure=rss_anon peak=0 low=0 last_beat=0 elapsed=0 charge=0 avail=0
+  want="" reason="" elected_detail="" stopping="" charge_measure=rss_anon last_confirm=-$BEAT_EVERY peak=0 low=0 last_beat=0 elapsed=0 charge=0 avail=0
 }
 # job_charge_kb [pss]: the job's charge, declared shm dirs plus RssAnon of every member, or Pss_Anon with `pss`.
 job_charge_kb() {
@@ -538,9 +538,12 @@ poll_once() {
   else elected_detail=""; fi
 }
 # confirmed_over_limit: the cheap charge is an upper bound, so a mem stop is confirmed with Pss_Anon first.
-# peak_mem_gb keeps the per-poll RssAnon measure; charge_measure names what decided the stop.
+# peak_mem_gb keeps the per-poll RssAnon measure; charge_measure names what decided the stop. A "no" holds for
+# BEAT_EVERY seconds, so a job whose shared copy-on-write pages keep RssAnon over the limit pays the slow read once a minute.
 confirmed_over_limit() {
-  local pss; pss=$(job_charge_kb pss)
+  local pss
+  [ $(( elapsed - last_confirm )) -ge "$BEAT_EVERY" ] || return 1
+  last_confirm=$elapsed; pss=$(job_charge_kb pss)
   log "charge $(kb_gb "$charge")G by RssAnon over $(kb_gb "$mem_limit_kb")G; Pss_Anon says $(kb_gb "$pss")G"
   [ "$pss" -gt "$mem_limit_kb" ] || return 1
   charge=$pss; charge_measure=pss
