@@ -14,4 +14,6 @@ Commands:
     guard/run manifest <run_dir> "$0" "$@"                   first line of work in each job script
     guard/run fence [base] [head]                            the merge inspector, also run by CI
 
+`VERSION` records the guard schema and the harness commit that installed this directory. To update, a human runs `guard init <repo> --update` from an up-to-date harness4research clone. It merges your edits with the new scripts and proposes the result on a branch. Revert that pull request to roll back.
+
 Installed by harness4research. See its README for why each piece exists.

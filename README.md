@@ -101,12 +101,28 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 |---|---|---|
 | `guard survey <repo>` | your machine | read-only inventory |
 | `guard init <repo>` | your machine | propose the guard on a new branch |
-| `guard init <repo> --update` | your machine | propose refreshed guard scripts, and add a missing `setting` or `hypothesis` line in the run templates |
+| `guard init <repo> --update [--force]` | your machine | propose the newer guard as a three-way merge that keeps your edits |
+| `guard version` | anywhere | this harness's release and schema; inside a project, which side is behind |
 | `guard archive <repo>` | your machine | tag every remote branch |
 | `guard/run preflight <run_dir> <job.sh> [sbatch options]` | cluster | submit or refuse |
 | `guard/run ripples <run_dir>` | cluster | warning signs |
 | `guard/run manifest <run_dir> "$0" "$@"` | inside a job | provenance record |
 | `guard/run fence [base] [head]` | anywhere, CI | merge inspector |
+
+`guard preflight`, `guard ripples`, `guard manifest`, and `guard fence` on PATH run the enclosing project's `guard/run` from its protected branch, and refuse outside a guarded project.
+
+## Updating a guarded project
+
+Pull the harness, then propose the update:
+
+```shell
+git -C ~/harness4research pull --recurse-submodules
+guard init ~/path/to/your-repo --update
+```
+
+The update arrives on branch `guard/update` in a new worktree, like `init`. Each guard script, `guard/run`, `guard/README.md`, and the fence workflow are merged three ways, against the templates that installed your project. Your edits are kept. New budget keys arrive with their defaults. Your card values, `watch.list`, `FACTS.md`, and `AGENTS.md` are not changed. If your edit and the harness changed the same lines, the command exits 3 and lists the files with conflict markers. Resolve them in the worktree before you push. `guard/run` refuses to run a script that still has markers.
+
+Pushing a change to `.github/workflows/` needs a token with the `workflow` scope (`gh auth refresh -s workflow`). To roll back, revert the update pull request. [docs/compatibility.md](docs/compatibility.md) lists what an update may and may not change.
 
 ## Documentation
 
@@ -115,6 +131,8 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 - [docs/prompts.md](docs/prompts.md): prompts for the cleanup and the first run
 - [docs/live-tests/runhub.md](docs/live-tests/runhub.md) and [docs/live-tests/gom-da-workspace.md](docs/live-tests/gom-da-workspace.md): step-by-step acceptance tests
 - [docs/cluster-subaccount-request.md](docs/cluster-subaccount-request.md): email template for a capped account
+- [docs/compatibility.md](docs/compatibility.md): what stays stable across releases, and how an update merges
+- [docs/roadmap.md](docs/roadmap.md): the designed next steps, from field feedback
 - [skills/safe-autonomous-hpc-science/SKILL.md](skills/safe-autonomous-hpc-science/SKILL.md): what agents read for experiment work
 - [skills/present/SKILL.md](skills/present/SKILL.md): the `/present` block a person judges from the chat alone
 
