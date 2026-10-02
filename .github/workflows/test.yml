@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       - name: Install shellcheck and PyYAML
         run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck python3-yaml
       - name: Lint
