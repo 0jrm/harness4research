@@ -5,7 +5,14 @@ here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 cmd=${1:-help}; shift || true
 case $cmd in
   survey|init|archive) exec bash "$here/lib/$cmd.sh" "$@" ;;
-  preflight|ripples|manifest|fence) exec bash "$here/templates/guard/bin/$cmd.sh" "$@" ;;
+  preflight|ripples|manifest|fence)
+    # Run the enclosing project's protected guard/run, never this harness's templates.
+    base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
+    runner=$(git show "$base:guard/run" 2>/dev/null) || {
+      echo "guard $cmd runs inside a guarded project, and $(pwd) has no guard/run on $base." >&2
+      echo "Run guard init <repo> first. To try this harness's copy on its own: bash $here/templates/guard/bin/$cmd.sh" >&2
+      exit 2; }
+    exec bash -c "$runner" guard/run "$cmd" "$@" ;;
   version)
     # shellcheck source=lib/version.sh
     . "$here/lib/version.sh"
@@ -30,7 +37,7 @@ Project setup, run from your machine:
   version             this harness's release and schema, and inside a project whether either side is behind
   archive <repo>      tag every remote branch before any cleanup
 
-Inside a guarded project, prefer guard/run, which runs the protected branch's copy:
+Inside a guarded project, guard <command> runs the project's guard/run from the protected branch:
   preflight, ripples, manifest, fence
 USAGE
      [ "$cmd" = help ] || exit 64 ;;
