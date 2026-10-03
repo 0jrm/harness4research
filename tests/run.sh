@@ -899,6 +899,18 @@ expect atlas-uncommitted-cartouche ok 'plus the working tree \(3 uncommitted fil
 expect atlas-head-only ok '\(6 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-head-only-hides-disk-run ok - -- bash -c '! grep -q "run-q-batch" "$1"' _ "$tmp/atlas/head.html"
 expect atlas-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$tmp/atlas/casts-v4-training" "$atlas_before"
+expect atlas-runs-filter ok '\(2 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --runs "cosine-*" --runs "explore-*" --title casts --out "$3/filtered.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-runs-title ok '<small>Chart of the guarded project casts-v4-training, runs cosine-\*, explore-\*</small>casts</h1>' -- cat "$tmp/atlas/filtered.html"
+port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+( . "$tmp/atlas/env.sh"; exec "$guard" atlas --serve "$port" --every 60 --no-ripples ) > "$tmp/atlas/serve.log" 2>&1 &
+serve_pid=$!
+for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$port/atlas.json" && break; sleep 0.2; done
+expect atlas-serve-line ok "^atlas: serving http://127.0.0.1:$port/ from " -- cat "$tmp/atlas/serve.log"
+expect atlas-serve-page ok '<meta http-equiv="refresh" content="60">' -- curl -s "http://127.0.0.1:$port/"
+expect atlas-serve-run ok 'id="run-cosine-v2"' -- curl -s "http://127.0.0.1:$port/"
+expect atlas-serve-footer ok 'Served live from .*; re-surveyed at most every 1 min on reload' -- curl -s "http://127.0.0.1:$port/"
+expect atlas-serve-json ok '"id": "q-batch"' -- curl -s "http://127.0.0.1:$port/atlas.json"
+kill "$serve_pid" 2>/dev/null; wait "$serve_pid" 2>/dev/null
 expect atlas-refuses-unguarded fail 'no guard/run' -- "$guard" atlas "$tmp/agents"
 
 echo; echo "$pass passed, $fail failed"

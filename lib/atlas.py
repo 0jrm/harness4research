@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""usage: guard atlas [repo] [--out FILE] [--json FILE] [--no-ripples] [--head-only] [--code NAME[=PATH]]...
+"""usage: guard atlas [repo] [--out FILE | --serve PORT [--every SECONDS]] [--json FILE] [--no-ripples]
+                   [--head-only] [--runs GLOB]... [--title NAME] [--code NAME[=PATH]]...
 
 Writes one self-contained HTML page that charts a guarded project: compute hosts and their fences,
 budget against the verification reserve, a runs by checks ripples matrix, the question cards as a
@@ -10,8 +11,9 @@ working tree, so uncommitted run dirs and manifests show up; --head-only reads H
 Ripples come from the project's own guard/run, so the page shows exactly what the agent sees.
 Python 3 standard library only.
 """
-import argparse, datetime as dt, glob, html, json, os, re, subprocess, sys
+import argparse, datetime as dt, fnmatch, glob, html, json, os, re, socket, subprocess, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 def git(top, *args, ok=False):
     p = subprocess.run(["git", "-C", top, "--no-optional-locks", *args], capture_output=True, text=True)
@@ -110,7 +112,7 @@ def mtime(top, path):
     except OSError:
         return ""
 
-def collect(top, base, run_ripples=True, worktree=True, given_code=None):
+def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=None, title=None):
     head = git(top, "rev-parse", "HEAD").strip()
     base_sha = (git(top, "rev-parse", base) or "").strip()
     budget = kv(show(top, base, "guard/budget.card"))
@@ -128,7 +130,7 @@ def collect(top, base, run_ripples=True, worktree=True, given_code=None):
     names = {f.split("/")[1] for f in files | loose if f.startswith("runs/") and f.count("/") >= 2}
     if worktree and os.path.isdir(os.path.join(top, "runs")):
         names |= {d for d in os.listdir(os.path.join(top, "runs")) if os.path.isdir(os.path.join(top, "runs", d))}
-    names = sorted(names - {"_template"})
+    names = sorted(r for r in names - {"_template"} if not globs or any(fnmatch.fnmatchcase(r, g) for g in globs))
 
     def read(path):
         if worktree and os.path.isfile(os.path.join(top, path)):
@@ -214,7 +216,7 @@ def collect(top, base, run_ripples=True, worktree=True, given_code=None):
                          "watched": watched, "time": last[0], "subject": last[-1]})
     origin = (git(top, "remote", "get-url", "origin") or top).strip().rstrip("/")
     project = re.sub(r"\.git$", "", re.split(r"[/:]", origin)[-1])
-    return {"project": project, "top": top, "base": base,
+    return {"project": project, "title": title or project, "globs": list(globs), "top": top, "base": base,
             "base_sha": base_sha, "head": head, "worktree": worktree,
             "uncommitted": sum(len(r["uncommitted_files"]) for r in runs), "code": code,
             "budget": budget, "version": version, "watch": watch, "runs": runs, "branches": branches,
@@ -637,21 +639,27 @@ def render(data):
         f'<td class="{"alarm" if b["drawer"] else ""}">{E(", ".join(b["drawer"])) or "untouched"}</td>'
         f'<td class="{"alarm" if b["watched"] else ""}">{E(", ".join(b["watched"])) or "untouched"}</td><td>{E(b["subject"])}</td></tr>'
         for b in data["branches"])
+    live = data.get("every")
+    sub = "Chart of the guarded project" + (f" {data['project']}" if data["title"] != data["project"] else "") + \
+        (", runs " + ", ".join(data["globs"]) if data["globs"] else "")
     read_at = f'HEAD {data["head"][:7]}' + (f' plus the working tree ({n(data["uncommitted"], "uncommitted file")})' if data["worktree"] else "")
     code = "; ".join(f"{k} at {v}" if v else f"{k} not checked out here" for k, v in data["code"].items()) or "none cited"
     link_key = "".join(f'<span class="link {k}">{E(k)}</span>{E(t)}' for k, (_, t) in LINKS.items())
+    footer = (f"Served live from {E(socket.gethostname())}; re-surveyed at most every {max(1, round(live / 60))} min on reload."
+              if live else "Regenerate after a wake to refresh.")
     open_runs = sum(1 for r in runs if any(l["status"] == "RIPPLE" for l in r["ripples"]))
     unchecked = sum(1 for r in runs if cell(r, "domain")[0] == "unchecked")
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Chart of {E(data["project"])}</title>
+{f'<meta http-equiv="refresh" content="{live}">' if live else ""}
+<title>Chart of {E(data["title"])}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500&family=Spectral:ital,wght@1,400;1,500&display=swap" rel="stylesheet">
 <style>{CSS}{"".join(f".link.{k}{{{c}}}" for k, (c, _) in LINKS.items())}</style></head><body>
 <nav aria-label="Sections"><a href="#waters">Waters</a><a href="#ripples">Ripples</a><a href="#questions">Questions</a><a href="#runs">Runs</a><a href="#drawer">Drawer</a></nav>
 <main>
 <section class="cartouche"><div>
-<h1><small>Chart of the guarded project</small>{E(data["project"])}</h1>
+<h1><small>{E(sub)}</small>{E(data["title"])}</h1>
 <dl><dt>Datum</dt><dd>{E(data["base"])} at {E(data["base_sha"][:7])}</dd>
 <dt>Runs read at</dt><dd>{E(read_at)}</dd>
 <dt>Code</dt><dd>{E(code)}</dd>
@@ -682,18 +690,52 @@ def render(data):
 <h2 id="drawer">Drawer</h2><p class="lede">Branches ahead of {E(data["base"])} and whether they touch guard files, the workflow, or watched paths. The fence blocks these from merging.</p>
 <div class="wide"><table class="drawer"><thead><tr><th>Branch</th><th>Ahead</th><th>Guard or workflow</th><th>Watched paths</th><th>Last commit</th></tr></thead>
 <tbody>{drawer or '<tr><td colspan="5">No branches ahead of the protected branch.</td></tr>'}</tbody></table></div>
-<footer>Generated by guard atlas from {E(data["top"])}. Regenerate after a wake to refresh. The page holds no state and writes nothing back.</footer>
+<footer>Generated by guard atlas from {E(data["top"])}. {footer} The page holds no state and writes nothing back.</footer>
 </main></body></html>'''
+
+def serve(port, every, survey):
+    lock, cache = threading.Lock(), {}
+
+    class Page(BaseHTTPRequestHandler):
+        def do_GET(self):
+            path = self.path.split("?")[0]
+            if path not in ("/", "/atlas.json"):
+                return self.send_error(404)
+            with lock:
+                if not cache or time.monotonic() - cache["at"] > every:
+                    try:
+                        data = dict(survey(), every=every)
+                    except Exception as e:
+                        return self.send_error(500, f"atlas could not survey the project: {e}")
+                    cache.update(at=time.monotonic(), data=data, html=render(data))
+                body = (cache["html"] if path == "/" else json.dumps(cache["data"], indent=1, default=str)).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8" if path == "/" else "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    return ThreadingHTTPServer(("127.0.0.1", port), Page)
 
 def main():
     ap = argparse.ArgumentParser(prog="guard atlas", description=__doc__.split("\n\n")[1])
     ap.add_argument("repo", nargs="?", default=".")
-    ap.add_argument("--out", default=None, help="HTML path, default atlas.html in the current directory")
+    where = ap.add_mutually_exclusive_group()
+    where.add_argument("--out", default=None, help="HTML path, default atlas.html in the current directory")
+    where.add_argument("--serve", type=int, metavar="PORT", help="serve the page live on 127.0.0.1:PORT instead of writing it")
+    ap.add_argument("--every", type=int, default=300, metavar="SECONDS", help="with --serve, re-survey at most this often (default 300)")
     ap.add_argument("--json", default=None, help="also write the collected data as JSON")
     ap.add_argument("--no-ripples", action="store_true", help="skip running guard/run ripples")
     ap.add_argument("--head-only", action="store_true", help="read runs from HEAD only, ignoring the working tree")
+    ap.add_argument("--runs", action="append", default=[], metavar="GLOB", help="only runs whose id matches GLOB (repeatable)")
+    ap.add_argument("--title", default=None, help="page title, default the project name")
     ap.add_argument("--code", action="append", default=[], metavar="NAME[=PATH]", help="a code repository commit cells may cite (repeatable)")
     a = ap.parse_args()
+    if a.serve is not None and a.json:
+        ap.error("--json writes a file once; with --serve, read /atlas.json instead")
     bare = (git(a.repo, "rev-parse", "--is-bare-repository") or "").strip() == "true"
     top = (git(a.repo, "rev-parse", "--absolute-git-dir" if bare else "--show-toplevel") or "").strip()
     if not top:
@@ -702,7 +744,16 @@ def main():
     if git(top, "cat-file", "-e", f"{base}:guard/run") is None:
         sys.exit(f"guard atlas: {top} has no guard/run on {base}; run guard init first")
     code = dict((c.split("=", 1) + [""])[:2] for c in a.code)
-    data = collect(top, base, not (a.no_ripples or bare), not (a.head_only or bare), code)
+    survey = lambda: collect(top, base, not (a.no_ripples or bare), not (a.head_only or bare), a.runs, code, a.title)
+    if a.serve is not None:
+        srv = serve(a.serve, a.every, survey)
+        print(f"atlas: serving http://127.0.0.1:{a.serve}/ from {top}", flush=True)
+        try:
+            srv.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        return
+    data = survey()
     out = a.out or os.path.join(os.getcwd(), "atlas.html")
     with open(out, "w") as f:
         f.write(render(data))

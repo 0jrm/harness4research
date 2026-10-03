@@ -105,7 +105,7 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 | `guard init <repo> --update [--force]` | your machine | propose the newer guard as a three-way merge that keeps your edits |
 | `guard version` | anywhere | this harness's release and schema; inside a project, which side is behind |
 | `guard archive <repo>` | your machine | tag every remote branch |
-| `guard atlas [repo] [--out f.html]` | anywhere with the repo | read-only chart: hosts and fences, budget, ripples matrix, card map, per-run lifeline and receipts |
+| `guard atlas [repo] [--out f.html \| --serve PORT] [--runs GLOB] [--title NAME] [--head-only]` | anywhere with the repo | read-only chart: hosts and fences, budget, ripples matrix, card map, per-run lifeline and receipts. Reads HEAD plus uncommitted run files; `--serve` re-surveys on reload at most every `--every` seconds |
 | `guard/run preflight <run_dir> <job.sh> [sbatch options]` | cluster | submit or refuse |
 | `guard/run ripples <run_dir>` | cluster | warning signs |
 | `guard/run manifest <run_dir> "$0" "$@"` | inside a job | provenance record |

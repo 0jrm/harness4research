@@ -37,7 +37,7 @@ Project setup, run from your machine:
   init <repo> --update  refresh guard scripts in a project that already has guard/
   version             this harness's release and schema, and inside a project whether either side is behind
   archive <repo>      tag every remote branch before any cleanup
-  atlas [repo]        read-only HTML chart of runs, ripples, cards, receipts and the drawer
+  atlas [repo]        read-only HTML chart of runs, ripples, cards, receipts and the drawer; --serve PORT serves it live
 
 Inside a guarded project, guard <command> runs the project's guard/run from the protected branch:
   preflight, ripples, manifest, fence, code
