@@ -220,7 +220,7 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
     project = re.sub(r"\.git$", "", re.split(r"[/:]", origin)[-1])
     return {"project": project, "title": title or project, "globs": list(globs), "top": top, "base": base,
             "base_sha": base_sha, "head": head, "worktree": worktree,
-            "uncommitted": sum(len(r["uncommitted_files"]) for r in runs), "code": code,
+            "uncommitted": sum(len(r["uncommitted_files"]) for r in runs), "code": code, "rippled": run_ripples,
             "budget": budget, "version": version, "watch": watch, "runs": runs, "branches": branches,
             "generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
 
@@ -666,9 +666,9 @@ def render(data):
 <dt>Runs read at</dt><dd>{E(read_at)}</dd>
 <dt>Code</dt><dd>{E(code)}</dd>
 <dt>Guard</dt><dd>schema {E(v.get("schema", "1"))}, release {E(v.get("release", "unknown"))}</dd>
-<dt>Soundings</dt><dd>core-hours, from sacct via ripples</dd>
+<dt>Soundings</dt><dd>{"core-hours, from sacct via ripples" if data["rippled"] else "none: ripples were not run"}</dd>
 <dt>Surveyed</dt><dd>{E(data["generated"])}</dd></dl>
-<p class="readonly">Read-only. {len(runs)} runs, {open_runs} with a ripple, {unchecked} with no domain check that reached a verdict. Every action this page suggests is a command or a pull request.</p>
+<p class="readonly">Read-only. {len(runs)} runs, {f"{open_runs} with a ripple, {unchecked} with no domain check that reached a verdict" if data["rippled"] else "ripples not run, so no check reached a verdict"}. Every action this page suggests is a command or a pull request.</p>
 </div></section>
 
 <h2 id="waters">Waters</h2><p class="lede">Where the compute ran, taken from manifests, and what fence stood around it.</p>
