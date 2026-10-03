@@ -871,6 +871,19 @@ expect atlas-renders ok '6 runs, 1 branch' -- bash -c '. "$1"; "$2" atlas --out 
 expect atlas-catches-early-compute ok 'started before the card was committed' -- cat "$tmp/atlas/atlas.html"
 expect atlas-broken-receipt ok 'link broken.*commit</b> deadbee' -- cat "$tmp/atlas/atlas.html"
 expect atlas-drawer-key-diff ok 'max_walltime_minutes 240 to 600' -- cat "$tmp/atlas/atlas.html"
+python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+for r in d["runs"]:
+    print(" ~ ".join(["O", r["id"], r["outcome"]]))
+    for v in r["violations"]: print(" ~ ".join(["V", r["id"], v]))
+    for e in (r["report"] or {}).get("evidence", []):
+        for l in e["links"]: print(" ~ ".join(["L", r["id"], e["claim"], l["kind"], l["value"], l["state"], l["note"]]))' "$tmp/atlas/atlas.json" > "$tmp/atlas/atlas.tsv"
+expect atlas-escaped-pipe ok '^L ~ cosine-v2 ~ Max \|dT\| at the casts ~ commit ~ [0-9a-f]{7} ~ ok' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-cause-bullet ok 'rescore.md</b>: the scorer read the wrong month of casts., fix: pinned the month' -- cat "$tmp/atlas/atlas.html"
+expect atlas-cause-bullet-not-flagged ok - -- bash -c '! grep -q "rescore.md names no root cause" "$1"' _ "$tmp/atlas/atlas.tsv"
+expect atlas-verdict-prose ok '^O ~ lr-sweep ~ supported$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-explore-outcome ok '<h3>explore-07</h3><span class="chip explore">explore</span>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-explore-no-violations ok - -- bash -c '! grep -q "^V ~ explore-07" "$1"' _ "$tmp/atlas/atlas.tsv"
 expect atlas-read-only ok '^$' -- git -C "$tmp/atlas/casts-v4-training" status --porcelain
 expect atlas-refuses-unguarded fail 'no guard/run' -- "$guard" atlas "$tmp/agents"
 

@@ -28,6 +28,12 @@ def kv(text):
             out[m.group(1)] = m.group(2).strip()
     return out
 
+def bullet(text, labels):
+    for m in re.finditer(r"^\s*[-*]\s+\*\*([^*]+?)\*\*:?\s*(.*)$", text or "", re.M):
+        if m.group(1).lower().startswith(labels):
+            return m.group(2).strip()
+    return ""
+
 def unset(v):
     return v is None or v == "" or bool(re.fullmatch(r"<[^>]*>", v))
 
@@ -49,10 +55,24 @@ def section(md, title):
 def table_rows(block):
     rows = []
     for line in block.splitlines():
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if line.strip().startswith("|") and not all(re.fullmatch(r":?-+:?", c) for c in cells):
+        if not line.strip().startswith("|"):
+            continue
+        cells = [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+        if not all(re.fullmatch(r":?-+:?", c) for c in cells):
             rows.append(cells)
-    return rows[1:] if rows else []
+    return rows
+
+EVIDENCE = ("claim", "value", "artifact", "job", "commit")
+
+def evidence_rows(block):
+    rows = table_rows(block)
+    if not rows:
+        return []
+    head = [h.lower() for h in rows[0]]
+    col = {k: next((i for i, h in enumerate(head) if k in h), None) for k in EVIDENCE}
+    if all(i is None for i in col.values()):
+        col = dict(zip(EVIDENCE, range(len(EVIDENCE))))
+    return [{k: r[i] if i is not None and i < len(r) else "" for k, i in col.items()} for r in rows[1:]]
 
 def ripples(top, base, run_dir):
     env = dict(os.environ, HPC_GUARD_REF=base)
@@ -93,22 +113,20 @@ def collect(top, base, run_ripples):
         incidents = []
         for f in files:
             if "/incidents/" in f and f.endswith(".md"):
-                i = kv(show(top, "HEAD", f)); c = commits(top, f)
-                incidents.append({"path": f, "job": i.get("job", ""), "root_cause": i.get("root_cause", ""),
-                                  "fix": i.get("fix", ""), "time": c[0]["time"] if c else ""})
+                text = show(top, "HEAD", f); i = kv(text); c = commits(top, f)
+                cause = i.get("root_cause") if not unset(i.get("root_cause")) else bullet(text, ("cause", "root cause"))
+                fix = i.get("fix") if not unset(i.get("fix")) else bullet(text, ("fix",))
+                incidents.append({"path": f, "job": i.get("job", ""), "root_cause": cause, "fix": fix,
+                                  "time": c[0]["time"] if c else ""})
         report_text = show(top, "HEAD", f"{d}/report.md") if f"{d}/report.md" in files else None
         report = None
         if report_text:
             rk = kv(report_text)
             verdict = re.search(r"^Verdict against kill criteria:\s*(.*)$", report_text, re.M)
-            evidence = []
-            for r in table_rows(section(report_text, "Evidence")):
-                r += [""] * (5 - len(r))
-                evidence.append(dict(zip(("claim", "value", "artifact", "job", "commit"), r[:5])))
             dev = [l.lstrip("-* ").strip() for l in section(report_text, "Deviations").splitlines() if l.strip()]
             rc = commits(top, f"{d}/report.md")
             report = {"hypothesis": rk.get("hypothesis", ""), "verdict": verdict.group(1).strip() if verdict else "",
-                      "evidence": evidence, "deviations": dev, "time": rc[-1]["time"] if rc else "",
+                      "evidence": evidence_rows(section(report_text, "Evidence")), "deviations": dev, "time": rc[-1]["time"] if rc else "",
                       "next": section(report_text, "Next step")}
         rip = ripples(top, base, d) if run_ripples else []
         runs.append({"id": rid, "card": card, "card_blob": blob, "card_history": hist, "manifests": manifests,
@@ -173,9 +191,11 @@ def trace_evidence(top, run, tree):
         e["links"] = [dict(zip(("kind", "value", "state", "note"), l)) for l in links]
 
 def outcome(r, runs):
+    if r["id"].startswith("explore-"):
+        return "explore"
     rep = r["report"]
     if rep:
-        v = rep["verdict"].lower()
+        v = re.sub(r"\W", "", (rep["verdict"].split() or [""])[0].lower())
         return {"kill": "negative", "continue": "supported", "escalate": "escalated"}.get(v, "reported")
     if any(o["card"].get("supersedes") == r["id"] for o in runs):
         return "superseded"
@@ -183,8 +203,9 @@ def outcome(r, runs):
 
 def violations(r):
     out = []
+    explore = r["id"].startswith("explore-")
     frozen = when(r["card_history"][0]["time"]) if r["card_history"] else None
-    for m in r["manifests"]:
+    for m in r["manifests"] if not explore else []:
         t = when(m.get("time", ""))
         if frozen and t and t < frozen:
             out.append(f"job {m.get('job_id')} started before the card was committed")
@@ -193,7 +214,7 @@ def violations(r):
     for i in r["incidents"]:
         if unset(i["root_cause"]):
             out.append(f"{i['path'].split('/')[-1]} names no root cause")
-    if unset(r["card"].get("partner_metric")):
+    if not explore and unset(r["card"].get("partner_metric")):
         out.append("no partner metric, so doing less could satisfy the metric")
     return out
 
@@ -385,7 +406,7 @@ def run_block(r):
         rows.append(f'<tr><td>{E(e["claim"])}</td><td class="num">{E(e["value"])}</td><td><div class="trace">{links}</div></td></tr>')
     trace = (f'<div class="wide"><table class="evidence"><thead><tr><th>Claim</th><th>Value</th><th>Receipts</th></tr></thead>'
              f'<tbody>{"".join(rows)}</tbody></table></div>') if rows else '<p class="note">No report yet, so nothing to trace.</p>'
-    inc = "".join(f'<li><b>{E(i["path"].split("/")[-1])}</b>, job {E(i["job"])}: {E(i["root_cause"]) if not unset(i["root_cause"]) else "<em>no root cause named</em>"}'
+    inc = "".join(f'<li><b>{E(i["path"].split("/")[-1])}</b>{", job " + E(i["job"]) if i["job"] else ""}: {E(i["root_cause"]) if not unset(i["root_cause"]) else "<em>no root cause named</em>"}'
                   f'{(", fix: " + E(i["fix"])) if i["fix"] else ""}</li>' for i in r["incidents"])
     dev = "".join(f"<li>{E(d)}</li>" for d in (rep["deviations"] if rep else []))
     warn = "".join(f"<li>{E(v)}</li>" for v in r["violations"])
@@ -480,6 +501,7 @@ td{padding:6px 8px;border-bottom:.5px solid var(--rule);vertical-align:top}
 .link.ok{background:var(--shoal);color:var(--passt)}.link.broken{background:var(--magt);color:var(--mag);box-shadow:inset 0 0 0 1px var(--mag)}
 .link.unknown{background:repeating-linear-gradient(135deg,transparent 0 4px,var(--rule) 4px 5px);color:var(--sound);font-style:italic}
 ul.plain{margin:0;padding-left:18px;font-size:15px}.note{color:var(--sound);font-size:15px}
+.matrix td:first-child .chip{margin-left:8px}
 .drawer td.alarm{color:var(--mag)}.drawer code{font:inherit;font-size:13px}
 footer{margin-top:60px;font-size:13px;color:var(--sound);border-top:.5px solid var(--rule);padding-top:12px}
 @media (max-width:720px){.cartouche>div{grid-template-columns:1fr;padding:20px}}
@@ -490,7 +512,8 @@ def render(data):
     matrix = []
     for r in runs:
         tds = "".join(f'<td class="st" title="{E(t)}"><span class="{k}">{E(s)}</span></td>' for k, s, t in (cell(r, key) for key, _ in COLS))
-        matrix.append(f'<tr><td><a href="#run-{E(r["id"])}">{E(r["id"])}</a></td>{tds}</tr>')
+        tag = chip("explore", "explore") if r["outcome"] == "explore" else ""
+        matrix.append(f'<tr><td><a href="#run-{E(r["id"])}">{E(r["id"])}</a>{tag}</td>{tds}</tr>')
     heads = "".join(f"<th>{lbl}</th>" for _, lbl in COLS)
     waters = "".join(f'<div class="area {kind}"><span class="count">{E(cnt)}</span><h3>{E(name)}</h3>'
                      f'<span class="kind">{ {"bank": "bank limit", "bump": "speed bump", "none": "no fence"}[kind]}</span><p>{E(desc)}</p></div>'
@@ -531,7 +554,7 @@ def render(data):
 
 <h2 id="questions">Questions</h2><p class="lede">Each card placed in the order it was frozen. A supersedes line keeps the row, a spawned line starts a new one. A clean negative is a finished result.</p>
 <div class="graphwrap">{atlas_graph(runs)}</div>
-<div class="legend"><span class="key k-sup"></span>supported<span class="key k-neg"></span>clean negative<span class="key k-open"></span>open
+<div class="legend"><span class="key k-sup"></span>supported<span class="key k-neg"></span>clean negative<span class="key k-open"></span>open or explore
 <span class="key k-dash"></span>superseded or not run<span class="key k-pair"></span>no partner metric</div>
 
 <h2 id="runs">Runs</h2><p class="lede">Shaded time is before the card was committed. Compute there would be a violation.</p>

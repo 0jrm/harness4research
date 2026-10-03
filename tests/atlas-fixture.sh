@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # usage: tests/atlas-fixture.sh <dir>
-# Builds a guarded demo project at <dir>/proj with an origin, six runs, an agent branch and fake Slurm rows.
+# Builds a guarded demo project at <dir>/casts-v4-training with an origin, six runs, an agent branch and fake Slurm rows.
 # Prints the env lines a caller exports before running ripples or guard atlas against it.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -48,7 +48,7 @@ cat > runs/lr-sweep/report.md <<'R'
 
 Question: Which constant learning rate is the baseline for casts-v4?
 hypothesis: supported
-Verdict against kill criteria: continue
+Verdict against kill criteria: continue. No kill criterion triggered.
 
 ## Evidence
 
@@ -114,6 +114,7 @@ Verdict against kill criteria: continue
 | RMSE drop against lr-sweep | 3.1% (0.5%) | runs/cosine-v2/manifest-4830.txt | 4830 | $(git rev-parse --short HEAD) |
 | Climatology fraction | 0.8% (0.2%) | runs/cosine-v2/scores.csv | 4830 | $(git rev-parse --short HEAD) |
 | RMSE at half the steps | 1.2% | runs/cosine-v2/manifest-4812.txt | 4812 | deadbee |
+| Max \|dT\| at the casts | 0.02 degC | \`runs/cosine-v2/manifest-4830.txt\` (job line) | 4830 | $(git rev-parse --short HEAD) |
 
 ## Deviations from the question card
 - Batch size halved after incident oom-4811, logged before the rerun.
@@ -121,6 +122,7 @@ Verdict against kill criteria: continue
 ## Next step
 Repeat with three seeds before the thesis figure.
 R
+printf -- '- **When:** 2026-09-14, after the report.\n- **Cause:** the scorer read the wrong month of casts.\n- **Fix (human chose the month):** pinned the month in scripts/score.py.\n' > runs/cosine-v2/incidents/rescore.md
 git add -A; at 2026-09-14T17:00:00 "docs(runs): cosine-v2 report"
 
 card fp32-check "Does training in float32 change the result?" "float32 RMSE is within 0.2% of float64" "validation RMSE of T and S, scripts/score.py" "fraction of casts the model leaves at climatology"
@@ -129,7 +131,7 @@ sed -i 's/^kill_criteria: .*/kill_criteria: stop if float32 diverges before epoc
 manifest fp32-check 4850 2026-09-21T09:00:00Z hpc-g004
 git add -A; at 2026-09-21T09:30:00 "chore(runs): fp32-check manifest, adjust kill criteria"
 
-card explore-07 "Does the loader stall on the new disk?" "the loader keeps the GPU above 80% busy" "GPU utilisation from nvidia-smi" "steps per second against lr-sweep"
+card explore-07 "Does the loader stall on the new disk?" "the loader keeps the GPU above 80% busy" "GPU utilisation from nvidia-smi" "<a metric that punishes doing less>"
 manifest explore-07 local-1758537600 2026-09-22T11:00:00Z skynet
 git add -A; at 2026-09-22T11:05:00 "chore(runs): explore-07 on skynet"
 git push -q -u origin main; git remote set-head origin -a >/dev/null
