@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
-"""usage: guard atlas [repo] [--out FILE] [--json FILE] [--no-ripples]
+"""usage: guard atlas [repo] [--out FILE] [--json FILE] [--no-ripples] [--head-only]
 
 Writes one self-contained HTML page that charts a guarded project: compute hosts and their fences,
 budget against the verification reserve, a runs by checks ripples matrix, the question cards as a
 map, and per run a lifeline and a provenance trace for every evidence row.
 
-Read-only. Guard inputs come from the protected branch through git show; runs come from HEAD.
+Read-only. Guard inputs come from the protected branch through git show. Runs come from HEAD plus the
+working tree, so uncommitted run dirs and manifests show up; --head-only reads HEAD alone.
 Ripples come from the project's own guard/run, so the page shows exactly what the agent sees.
 Python 3 standard library only.
 """
 import argparse, datetime as dt, html, json, os, re, subprocess, sys
+from concurrent.futures import ThreadPoolExecutor
 
 def git(top, *args, ok=False):
-    p = subprocess.run(["git", "-C", top, *args], capture_output=True, text=True)
+    p = subprocess.run(["git", "-C", top, "--no-optional-locks", *args], capture_output=True, text=True)
     if p.returncode and not ok:
         return None
     return p.stdout
+
+def ls(top, cmd, *args):
+    return [f for f in (git(top, cmd, "-z", *args) or "").split("\0") if f]
 
 def show(top, ref, path):
     return git(top, "show", f"{ref}:{path}")
@@ -75,7 +80,7 @@ def evidence_rows(block):
     return [{k: r[i] if i is not None and i < len(r) else "" for k, i in col.items()} for r in rows[1:]]
 
 def ripples(top, base, run_dir):
-    env = dict(os.environ, HPC_GUARD_REF=base)
+    env = dict(os.environ, HPC_GUARD_REF=base, GIT_OPTIONAL_LOCKS="0")
     try:
         p = subprocess.run(["bash", "guard/run", "ripples", run_dir], cwd=top, env=env,
                            capture_output=True, text=True, timeout=180)
@@ -86,54 +91,87 @@ def ripples(top, base, run_dir):
         return [{"status": "UNCHECKED", "check": "ripples", "detail": (p.stderr.strip() or "no output")[:200]}]
     return [{"status": s, "check": c, "detail": d.strip()} for s, c, d in lines]
 
-def collect(top, base, run_ripples):
+def mtime(top, path):
+    try:
+        return dt.datetime.fromtimestamp(os.path.getmtime(os.path.join(top, path)), dt.timezone.utc).isoformat()
+    except OSError:
+        return ""
+
+def collect(top, base, run_ripples=True, worktree=True):
     head = git(top, "rev-parse", "HEAD").strip()
     base_sha = (git(top, "rev-parse", base) or "").strip()
     budget = kv(show(top, base, "guard/budget.card"))
     version = kv(show(top, base, "guard/VERSION"))
     watch = [l.split("#")[0].strip() for l in (show(top, base, "guard/watch.list") or "").splitlines()]
     watch = [w for w in watch if w]
-    names = sorted({p.split("/")[1] for p in (git(top, "ls-tree", "-r", "--name-only", "HEAD", "runs/") or "").split()
-                    if p.count("/") >= 2} - {"_template"})
+    files = set(ls(top, "ls-tree", "-r", "--name-only", "HEAD"))
+    tree = set(files)
+    for f in files:
+        d = os.path.dirname(f)
+        while d and d not in tree:
+            tree.add(d); d = os.path.dirname(d)
+    loose = set(ls(top, "ls-files", "--others", "--exclude-standard", "--", "runs/")) | \
+        set(ls(top, "diff", "--name-only", "HEAD", "--", "runs/")) if worktree else set()
+    names = {f.split("/")[1] for f in files | loose if f.startswith("runs/") and f.count("/") >= 2}
+    if worktree and os.path.isdir(os.path.join(top, "runs")):
+        names |= {d for d in os.listdir(os.path.join(top, "runs")) if os.path.isdir(os.path.join(top, "runs", d))}
+    names = sorted(names - {"_template"})
+
+    def read(path):
+        if worktree and os.path.isfile(os.path.join(top, path)):
+            with open(os.path.join(top, path), errors="replace") as f:
+                return f.read()
+        return show(top, "HEAD", path)
+
+    def born(path, hist, last=False):
+        return hist[-1 if last else 0]["time"] if hist else (mtime(top, path) if worktree else "")
+
     runs = []
     for rid in names:
-        d = f"runs/{rid}"
-        files = (git(top, "ls-tree", "-r", "--name-only", "HEAD", d + "/") or "").split()
-        card_text = show(top, "HEAD", f"{d}/question.card") or ""
-        card = kv(card_text)
-        hist = commits(top, f"{d}/question.card")
-        blob = (git(top, "rev-parse", f"HEAD:{d}/question.card", ok=True) or "").strip()
+        d = f"runs/{rid}/"
+        committed = sorted(f for f in files if f.startswith(d))
+        uncommitted = sorted(f for f in loose if f.startswith(d))
+        paths = sorted(set(committed) | set(uncommitted))
+        card_path = d + "question.card"
+        card = kv(read(card_path))
+        on_disk = worktree and os.path.isfile(os.path.join(top, card_path))
+        blob = (git(top, "hash-object", card_path) if on_disk else git(top, "rev-parse", f"HEAD:{card_path}", ok=True)) or ""
         manifests = []
-        for f in files:
+        for f in paths:
             if re.search(r"/manifest-[^/]+\.txt$", f):
-                m = kv(show(top, "HEAD", f)); m["path"] = f
-                m["inputs"] = [l[7:] for l in (show(top, "HEAD", f) or "").splitlines() if l.startswith("input: ")]
+                text = read(f) or ""
+                m = kv(text); m["path"] = f; m["committed"] = f in files
+                m["inputs"] = [l[7:] for l in text.splitlines() if l.startswith("input: ")]
                 manifests.append(m)
         manifests.sort(key=lambda m: m.get("time", ""))
         incidents = []
-        for f in files:
+        for f in paths:
             if "/incidents/" in f and f.endswith(".md"):
-                text = show(top, "HEAD", f); i = kv(text); c = commits(top, f)
+                text = read(f); i = kv(text)
                 cause = i.get("root_cause") if not unset(i.get("root_cause")) else bullet(text, ("cause", "root cause"))
                 fix = i.get("fix") if not unset(i.get("fix")) else bullet(text, ("fix",))
                 incidents.append({"path": f, "job": i.get("job", ""), "root_cause": cause, "fix": fix,
-                                  "time": c[0]["time"] if c else ""})
-        report_text = show(top, "HEAD", f"{d}/report.md") if f"{d}/report.md" in files else None
+                                  "time": born(f, commits(top, f))})
+        report_text = read(d + "report.md") if d + "report.md" in paths else None
         report = None
         if report_text:
             rk = kv(report_text)
             verdict = re.search(r"^Verdict against kill criteria:\s*(.*)$", report_text, re.M)
             dev = [l.lstrip("-* ").strip() for l in section(report_text, "Deviations").splitlines() if l.strip()]
-            rc = commits(top, f"{d}/report.md")
             report = {"hypothesis": rk.get("hypothesis", ""), "verdict": verdict.group(1).strip() if verdict else "",
-                      "evidence": evidence_rows(section(report_text, "Evidence")), "deviations": dev, "time": rc[-1]["time"] if rc else "",
+                      "evidence": evidence_rows(section(report_text, "Evidence")), "deviations": dev,
+                      "time": born(d + "report.md", commits(top, d + "report.md"), last=True),
                       "next": section(report_text, "Next step")}
-        rip = ripples(top, base, d) if run_ripples else []
-        runs.append({"id": rid, "card": card, "card_blob": blob, "card_history": hist, "manifests": manifests,
-                     "incidents": incidents, "report": report, "ripples": rip,
-                     "checks": sorted(f.split("/")[-1] for f in files if "/checks/" in f)})
+        runs.append({"id": rid, "card": card, "card_blob": blob.strip(), "card_history": commits(top, card_path),
+                     "manifests": manifests, "incidents": incidents, "report": report, "ripples": [],
+                     "committed_files": committed, "uncommitted_files": uncommitted,
+                     "checks": sorted(f.split("/")[-1] for f in paths if "/checks/" in f)})
+    if run_ripples:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for r, rip in zip(runs, ex.map(lambda r: ripples(top, base, f"runs/{r['id']}"), runs)):
+                r["ripples"] = rip
     for r in runs:
-        trace_evidence(top, r, files_of(top, r["id"]))
+        trace_evidence(top, r, files)
         r["outcome"] = outcome(r, runs)
         r["violations"] = violations(r)
     branches = []
@@ -158,12 +196,13 @@ def collect(top, base, run_ripples):
         last = (git(top, "log", "-1", "--format=%cI\t%s", ref) or "\t").strip().split("\t", 1)
         branches.append({"name": ref, "ahead": ahead, "changed": len(changed), "drawer": drawer,
                          "watched": watched, "time": last[0], "subject": last[-1]})
-    return {"project": os.path.basename(top), "top": top, "base": base, "base_sha": base_sha, "head": head,
+    origin = (git(top, "remote", "get-url", "origin") or top).strip().rstrip("/")
+    project = re.sub(r"\.git$", "", re.split(r"[/:]", origin)[-1])
+    return {"project": project, "top": top, "base": base,
+            "base_sha": base_sha, "head": head, "worktree": worktree,
+            "uncommitted": sum(len(r["uncommitted_files"]) for r in runs),
             "budget": budget, "version": version, "watch": watch, "runs": runs, "branches": branches,
             "generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
-
-def files_of(top, rid):
-    return set((git(top, "ls-tree", "-r", "--name-only", "HEAD") or "").split())
 
 def trace_evidence(top, run, tree):
     by_job = {m.get("job_id"): m for m in run["manifests"]}
@@ -182,7 +221,7 @@ def trace_evidence(top, run, tree):
         if m and m.get("card"):
             same = run["card_blob"].startswith(m["card"])
             links.append(("card", m["card"][:12], "ok" if same else "broken",
-                          "matches the card at HEAD" if same else "the card changed after this job"))
+                          "matches the card read here" if same else "the card changed after this job"))
         else:
             links.append(("card", "not recorded", "unknown", "manifests record the card hash from roadmap item 3"))
         if m:
@@ -205,6 +244,8 @@ def violations(r):
     out = []
     explore = r["id"].startswith("explore-")
     frozen = when(r["card_history"][0]["time"]) if r["card_history"] else None
+    if not explore and not frozen:
+        out.append("question card is not committed, so nothing froze it")
     for m in r["manifests"] if not explore else []:
         t = when(m.get("time", ""))
         if frozen and t and t < frozen:
@@ -415,7 +456,7 @@ def run_block(r):
         if not unset(c.get(k)):
             rel.append(f'{k.replace("_", " ")} <a href="#run-{E(c[k])}">{E(c[k])}</a>')
     return f'''<article class="run" id="run-{E(r["id"])}">
-<header><h3>{E(r["id"])}</h3>{chip(r["outcome"], r["outcome"].replace(" ", "-"))}{"".join(f'<span class="rel">{x}</span>' for x in rel)}</header>
+<header><h3>{E(r["id"])}</h3>{chip(r["outcome"], r["outcome"].replace(" ", "-"))}{chip("uncommitted", "loose-chip") if r["uncommitted_files"] else ""}{"".join(f'<span class="rel">{x}</span>' for x in rel)}</header>
 <p class="question">{E(c.get("question", ""))}</p>
 <dl class="card">
 <div><dt>Hypothesis</dt><dd>{E(c.get("hypothesis", ""))}{f' <span class="verdict">Report says {E(rep["hypothesis"])}, verdict {E(rep["verdict"])}.</span>' if rep else ""}</dd></div>
@@ -498,10 +539,10 @@ td{padding:6px 8px;border-bottom:.5px solid var(--rule);vertical-align:top}
 .warn{margin:8px 0;padding:0;list-style:none;font-size:14px;color:var(--mag)}.warn li::before{content:"\\25B2  ";font-size:10px}
 .evidence td.num{white-space:nowrap}.trace{display:flex;flex-wrap:wrap;gap:4px}
 .link{font-size:12.5px;padding:2px 7px;border-radius:3px;white-space:nowrap}.link b{font-weight:500}
-.link.ok{background:var(--shoal);color:var(--passt)}.link.broken{background:var(--magt);color:var(--mag);box-shadow:inset 0 0 0 1px var(--mag)}
+.chip.loose-chip{background:var(--land);color:var(--handt);border-color:var(--handt)}.link.ok{background:var(--shoal);color:var(--passt)}.link.broken{background:var(--magt);color:var(--mag);box-shadow:inset 0 0 0 1px var(--mag)}
 .link.unknown{background:repeating-linear-gradient(135deg,transparent 0 4px,var(--rule) 4px 5px);color:var(--sound);font-style:italic}
+.loose{display:block;font-size:12px;color:var(--handt)}.matrix td:first-child .chip{margin-left:8px}
 ul.plain{margin:0;padding-left:18px;font-size:15px}.note{color:var(--sound);font-size:15px}
-.matrix td:first-child .chip{margin-left:8px}
 .drawer td.alarm{color:var(--mag)}.drawer code{font:inherit;font-size:13px}
 footer{margin-top:60px;font-size:13px;color:var(--sound);border-top:.5px solid var(--rule);padding-top:12px}
 @media (max-width:720px){.cartouche>div{grid-template-columns:1fr;padding:20px}}
@@ -513,7 +554,8 @@ def render(data):
     for r in runs:
         tds = "".join(f'<td class="st" title="{E(t)}"><span class="{k}">{E(s)}</span></td>' for k, s, t in (cell(r, key) for key, _ in COLS))
         tag = chip("explore", "explore") if r["outcome"] == "explore" else ""
-        matrix.append(f'<tr><td><a href="#run-{E(r["id"])}">{E(r["id"])}</a>{tag}</td>{tds}</tr>')
+        loose = f'<span class="loose">{len(r["uncommitted_files"])} uncommitted</span>' if r["uncommitted_files"] else ""
+        matrix.append(f'<tr><td><a href="#run-{E(r["id"])}">{E(r["id"])}</a>{tag}{loose}</td>{tds}</tr>')
     heads = "".join(f"<th>{lbl}</th>" for _, lbl in COLS)
     waters = "".join(f'<div class="area {kind}"><span class="count">{E(cnt)}</span><h3>{E(name)}</h3>'
                      f'<span class="kind">{ {"bank": "bank limit", "bump": "speed bump", "none": "no fence"}[kind]}</span><p>{E(desc)}</p></div>'
@@ -523,6 +565,7 @@ def render(data):
         f'<td class="{"alarm" if b["drawer"] else ""}">{E(", ".join(b["drawer"])) or "untouched"}</td>'
         f'<td class="{"alarm" if b["watched"] else ""}">{E(", ".join(b["watched"])) or "untouched"}</td><td>{E(b["subject"])}</td></tr>'
         for b in data["branches"])
+    read_at = f'HEAD {data["head"][:7]}' + (f' plus the working tree ({n(data["uncommitted"], "uncommitted file")})' if data["worktree"] else "")
     open_runs = sum(1 for r in runs if any(l["status"] == "RIPPLE" for l in r["ripples"]))
     unchecked = sum(1 for r in runs if cell(r, "domain")[0] == "unchecked")
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -536,7 +579,7 @@ def render(data):
 <section class="cartouche"><div>
 <h1><small>Chart of the guarded project</small>{E(data["project"])}</h1>
 <dl><dt>Datum</dt><dd>{E(data["base"])} at {E(data["base_sha"][:7])}</dd>
-<dt>Runs read at</dt><dd>HEAD {E(data["head"][:7])}</dd>
+<dt>Runs read at</dt><dd>{E(read_at)}</dd>
 <dt>Guard</dt><dd>schema {E(v.get("schema", "1"))}, release {E(v.get("release", "unknown"))}</dd>
 <dt>Soundings</dt><dd>core-hours, from sacct via ripples</dd>
 <dt>Surveyed</dt><dd>{E(data["generated"])}</dd></dl>
@@ -572,14 +615,16 @@ def main():
     ap.add_argument("--out", default=None, help="HTML path, default atlas.html in the current directory")
     ap.add_argument("--json", default=None, help="also write the collected data as JSON")
     ap.add_argument("--no-ripples", action="store_true", help="skip running guard/run ripples")
+    ap.add_argument("--head-only", action="store_true", help="read runs from HEAD only, ignoring the working tree")
     a = ap.parse_args()
-    top = (git(a.repo, "rev-parse", "--show-toplevel") or "").strip()
+    bare = (git(a.repo, "rev-parse", "--is-bare-repository") or "").strip() == "true"
+    top = (git(a.repo, "rev-parse", "--absolute-git-dir" if bare else "--show-toplevel") or "").strip()
     if not top:
         sys.exit(f"guard atlas: {a.repo} is not a git repository")
     base = os.environ.get("HPC_GUARD_REF") or (git(top, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") or "origin/main").strip()
     if git(top, "cat-file", "-e", f"{base}:guard/run") is None:
         sys.exit(f"guard atlas: {top} has no guard/run on {base}; run guard init first")
-    data = collect(top, base, not a.no_ripples)
+    data = collect(top, base, not (a.no_ripples or bare), not (a.head_only or bare))
     out = a.out or os.path.join(os.getcwd(), "atlas.html")
     with open(out, "w") as f:
         f.write(render(data))

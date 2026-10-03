@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # usage: tests/atlas-fixture.sh <dir>
-# Builds a guarded demo project at <dir>/casts-v4-training with an origin, six runs, an agent branch and fake Slurm rows.
+# Builds a guarded demo project at <dir>/casts-v4-training with an origin, six committed runs, one run only on disk,
+# an agent branch and fake Slurm rows.
 # Prints the env lines a caller exports before running ripples or guard atlas against it.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -24,8 +25,8 @@ manifest() {  # manifest <run> <job> <time> <host> [inputs]
     echo "dirty_files: 0"; echo "modules: python/3.11 cuda/12.4"; echo "container: none"
     echo "input: data/casts-v4.nc 81264512 1758000000"; echo "command: jobs/train.sh --config runs/$1/config.yaml"; } > "runs/$1/manifest-$2.txt"
 }
-rm -rf "$root/origin.git" "$proj"
-git init -q --bare -b main "$root/origin.git"; git clone -q "$root/origin.git" "$proj" 2>/dev/null; cd "$proj"; git checkout -q -b main
+rm -rf "$root/casts-v4-training.git" "$proj"
+git init -q --bare -b main "$root/casts-v4-training.git"; git clone -q "$root/casts-v4-training.git" "$proj" 2>/dev/null; cd "$proj"; git checkout -q -b main
 mkdir -p guard/bin runs/_template src jobs .github/workflows
 cp "$here"/templates/guard/bin/*.sh guard/bin/; cp "$here/templates/guard/run" "$here/templates/guard/watch.list" "$here/templates/guard/README.md" guard/
 cp "$here"/templates/runs/_template/* runs/_template/; cp "$here/templates/github/workflows/guard-fence.yml" .github/workflows/
@@ -142,6 +143,10 @@ sed -i 's/^max_walltime_minutes: .*/max_walltime_minutes: 600/' guard/budget.car
 git add -A; at 2026-09-23T03:12:00 "chore: relax walltime and add a check"
 git push -q -u origin agent/fp32-check; git switch -q main
 
+card q-batch "Does a batch of 256 casts train as well as 512?" "batch 256 matches RMSE within 0.5%" "validation RMSE of T and S, scripts/score.py" "fraction of casts the model leaves at climatology"
+manifest q-batch 4860 2026-09-24T09:00:00Z hpc-g004
+echo 'cast,score' > runs/cosine-v2/scores.csv
+
 cat > "$root/sacct.rows" <<'S'
 4790|q-warmup|COMPLETED|5400|240
 4801|lr-sweep|COMPLETED|7200|240
@@ -151,6 +156,7 @@ cat > "$root/sacct.rows" <<'S'
 4830|cosine-v2|COMPLETED|13300|240
 4850|fp32-check|RUNNING|3600|240
 4840|explore-07|FAILED|120|60
+4860|q-batch|RUNNING|600|240
 S
 echo "export PATH=$here/tests/mock-bin:\$PATH USER=tester MOCK_SACCT_ROWS=$root/sacct.rows MOCK_SACCT_CPUSECONDS='1200000 900000 1140000'"
 echo "cd $proj"

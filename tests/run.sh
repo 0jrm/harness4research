@@ -867,7 +867,8 @@ if [ -z "$releases" ]; then fail=$((fail+1)); echo "FAIL compat-releases (no tag
 for tag in $releases; do upgrade_from "$tag"; done
 echo "== atlas"
 mkdir -p "$tmp/atlas"; bash "$here/tests/atlas-fixture.sh" "$tmp/atlas" > "$tmp/atlas/env.sh"
-expect atlas-renders ok '6 runs, 1 branch' -- bash -c '. "$1"; "$2" atlas --out "$3/atlas.html" --json "$3/atlas.json"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+atlas_before=$(git -C "$tmp/atlas/casts-v4-training" status --porcelain)
+expect atlas-renders ok '7 runs, 1 branch' -- bash -c '. "$1"; "$2" atlas --out "$3/atlas.html" --json "$3/atlas.json"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-catches-early-compute ok 'started before the card was committed' -- cat "$tmp/atlas/atlas.html"
 expect atlas-broken-receipt ok 'link broken.*commit</b> deadbee' -- cat "$tmp/atlas/atlas.html"
 expect atlas-drawer-key-diff ok 'max_walltime_minutes 240 to 600' -- cat "$tmp/atlas/atlas.html"
@@ -876,6 +877,7 @@ d = json.load(open(sys.argv[1]))
 for r in d["runs"]:
     print(" ~ ".join(["O", r["id"], r["outcome"]]))
     for v in r["violations"]: print(" ~ ".join(["V", r["id"], v]))
+    for m in r["manifests"]: print(" ~ ".join(["M", r["id"], m["path"], str(m["committed"])]))
     for e in (r["report"] or {}).get("evidence", []):
         for l in e["links"]: print(" ~ ".join(["L", r["id"], e["claim"], l["kind"], l["value"], l["state"], l["note"]]))' "$tmp/atlas/atlas.json" > "$tmp/atlas/atlas.tsv"
 expect atlas-escaped-pipe ok '^L ~ cosine-v2 ~ Max \|dT\| at the casts ~ commit ~ [0-9a-f]{7} ~ ok' -- cat "$tmp/atlas/atlas.tsv"
@@ -884,7 +886,13 @@ expect atlas-cause-bullet-not-flagged ok - -- bash -c '! grep -q "rescore.md nam
 expect atlas-verdict-prose ok '^O ~ lr-sweep ~ supported$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-explore-outcome ok '<h3>explore-07</h3><span class="chip explore">explore</span>' -- cat "$tmp/atlas/atlas.html"
 expect atlas-explore-no-violations ok - -- bash -c '! grep -q "^V ~ explore-07" "$1"' _ "$tmp/atlas/atlas.tsv"
-expect atlas-read-only ok '^$' -- git -C "$tmp/atlas/casts-v4-training" status --porcelain
+expect atlas-uncommitted-run ok '^V ~ q-batch ~ question card is not committed, so nothing froze it$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-uncommitted-manifest ok '^M ~ q-batch ~ runs/q-batch/manifest-4860.txt ~ False$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-uncommitted-note ok 'q-batch</a><span class="loose">2 uncommitted</span>.*' -- cat "$tmp/atlas/atlas.html"
+expect atlas-uncommitted-cartouche ok 'plus the working tree \(3 uncommitted files\)' -- cat "$tmp/atlas/atlas.html"
+expect atlas-head-only ok '\(6 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-head-only-hides-disk-run ok - -- bash -c '! grep -q "run-q-batch" "$1"' _ "$tmp/atlas/head.html"
+expect atlas-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$tmp/atlas/casts-v4-training" "$atlas_before"
 expect atlas-refuses-unguarded fail 'no guard/run' -- "$guard" atlas "$tmp/agents"
 
 echo; echo "$pass passed, $fail failed"
