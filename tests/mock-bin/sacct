@@ -1,2 +1,5 @@
 #!/usr/bin/env bash
-if [[ "$*" == *JobID,JobName* ]]; then cat "${MOCK_SACCT_ROWS:-/dev/null}"; else printf '%s\n' ${MOCK_SACCT_CPUSECONDS:-36000 72000}; fi
+if [[ "$*" == *JobID,JobName* ]]; then cat "${MOCK_SACCT_ROWS:-/dev/null}"
+elif [[ "$*" == *JobName,CPUTimeRAW* ]]; then cat "${MOCK_SACCT_RUNROWS:-/dev/null}"
+elif [[ "$*" == *JobName,State* ]]; then cat "${MOCK_SACCT_STATE:-/dev/null}"
+else printf '%s\n' ${MOCK_SACCT_CPUSECONDS:-36000 72000}; fi

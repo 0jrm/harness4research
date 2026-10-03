@@ -1,11 +1,14 @@
 question: <one sentence: what do we not know?>
 decision_this_informs: <what changes depending on the answer>
-setting: <dataset, geometry, code, and pinned commits>
+setting: <dataset, geometry, code, and pinned commits; hosts, GPUs and memory limits go in execution.tsv>
 hypothesis: <what we expect, stated so it can be wrong>
 metric: <exact definition, script path, commit>
 partner_metric: <a metric that punishes doing less: smoothing, averaging, predicting the prior>
 baseline: <run id or configuration of the control>
 baseline_tolerance: <number>
+budget_gpu_hours: <GPU-hours this question is worth; leave the placeholder to use default_run_gpu_hours>
+budget_core_hours: <core-hours this question is worth; leave the placeholder to use default_run_core_hours>
+deadline: <YYYY-MM-DD after which no job for this run starts; leave the placeholder for stop_date alone>
 kill_criteria: <stop if ...>
 negative_result_means: <what we conclude and write down>
 out_of_scope: <what this run will not try>

@@ -25,13 +25,25 @@ if [ ${#watch[@]} -gt 0 ]; then
   if [ -z "$w" ]; then say PASS watched-paths ""; else say RIPPLE watched-paths "$(echo $w)"; fi
 else say UNCHECKED watched-paths "list verifier, test and threshold paths in guard/watch.list"; fi
 
+# launch.sh runs only for a project that opted in or a run with a ledger, so a Slurm project pays nothing for it.
+launch=""; lh=$(get launch_hosts)
+if { [ -n "$lh" ] && [ "$lh" != none ] && [[ $lh != *"<"* ]]; } || git cat-file -e "HEAD:$run_dir/execution.tsv" 2>/dev/null; then
+  launch=$(git show "$base:guard/bin/launch.sh" 2>/dev/null)
+fi
+launched() { bash -c "$launch" guard/bin/launch.sh "$@"; }
+# On a launch host, launch records answer sacct's row query, so the job checks below cover launched jobs too.
+if [ -n "$launch" ] && launched --here; then
+  sacct() { [ -z "$(type -P sacct)" ] || command sacct "$@"; [[ $* != *JobName* ]] || launched --sacct; }
+fi
 if command -v sacct >/dev/null; then
   rows=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobID,JobName,State,ElapsedRaw,TimelimitRaw \
     | awk -F'|' -v r="$run_id" '$2==r')
   # A job is handled once a committed $run_dir/incidents/*.md has the line `job: <id>`.
   declare -A incident=() acked=()
   while IFS=: read -r _ path line; do id=${line#job:}; incident[${id// /}]=incidents/$(basename "$path")
-  done < <(git grep -E '^job: *[0-9][0-9_]* *$' HEAD -- "$run_dir/incidents/" 2>/dev/null)
+  done < <(git grep -E '^job: *[0-9A-Za-z][0-9A-Za-z_.-]* *$' HEAD -- "$run_dir/incidents/" 2>/dev/null)
+  # A committed execution.tsv restart or resume row citing a job handles it the same way.
+  [ -z "$launch" ] || while read -r id ref; do [ -n "${incident[$id]+x}" ] || incident[$id]=$ref; done < <(launched --handled "$run_dir")
   sort_out() {  # sort_out <check> "<id>:<detail> ...": HANDLED for entries with an incident, RIPPLE for the rest
     local open="" done="" e id
     for e in $2; do id=${e%%:*}
@@ -52,9 +64,11 @@ if command -v sacct >/dev/null; then
   if [ ${#acked[@]} -gt "$cap" ]; then say RIPPLE handled-failures "${#acked[@]} handled, over max_handled_failures=$cap"
   else say PASS handled-failures "${#acked[@]} of $cap"; fi
 
+  if [ -z "$(type -P sacct)" ]; then say UNCHECKED budget "sacct not found on PATH on this host"; else
   spent=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW | awk '{s+=$1} END{printf "%d", s/3600}')
   if [[ $max_ch =~ ^[0-9]+$ ]] && [ $(( spent * 100 )) -gt $(( max_ch * 80 )) ]; then say RIPPLE budget "$spent of $max_ch core-h"
   else say PASS budget "$spent of ${max_ch:-?} core-h"; fi
+  fi
 else
   for k in job-states walltime-headroom retries handled-failures budget; do say UNCHECKED "$k" "sacct not found on PATH on this host"; done
 fi
@@ -74,4 +88,10 @@ for c in "$run_dir"/checks/*; do
   else say RIPPLE "check:$(basename "$c")" "$(tail -n1 <<<"$out")"; fi
 done
 [ $found -eq 1 ] || say UNCHECKED domain-checks "no executable $run_dir/checks/*"
+# launch prints nothing unless launch_hosts names a host, so a project that never opted in gets no new line.
+if [ -n "$launch" ]; then
+  while IFS=$'\t' read -r s k d; do
+    if [ "$s" = ENTRIES ]; then sort_out "$k" "$d"; else say "$s" "$k" "$d"; fi
+  done < <(launched --checks "$run_dir")
+fi
 exit $status

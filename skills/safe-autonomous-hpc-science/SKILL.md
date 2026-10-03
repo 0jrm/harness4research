@@ -37,7 +37,8 @@ Pause and ask for these:
 Never do these:
 - use `sudo`, or read, copy, or print credentials, keys, or tokens;
 - touch other users' files;
-- run compute on login nodes, or bypass the scheduler;
+- run compute on login nodes, or bypass the scheduler; on a host named in `guard/budget.card`'s `launch_hosts`, compute goes through `guard/run launch` and nothing else;
+- use `pgrep -f`, `pkill -f`, or any command-line pattern to find or stop a job; `guard/run launch --list` and `--stop <job_id>` read the record written at launch;
 - edit a limit, test, threshold, or monitor to make a run pass.
 
 ## Guards are structure, not prose
@@ -49,6 +50,7 @@ A guarded repo has a `guard/` directory, `FACTS.md`, and a `guard-fence` CI chec
 - Call `guard/run manifest "$RUN_DIR" "$0" "$@"` at the top of every job script. It records commit, dirty count, modules, container, lockfile hashes, input size and mtime (hashes with `HPC_HASH_INPUTS=1`), and the command, and it never overwrites.
 - Run `guard/run ripples <run_dir>` at every wake. Exit 1 means stop new submissions.
 - Run frozen code from `cwd=$(guard/run code <repo> <commit>)` and pass the printed absolute path as the job's working directory. Never build worktree paths by hand.
+- On a launch host (one that `guard/budget.card`'s `launch_hosts` names by its short hostname, as `hostname -s` prints it there, not an ssh alias), start compute only with `guard/run launch <run_dir> --time=T --gpus=<i,j|none> --mem=<GB> [--shm=DIR] [--cwd=DIR] -- <command>`. It applies preflight's gates, refuses while ripples exits 1, caps GPU-hours, memory (anonymous memory plus the declared shm dirs) and walltime, and starts a supervisor that stops the job gently (INT, then TERM, then KILL) when a cap is reached or the host runs out of memory. It prints the job id alone on stdout. Check on jobs with `guard/run launch --list <run_dir>` and stop one with `guard/run launch --stop <job_id> --reason=<why>`. Only that supervisor and `--stop` ever stop a job; ripples reports and never stops anything.
 
 When a guard blocks you, the block is the answer. Report it. Do not route around it.
 
@@ -59,7 +61,7 @@ This text describes guard schema 3. Once per session, read `git show origin/main
 1. Write `runs/<run_id>/question.card` and commit it before any compute.
 2. Reproduce the baseline at the smallest configuration that exercises the whole pipeline. If it misses the card's tolerance, stop and report. Nothing downstream is interpretable without it.
 3. Sketch freely in `runs/explore-<name>/`. Preflight allows those without a card at one node, one hour, and one task, and the fence keeps their results out of reports. Then climb the smoke ladder for the carded run, tiny then small then full. Each rung needs a written pass check. Use the small rung to measure walltime and storage per unit, and rerun preflight with real numbers.
-4. Submit through preflight. Wake on events and run ripples at each wake.
+4. Submit through preflight, or through launch on a launch host. Wake on events and run ripples at each wake. The card holds the design; execution facts (host, GPUs, memory stop, stage length, a resume checkpoint, a restart) go in `runs/<run_id>/execution.tsv` as committed rows `id ts field value why evidence` with ids `x1`, `x2`, ... in order. A resource stop (OUT_OF_MEMORY, HOST_OUT_OF_MEMORY, NODE_FAIL, PREEMPTED, SUPERVISOR_FAILED, CANCELLED, LAUNCH_FAILED: contention or infrastructure, including a run you stopped to free memory) continues with a `restart` or `resume` row citing the job id, which also counts as handling it under `max_handled_failures`. A science stop (FAILED, TIMEOUT) goes to the human; a ledger row cannot clear it. The report's `## Execution history` cites every row.
 5. Verify with a separate model, agent, or script that did not write the code. It reads artifacts and the question card, never the implementer's summary. `runs/<run_id>/checks/` holds the domain checks as executables that exit nonzero on failure. Write checks for NaN/Inf, conservation drift, physical bounds, output identical to input or baseline, and too-good metrics. `guard/watch.list` protects that directory from the implementer by default.
 6. Write the report, then decide continue, kill, or escalate from the card's kill criteria. Log the row.
 
@@ -67,7 +69,7 @@ This text describes guard schema 3. Once per session, read `git show origin/main
 
 A RIPPLE stops new submissions. The agent keeps working on the cause within the verification reserve. It diagnoses at the small rung, reads logs, and writes `runs/<run_id>/incidents/<n>.md` with one `job: <id>` line per job it covers. This matches Autonomous run's rule that mid-run discoveries are the agent's to handle. The ripple that matters most is the agent's own diff touching a guard, a watched path, or the question card. An agent that hits a limit reaches for the limit before the cause, so treat that ripple as a stop.
 
-`guard/run ripples` checks these: guard files untouched, question card frozen, watched paths untouched, bad job states, walltime above 80% of the limit, more than one non-completed job, budget above 80%, quota above 80% via the card's `quota_pct_cmd`, and every domain check. It reports UNCHECKED instead of PASS when it cannot see a value. An unchecked ripple is not a pass.
+`guard/run ripples` checks these: guard files untouched, question card frozen, watched paths untouched, bad job states, walltime above 80% of the limit, more than one non-completed job, budget above 80%, quota above 80% via the card's `quota_pct_cmd`, every domain check, and, for a run with an `execution.tsv`, that every committed row is within the envelope. On a launch host it also reports GPU-hours against `max_gpu_hours`, whether each live launch still has its supervisor and its log, memory against each launch's `--mem` and the host floor, stray processes on a GPU or over half of `host_max_mem_gb`, and tracebacks, CUDA or NCCL errors and non-finite losses in live logs. It reports UNCHECKED instead of PASS when it cannot see a value. An unchecked ripple is not a pass.
 
 A committed incident note turns that job's job-state, walltime and retry ripples into HANDLED lines, which do not stop submissions. A note in the working tree does not count. Once a run has more handled jobs than the card's `max_handled_failures`, ripples flags it again, and the next call is the human's. Never start a new run directory to clear a ripple.
 
@@ -96,6 +98,9 @@ metric: exact definition, script path, commit
 partner_metric: the one that punishes doing less
 baseline: run id or config of the control
 baseline_tolerance: number
+budget_gpu_hours: GPU-hours this question is worth, or the workspace default
+budget_core_hours: core-hours this question is worth, or the workspace default
+deadline: YYYY-MM-DD after which no job for this run starts
 kill_criteria: stop if ...
 negative_result_means: what we conclude
 out_of_scope: what this run will not try
@@ -115,6 +120,17 @@ max_walltime_minutes: 0
 max_concurrent_jobs: 0
 quota_pct_cmd: <site command that prints percent used>
 max_handled_failures: 2
+launch_hosts: none
+max_gpu_hours: 0
+host_max_walltime_minutes: 720
+host_max_mem_gb: 64
+host_min_available_gb: 32
+host_stop_grace_seconds: 60
+host_state_dir: ~/.local/state/guard/launches
+explore_max_gpus: 1
+default_run_gpu_hours: 0
+default_run_core_hours: 0
+stray_ignore: none
 ```
 
 Copy `runs/_template/report.md`. It carries `hypothesis:` copied from the card, or `n/a` in any letter case. A fullwidth letter or a fraction slash in that token counts the same as `n/a`. It holds, in order:

@@ -100,6 +100,14 @@ if [ "${HPC_SPEND_RESERVE:-0}" = 1 ]; then held=0; else held=$reserve; fi
 avail=$(( max_ch - held ))
 [ $(( spent + queued + proj )) -le "$avail" ] \
   || fail "spent $spent + queued $queued + this job $proj core-h exceeds $avail available (max $max_ch, reserve held $held)"
+qget() { [ $explore = 1 ] || awk -F': *' -v k="$1" '$1==k && $2 !~ /</ {print $2; exit}' <<<"$(git show "HEAD:$run_dir/question.card")"; }
+deadline=$(qget deadline)
+[ -z "$deadline" ] || [[ ! $(date +%F) > $deadline ]] || fail "past deadline $deadline in $run_dir/question.card"
+run_max=$(qget budget_core_hours); run_max=${run_max:-$(get default_run_core_hours)}
+if [[ $run_max =~ ^[0-9]+$ ]] && [ "$run_max" -gt 0 ]; then
+  run_spent=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobName,CPUTimeRAW | awk -F'|' -v r="$run_id" '$1==r {s+=$2} END{printf "%d", s/3600}')
+  [ $(( run_spent + proj )) -le "$run_max" ] || fail "this run spent $run_spent + this job $proj core-h exceeds budget_core_hours=$run_max"
+fi
 live=$(squeue -A "$acct" -u "$USER" -h | wc -l)
 [ $(( live + n )) -le "$max_conc" ] || fail "$live live + $n new jobs exceeds max_concurrent_jobs=$max_conc"
 

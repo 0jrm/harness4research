@@ -95,7 +95,7 @@ add_keys() {
 }
 t=$here/templates
 if [ $update = 0 ]; then
-  for f in preflight ripples manifest fence code; do place "$t/guard/bin/$f.sh" "guard/bin/$f.sh" replace; done
+  for f in preflight ripples manifest fence code launch; do place "$t/guard/bin/$f.sh" "guard/bin/$f.sh" replace; done
   place "$t/guard/run" guard/run replace
   place "$t/guard/budget.card" guard/budget.card
   place "$t/guard/watch.list" guard/watch.list
@@ -110,7 +110,7 @@ if [ $update = 0 ]; then
   place "$t/CLAUDE.md" CLAUDE.md
   "$here/lib/survey.sh" "$repo" > "$wt/guard/SURVEY.md"; added+=(guard/SURVEY.md)
 else
-  for f in preflight ripples manifest fence code; do merge_in "guard/bin/$f.sh" "guard/bin/$f.sh"; done
+  for f in preflight ripples manifest fence code launch; do merge_in "guard/bin/$f.sh" "guard/bin/$f.sh"; done
   merge_in guard/run guard/run; chmod +x "$wt/guard/run"
   merge_in guard/README.md guard/README.md
   merge_in github/workflows/guard-fence.yml .github/workflows/guard-fence.yml

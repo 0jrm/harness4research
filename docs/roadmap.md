@@ -12,13 +12,13 @@ The gaps are below, ordered by what they cost in that session. Every item reache
 | # | Item | Status |
 |---|---|---|
 | 0 | Upgrade strategy and compatibility contract | done, schema 2 |
-| 1 | `guard/run launch` for a host without a scheduler | next |
+| 1 | `guard/run launch` for a host without a scheduler | done, schema 3 |
 | 2 | Standard check pack, checks run from the protected branch | next |
 | 6 | Close the handled-failures bypass | small, early |
 | 5 | Script arguments for preflight | small, early |
 | 3 | Link question cards to what ran | after 1 |
 | 7 | Skills reach every session | small |
-| 4 | Freeze a card at first launch instead of first commit | later |
+| 4 | The execution envelope: design in the card, execution in `execution.tsv` | done, schema 3 |
 | 9 | One checklist per action | later |
 | 8 | Continuity across sessions | later, skill only |
 
@@ -86,14 +86,9 @@ Every ripples run printed `UNCHECKED domain-checks`, which trained people to ign
   - Ripples compares `data_path` with the manifest's `input:` lines.
 - **Compatibility.** Only appended lines and optional keys.
 
-## 4. Freeze a card at first launch
+## 4. The execution envelope
 
-This is deferred. The frozen card is the part the feedback valued most, and the friction cost one superseded run id. A committed manifest is not a reliable freeze anchor, because manifests reach git only when the agent commits them. An agent could run card A, edit it to B, and report with a green fence.
-
-When this is built, three fence rules make it safe:
-- an added report needs at least one committed manifest in its run directory;
-- every committed manifest's `card:` must match the head card;
-- changing or deleting a committed manifest fails.
+Freezing the card at first launch was dropped. The card stays frozen at first commit and holds only the design; the execution facts that used to force a new run id (host, GPUs, memory limit, a restart after a resource stop such as OOM, a reboot, preemption, a cancelled or never-started launch; a science stop, FAILED or TIMEOUT, still goes to the human) go in `runs/<id>/execution.tsv`, an append-only ledger with a fixed vocabulary. Ripples checks every committed row against the budget card and the launch records, and the fence keeps the ledger append-only and makes the report cite every row. [compatibility.md](compatibility.md) lists the keys and the rules.
 
 ## 5. Script arguments for preflight
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# usage: guard/run <preflight|ripples|manifest|fence|code> [args...]
+# usage: guard/run <preflight|ripples|manifest|fence|code|launch> [args...]
 # Runs the script as it exists on the protected branch, so edits on a working branch have no effect.
 # HPC_GUARD_LOCAL=1 runs the working-tree copy instead, for the bootstrap before guard/ is merged.
 set -euo pipefail
 cmd=${1:-}; shift || true
 base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
 case $cmd in
-  preflight|ripples|manifest|fence|code) ;;
-  *) echo "usage: guard/run <preflight|ripples|manifest|fence|code> [args...]" >&2
+  preflight|ripples|manifest|fence|code|launch) ;;
+  *) echo "usage: guard/run <preflight|ripples|manifest|fence|code|launch> [args...]" >&2
      schema=$(git show "$base:guard/VERSION" 2>/dev/null | awk -F': *' '$1=="schema" {print $2; exit}' || true)
      echo "This project's guard is schema ${schema:-1} (guard/VERSION on $base). A command it lacks needs a human to run guard init --update." >&2
      exit 64 ;;
