@@ -911,6 +911,18 @@ expect atlas-serve-run ok 'id="run-cosine-v2"' -- curl -s "http://127.0.0.1:$por
 expect atlas-serve-footer ok 'Served live from .*; re-surveyed at most every 1 min on reload' -- curl -s "http://127.0.0.1:$port/"
 expect atlas-serve-json ok '"id": "q-batch"' -- curl -s "http://127.0.0.1:$port/atlas.json"
 kill "$serve_pid" 2>/dev/null; wait "$serve_pid" 2>/dev/null
+sock="$tmp/atlas/atlas.sock"
+( . "$tmp/atlas/env.sh"; exec "$guard" atlas --serve "$sock" --every 60 --no-ripples ) > "$tmp/atlas/sock.log" 2>&1 &
+sock_pid=$!
+for _ in $(seq 50); do [ -S "$sock" ] && curl -s -o /dev/null --unix-socket "$sock" http://atlas/atlas.json && break; sleep 0.2; done
+expect atlas-sock-line ok "^atlas: serving unix:$sock from " -- cat "$tmp/atlas/sock.log"
+expect atlas-sock-page ok 'id="run-cosine-v2"' -- curl -s --unix-socket "$sock" http://atlas/
+expect atlas-sock-mode ok '^600$' -- stat -c %a "$sock"
+kill -TERM "$sock_pid" 2>/dev/null; wait "$sock_pid" 2>/dev/null
+expect atlas-sock-removed ok '^gone$' -- bash -c '[ ! -e "$1" ] && echo gone' _ "$sock"
+echo plain > "$tmp/atlas/not-a-socket"
+expect atlas-sock-refuses-file fail 'not a socket' -- bash -c '. "$1"; "$2" atlas --serve "$3" --no-ripples' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas/not-a-socket"
+expect atlas-serve-bad-value fail "port number or a socket path" -- "$guard" atlas --serve nope
 expect atlas-refuses-unguarded fail 'no guard/run' -- "$guard" atlas "$tmp/agents"
 
 echo; echo "$pass passed, $fail failed"
