@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # usage: tests/atlas-fixture.sh <dir>
 # Builds a guarded demo project at <dir>/casts-v4-training with an origin, six committed runs, one run only on disk,
-# an agent branch and fake Slurm rows.
+# an agent branch, fake Slurm rows and a sibling code repo <dir>/casts-loader that a report cites by name.
 # Prints the env lines a caller exports before running ripples or guard atlas against it.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -25,7 +25,9 @@ manifest() {  # manifest <run> <job> <time> <host> [inputs]
     echo "dirty_files: 0"; echo "modules: python/3.11 cuda/12.4"; echo "container: none"
     echo "input: data/casts-v4.nc 81264512 1758000000"; echo "command: jobs/train.sh --config runs/$1/config.yaml"; } > "runs/$1/manifest-$2.txt"
 }
-rm -rf "$root/casts-v4-training.git" "$proj"
+rm -rf "$root/casts-v4-training.git" "$proj" "$root/casts-loader"
+git init -q -b main "$root/casts-loader"; echo 'def load(): pass' > "$root/casts-loader/loader.py"
+git -C "$root/casts-loader" add -A; (cd "$root/casts-loader" && at 2026-09-01T09:00:00 "feat: loader"); loader=$(git -C "$root/casts-loader" rev-parse --short HEAD)
 git init -q --bare -b main "$root/casts-v4-training.git"; git clone -q "$root/casts-v4-training.git" "$proj" 2>/dev/null; cd "$proj"; git checkout -q -b main
 mkdir -p guard/bin runs/_template src jobs .github/workflows
 cp "$here"/templates/guard/bin/*.sh guard/bin/; cp "$here/templates/guard/run" "$here/templates/guard/watch.list" "$here/templates/guard/README.md" guard/
@@ -116,6 +118,7 @@ Verdict against kill criteria: continue
 | Climatology fraction | 0.8% (0.2%) | runs/cosine-v2/scores.csv | 4830 | $(git rev-parse --short HEAD) |
 | RMSE at half the steps | 1.2% | runs/cosine-v2/manifest-4812.txt | 4812 | deadbee |
 | Max \|dT\| at the casts | 0.02 degC | \`runs/cosine-v2/manifest-4830.txt\` (job line) | 4830 | $(git rev-parse --short HEAD) |
+| Predictions on the shared disk | 4 files | \`/unity/g9/nobody/casts-v4/pred.nc\` | skynet interactive, GPU 2 | casts-loader $loader |
 
 ## Deviations from the question card
 - Batch size halved after incident oom-4811, logged before the rerun.

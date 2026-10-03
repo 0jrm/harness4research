@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""usage: guard atlas [repo] [--out FILE] [--json FILE] [--no-ripples] [--head-only]
+"""usage: guard atlas [repo] [--out FILE] [--json FILE] [--no-ripples] [--head-only] [--code NAME[=PATH]]...
 
 Writes one self-contained HTML page that charts a guarded project: compute hosts and their fences,
 budget against the verification reserve, a runs by checks ripples matrix, the question cards as a
@@ -10,7 +10,7 @@ working tree, so uncommitted run dirs and manifests show up; --head-only reads H
 Ripples come from the project's own guard/run, so the page shows exactly what the agent sees.
 Python 3 standard library only.
 """
-import argparse, datetime as dt, html, json, os, re, subprocess, sys
+import argparse, datetime as dt, glob, html, json, os, re, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 
 def git(top, *args, ok=False):
@@ -91,13 +91,26 @@ def ripples(top, base, run_dir):
         return [{"status": "UNCHECKED", "check": "ripples", "detail": (p.stderr.strip() or "no output")[:200]}]
     return [{"status": s, "check": c, "detail": d.strip()} for s, c, d in lines]
 
+def repo_at(path):
+    found = (git(path, "rev-parse", "--show-toplevel") or "").strip() if os.path.isdir(path) else ""
+    return path if found and os.path.realpath(found) == os.path.realpath(path) else None
+
+def find_code(top, names, given):
+    code = {}
+    for name in sorted(set(names) | set(given)):
+        if given.get(name):
+            code[name] = repo_at(os.path.abspath(given[name]))
+        else:
+            code[name] = next(filter(None, (repo_at(os.path.join(d, name)) for d in (top, os.path.dirname(top)))), None)
+    return code
+
 def mtime(top, path):
     try:
         return dt.datetime.fromtimestamp(os.path.getmtime(os.path.join(top, path)), dt.timezone.utc).isoformat()
     except OSError:
         return ""
 
-def collect(top, base, run_ripples=True, worktree=True):
+def collect(top, base, run_ripples=True, worktree=True, given_code=None):
     head = git(top, "rev-parse", "HEAD").strip()
     base_sha = (git(top, "rev-parse", base) or "").strip()
     budget = kv(show(top, base, "guard/budget.card"))
@@ -170,8 +183,11 @@ def collect(top, base, run_ripples=True, worktree=True):
         with ThreadPoolExecutor(max_workers=8) as ex:
             for r, rip in zip(runs, ex.map(lambda r: ripples(top, base, f"runs/{r['id']}"), runs)):
                 r["ripples"] = rip
+    cited = [m.group(1) for r in runs for e in (r["report"]["evidence"] if r["report"] else [])
+             for m in [COMMIT.fullmatch(clean(e["commit"]))] if m and m.group(1)]
+    code = find_code(top, cited, given_code or {})
     for r in runs:
-        trace_evidence(top, r, files)
+        trace_evidence(top, r, tree, code, worktree)
         r["outcome"] = outcome(r, runs)
         r["violations"] = violations(r)
     branches = []
@@ -200,34 +216,87 @@ def collect(top, base, run_ripples=True, worktree=True):
     project = re.sub(r"\.git$", "", re.split(r"[/:]", origin)[-1])
     return {"project": project, "top": top, "base": base,
             "base_sha": base_sha, "head": head, "worktree": worktree,
-            "uncommitted": sum(len(r["uncommitted_files"]) for r in runs),
+            "uncommitted": sum(len(r["uncommitted_files"]) for r in runs), "code": code,
             "budget": budget, "version": version, "watch": watch, "runs": runs, "branches": branches,
             "generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
 
-def trace_evidence(top, run, tree):
+SLURM = re.compile(r"[0-9][0-9_]*")
+COMMIT = re.compile(r"(?:([\w.-]+)\s+)?([0-9a-f]{7,40})")
+
+def clean(cell):
+    return cell.strip().strip("`").strip()
+
+def link(kind, value, state, note):
+    return {"kind": kind, "value": value, "state": state, "note": note}
+
+def exists(path):
+    return os.path.exists(path) or (any(c in path for c in "*?[") and bool(glob.glob(path)))
+
+def artifact_link(cell, head_tree, top):
+    tokens = re.findall(r"`([^`]+)`", cell) or [cell]
+    path = next((t.strip() for t in tokens if "/" in t), None)
+    if not path:
+        return link("artifact", cell or "none", "unknown", "not a path")
+    if os.path.isabs(path):
+        if exists(path):
+            return link("artifact", path, "local", "on disk here, not committed")
+        return link("artifact", path, "unknown", "absolute path not on this host")
+    rel = os.path.normpath(path)
+    if rel in head_tree:
+        return link("artifact", path, "ok", "committed at HEAD")
+    if top and exists(os.path.join(top, rel)):
+        return link("artifact", path, "local", "on disk here, not committed")
+    return link("artifact", path, "broken", "not in the repository or on disk")
+
+def job_link(cell, manifests_by_job):
+    v = clean(cell)
+    if v.lower() in ("", "none", "n/a"):
+        return link("job", v or "none", "unknown", "no job cited")
+    if not SLURM.fullmatch(v):
+        return link("job", v, "unknown", "no scheduler job id, so no manifest to match")
+    m = manifests_by_job.get(v)
+    if not m:
+        return link("job", v, "broken", "no manifest with this job id in the run")
+    return link("job", v, "ok", f"manifest on {m.get('host', '?')}" + ("" if m["committed"] else " (uncommitted)"))
+
+def commit_link(cell, top, code):
+    v = clean(cell)
+    m = COMMIT.fullmatch(v)
+    if not m:
+        return link("commit", v or "none", "broken", "no commit sha in the cell")
+    name, sha = m.groups()
+    resolves = lambda repo: git(repo, "rev-parse", "--verify", "-q", f"{sha}^{{commit}}") is not None
+    if name:
+        if not code.get(name):
+            return link("commit", v, "unknown", f"{name} is not checked out here")
+        return link("commit", v, "ok", f"resolves in {name}") if resolves(code[name]) else \
+            link("commit", v, "broken", f"does not resolve in {name}")
+    if resolves(top):
+        return link("commit", v, "ok", "resolves in the project")
+    hit = next((n for n, p in code.items() if p and resolves(p)), None)
+    if hit:
+        return link("commit", v, "ok", f"resolves in {hit}")
+    missing = [n for n, p in code.items() if not p]
+    if missing:
+        return link("commit", v, "unknown", f"not in the project; {', '.join(missing)} not checked out here")
+    return link("commit", v, "broken", "does not resolve in the project" + "".join(f" or {n}" for n in code))
+
+def trace_evidence(top, run, tree, code, worktree):
     by_job = {m.get("job_id"): m for m in run["manifests"]}
     for e in run["report"]["evidence"] if run["report"] else []:
-        links = []
-        art = e["artifact"]
-        links.append(("artifact", art or "none", "ok" if art in tree else "broken",
-                      "committed at HEAD" if art in tree else "not in the repository at HEAD"))
-        m = by_job.get(e["job"])
-        links.append(("job", e["job"] or "none", "ok" if m else "broken",
-                      f"manifest on {m.get('host', '?')}" if m else "no manifest with this job id in the run"))
-        c = e["commit"]
-        exists = bool(c) and git(top, "rev-parse", "--verify", "-q", f"{c}^{{commit}}") is not None
-        links.append(("commit", c or "none", "ok" if exists else "broken",
-                      "resolves in the repository" if exists else "does not resolve"))
+        links = [artifact_link(e["artifact"], tree, top if worktree else None), job_link(e["job"], by_job),
+                 commit_link(e["commit"], top, code)]
+        m = by_job.get(clean(e["job"]))
         if m and m.get("card"):
             same = run["card_blob"].startswith(m["card"])
-            links.append(("card", m["card"][:12], "ok" if same else "broken",
-                          "matches the card read here" if same else "the card changed after this job"))
+            links.append(link("card", m["card"][:12], "ok" if same else "broken",
+                              "matches the card read here" if same else "the card changed after this job"))
         else:
-            links.append(("card", "not recorded", "unknown", "manifests record the card hash from roadmap item 3"))
+            links.append(link("card", "not recorded", "unknown", "manifests record the card hash from roadmap item 3"))
         if m:
-            links.append(("inputs", f"{len(m['inputs'])} listed", "ok" if m["inputs"] else "unknown",
-                          "; ".join(m["inputs"]) or "no inputs.list for this run"))
-        e["links"] = [dict(zip(("kind", "value", "state", "note"), l)) for l in links]
+            links.append(link("inputs", f"{len(m['inputs'])} listed", "ok" if m["inputs"] else "unknown",
+                              "; ".join(m["inputs"]) or "no inputs.list for this run"))
+        e["links"] = links
 
 def outcome(r, runs):
     if r["id"].startswith("explore-"):
@@ -266,6 +335,11 @@ COLS = [("guard-untouched", "guard"), ("question-card-frozen", "card"), ("watche
         ("job-states", "jobs"), ("walltime-headroom", "walltime"), ("retries", "retries"),
         ("handled-failures", "handled"), ("budget", "budget"), ("quota", "quota"), ("domain", "domain")]
 WORD = {"PASS": "pass", "RIPPLE": "ripple", "HANDLED": "handled", "UNCHECKED": "unchecked"}
+LINKS = {"ok": ("background:var(--shoal);color:var(--passt)", "holds: committed, or resolves"),
+         "local": ("background:var(--land);color:var(--handt)", "on disk here, not committed"),
+         "unknown": ("background:repeating-linear-gradient(135deg,transparent 0 4px,var(--rule) 4px 5px);color:var(--sound);font-style:italic",
+                     "cannot be checked from here"),
+         "broken": ("background:var(--magt);color:var(--mag);box-shadow:inset 0 0 0 1px var(--mag)", "broken, points at nothing")}
 
 def cell(r, key):
     lines = r["ripples"]
@@ -539,9 +613,7 @@ td{padding:6px 8px;border-bottom:.5px solid var(--rule);vertical-align:top}
 .warn{margin:8px 0;padding:0;list-style:none;font-size:14px;color:var(--mag)}.warn li::before{content:"\\25B2  ";font-size:10px}
 .evidence td.num{white-space:nowrap}.trace{display:flex;flex-wrap:wrap;gap:4px}
 .link{font-size:12.5px;padding:2px 7px;border-radius:3px;white-space:nowrap}.link b{font-weight:500}
-.chip.loose-chip{background:var(--land);color:var(--handt);border-color:var(--handt)}.link.ok{background:var(--shoal);color:var(--passt)}.link.broken{background:var(--magt);color:var(--mag);box-shadow:inset 0 0 0 1px var(--mag)}
-.link.unknown{background:repeating-linear-gradient(135deg,transparent 0 4px,var(--rule) 4px 5px);color:var(--sound);font-style:italic}
-.loose{display:block;font-size:12px;color:var(--handt)}.matrix td:first-child .chip{margin-left:8px}
+.legend .link{white-space:normal}.chip.loose-chip{background:var(--land);color:var(--handt);border-color:var(--handt)}.loose{display:block;font-size:12px;color:var(--handt)}.matrix td:first-child .chip{margin-left:8px}
 ul.plain{margin:0;padding-left:18px;font-size:15px}.note{color:var(--sound);font-size:15px}
 .drawer td.alarm{color:var(--mag)}.drawer code{font:inherit;font-size:13px}
 footer{margin-top:60px;font-size:13px;color:var(--sound);border-top:.5px solid var(--rule);padding-top:12px}
@@ -566,6 +638,8 @@ def render(data):
         f'<td class="{"alarm" if b["watched"] else ""}">{E(", ".join(b["watched"])) or "untouched"}</td><td>{E(b["subject"])}</td></tr>'
         for b in data["branches"])
     read_at = f'HEAD {data["head"][:7]}' + (f' plus the working tree ({n(data["uncommitted"], "uncommitted file")})' if data["worktree"] else "")
+    code = "; ".join(f"{k} at {v}" if v else f"{k} not checked out here" for k, v in data["code"].items()) or "none cited"
+    link_key = "".join(f'<span class="link {k}">{E(k)}</span>{E(t)}' for k, (_, t) in LINKS.items())
     open_runs = sum(1 for r in runs if any(l["status"] == "RIPPLE" for l in r["ripples"]))
     unchecked = sum(1 for r in runs if cell(r, "domain")[0] == "unchecked")
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -573,13 +647,14 @@ def render(data):
 <title>Chart of {E(data["project"])}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500&family=Spectral:ital,wght@1,400;1,500&display=swap" rel="stylesheet">
-<style>{CSS}</style></head><body>
+<style>{CSS}{"".join(f".link.{k}{{{c}}}" for k, (c, _) in LINKS.items())}</style></head><body>
 <nav aria-label="Sections"><a href="#waters">Waters</a><a href="#ripples">Ripples</a><a href="#questions">Questions</a><a href="#runs">Runs</a><a href="#drawer">Drawer</a></nav>
 <main>
 <section class="cartouche"><div>
 <h1><small>Chart of the guarded project</small>{E(data["project"])}</h1>
 <dl><dt>Datum</dt><dd>{E(data["base"])} at {E(data["base_sha"][:7])}</dd>
 <dt>Runs read at</dt><dd>{E(read_at)}</dd>
+<dt>Code</dt><dd>{E(code)}</dd>
 <dt>Guard</dt><dd>schema {E(v.get("schema", "1"))}, release {E(v.get("release", "unknown"))}</dd>
 <dt>Soundings</dt><dd>core-hours, from sacct via ripples</dd>
 <dt>Surveyed</dt><dd>{E(data["generated"])}</dd></dl>
@@ -600,7 +675,8 @@ def render(data):
 <div class="legend"><span class="key k-sup"></span>supported<span class="key k-neg"></span>clean negative<span class="key k-open"></span>open or explore
 <span class="key k-dash"></span>superseded or not run<span class="key k-pair"></span>no partner metric</div>
 
-<h2 id="runs">Runs</h2><p class="lede">Shaded time is before the card was committed. Compute there would be a violation.</p>
+<h2 id="runs">Runs</h2><p class="lede">Shaded time is before the card was committed. Compute there would be a violation. Each evidence row carries its receipts; hover one for why it has its state.</p>
+<div class="legend">{link_key}</div>
 {"".join(run_block(r) for r in runs)}
 
 <h2 id="drawer">Drawer</h2><p class="lede">Branches ahead of {E(data["base"])} and whether they touch guard files, the workflow, or watched paths. The fence blocks these from merging.</p>
@@ -616,6 +692,7 @@ def main():
     ap.add_argument("--json", default=None, help="also write the collected data as JSON")
     ap.add_argument("--no-ripples", action="store_true", help="skip running guard/run ripples")
     ap.add_argument("--head-only", action="store_true", help="read runs from HEAD only, ignoring the working tree")
+    ap.add_argument("--code", action="append", default=[], metavar="NAME[=PATH]", help="a code repository commit cells may cite (repeatable)")
     a = ap.parse_args()
     bare = (git(a.repo, "rev-parse", "--is-bare-repository") or "").strip() == "true"
     top = (git(a.repo, "rev-parse", "--absolute-git-dir" if bare else "--show-toplevel") or "").strip()
@@ -624,7 +701,8 @@ def main():
     base = os.environ.get("HPC_GUARD_REF") or (git(top, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") or "origin/main").strip()
     if git(top, "cat-file", "-e", f"{base}:guard/run") is None:
         sys.exit(f"guard atlas: {top} has no guard/run on {base}; run guard init first")
-    data = collect(top, base, not (a.no_ripples or bare), not (a.head_only or bare))
+    code = dict((c.split("=", 1) + [""])[:2] for c in a.code)
+    data = collect(top, base, not (a.no_ripples or bare), not (a.head_only or bare), code)
     out = a.out or os.path.join(os.getcwd(), "atlas.html")
     with open(out, "w") as f:
         f.write(render(data))

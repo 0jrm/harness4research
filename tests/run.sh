@@ -881,6 +881,12 @@ for r in d["runs"]:
     for e in (r["report"] or {}).get("evidence", []):
         for l in e["links"]: print(" ~ ".join(["L", r["id"], e["claim"], l["kind"], l["value"], l["state"], l["note"]]))' "$tmp/atlas/atlas.json" > "$tmp/atlas/atlas.tsv"
 expect atlas-escaped-pipe ok '^L ~ cosine-v2 ~ Max \|dT\| at the casts ~ commit ~ [0-9a-f]{7} ~ ok' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-artifact-note ok '^L ~ cosine-v2 ~ Max .* ~ artifact ~ runs/cosine-v2/manifest-4830.txt ~ ok ~ committed at HEAD$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-artifact-absent-host ok 'artifact ~ /unity/g9/nobody/casts-v4/pred.nc ~ unknown ~ absolute path not on this host$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-artifact-on-disk ok 'artifact ~ runs/cosine-v2/scores.csv ~ local ~ on disk here, not committed$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-job-not-slurm ok 'job ~ skynet interactive, GPU 2 ~ unknown ~ no scheduler job id' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-commit-in-code-repo ok 'commit ~ casts-loader [0-9a-f]{7} ~ ok ~ resolves in casts-loader$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-code-row ok '<dt>Code</dt><dd>casts-loader at /' -- cat "$tmp/atlas/atlas.html"
 expect atlas-cause-bullet ok 'rescore.md</b>: the scorer read the wrong month of casts., fix: pinned the month' -- cat "$tmp/atlas/atlas.html"
 expect atlas-cause-bullet-not-flagged ok - -- bash -c '! grep -q "rescore.md names no root cause" "$1"' _ "$tmp/atlas/atlas.tsv"
 expect atlas-verdict-prose ok '^O ~ lr-sweep ~ supported$' -- cat "$tmp/atlas/atlas.tsv"
