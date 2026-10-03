@@ -865,6 +865,66 @@ oldest=$(cat "$here/tests/oldest-supported")
 releases=$(git -C "$here" tag -l 'v*' --contains "$oldest" --merged HEAD 2>/dev/null)
 if [ -z "$releases" ]; then fail=$((fail+1)); echo "FAIL compat-releases (no tags from $oldest; fetch them with git fetch --tags)"; fi
 for tag in $releases; do upgrade_from "$tag"; done
+echo "== atlas"
+mkdir -p "$tmp/atlas"; bash "$here/tests/atlas-fixture.sh" "$tmp/atlas" > "$tmp/atlas/env.sh"
+atlas_before=$(git -C "$tmp/atlas/casts-v4-training" status --porcelain)
+expect atlas-renders ok '7 runs, 1 branch' -- bash -c '. "$1"; "$2" atlas --out "$3/atlas.html" --json "$3/atlas.json"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-catches-early-compute ok 'started before the card was committed' -- cat "$tmp/atlas/atlas.html"
+expect atlas-broken-receipt ok 'link broken.*commit</b> deadbee' -- cat "$tmp/atlas/atlas.html"
+expect atlas-drawer-key-diff ok 'max_walltime_minutes 240 to 600' -- cat "$tmp/atlas/atlas.html"
+python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+for r in d["runs"]:
+    print(" ~ ".join(["O", r["id"], r["outcome"]]))
+    for v in r["violations"]: print(" ~ ".join(["V", r["id"], v]))
+    for m in r["manifests"]: print(" ~ ".join(["M", r["id"], m["path"], str(m["committed"])]))
+    for e in (r["report"] or {}).get("evidence", []):
+        for l in e["links"]: print(" ~ ".join(["L", r["id"], e["claim"], l["kind"], l["value"], l["state"], l["note"]]))' "$tmp/atlas/atlas.json" > "$tmp/atlas/atlas.tsv"
+expect atlas-escaped-pipe ok '^L ~ cosine-v2 ~ Max \|dT\| at the casts ~ commit ~ [0-9a-f]{7} ~ ok' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-artifact-note ok '^L ~ cosine-v2 ~ Max .* ~ artifact ~ runs/cosine-v2/manifest-4830.txt ~ ok ~ committed at HEAD$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-artifact-absent-host ok 'artifact ~ /unity/g9/nobody/casts-v4/pred.nc ~ unknown ~ absolute path not on this host$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-artifact-on-disk ok 'artifact ~ runs/cosine-v2/scores.csv ~ local ~ on disk here, not committed$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-job-not-slurm ok 'job ~ skynet interactive, GPU 2 ~ unknown ~ no scheduler job id' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-commit-in-code-repo ok 'commit ~ casts-loader [0-9a-f]{7} ~ ok ~ resolves in casts-loader$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-code-row ok '<dt>Code</dt><dd>casts-loader at /' -- cat "$tmp/atlas/atlas.html"
+expect atlas-cause-bullet ok 'rescore.md</b>: the scorer read the wrong month of casts., fix: pinned the month' -- cat "$tmp/atlas/atlas.html"
+expect atlas-cause-bullet-not-flagged ok - -- bash -c '! grep -q "rescore.md names no root cause" "$1"' _ "$tmp/atlas/atlas.tsv"
+expect atlas-verdict-prose ok '^O ~ lr-sweep ~ supported$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-explore-outcome ok '<h3>explore-07</h3><span class="chip explore">explore</span>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-explore-no-violations ok - -- bash -c '! grep -q "^V ~ explore-07" "$1"' _ "$tmp/atlas/atlas.tsv"
+expect atlas-uncommitted-run ok '^V ~ q-batch ~ question card is not committed, so nothing froze it$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-uncommitted-manifest ok '^M ~ q-batch ~ runs/q-batch/manifest-4860.txt ~ False$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-uncommitted-note ok 'q-batch</a><span class="loose">2 uncommitted</span>.*' -- cat "$tmp/atlas/atlas.html"
+expect atlas-uncommitted-cartouche ok 'plus the working tree \(3 uncommitted files\)' -- cat "$tmp/atlas/atlas.html"
+expect atlas-head-only ok '\(6 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-no-ripples-says-so ok 'ripples not run, so no check reached a verdict' -- cat "$tmp/atlas/head.html"
+expect atlas-head-only-hides-disk-run ok - -- bash -c '! grep -q "run-q-batch" "$1"' _ "$tmp/atlas/head.html"
+expect atlas-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$tmp/atlas/casts-v4-training" "$atlas_before"
+expect atlas-runs-filter ok '\(2 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --runs "cosine-*" --runs "explore-*" --title casts --out "$3/filtered.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-runs-title ok '<small>Chart of the guarded project casts-v4-training, runs cosine-\*, explore-\*</small>casts</h1>' -- cat "$tmp/atlas/filtered.html"
+port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+( . "$tmp/atlas/env.sh"; exec "$guard" atlas --serve "$port" --every 60 --no-ripples ) > "$tmp/atlas/serve.log" 2>&1 &
+serve_pid=$!
+for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$port/atlas.json" && break; sleep 0.2; done
+expect atlas-serve-line ok "^atlas: serving http://127.0.0.1:$port/ from " -- cat "$tmp/atlas/serve.log"
+expect atlas-serve-page ok '<meta http-equiv="refresh" content="60">' -- curl -s "http://127.0.0.1:$port/"
+expect atlas-serve-run ok 'id="run-cosine-v2"' -- curl -s "http://127.0.0.1:$port/"
+expect atlas-serve-footer ok 'Served live from .*; re-surveyed at most every 1 min on reload' -- curl -s "http://127.0.0.1:$port/"
+expect atlas-serve-json ok '"id": "q-batch"' -- curl -s "http://127.0.0.1:$port/atlas.json"
+kill "$serve_pid" 2>/dev/null; wait "$serve_pid" 2>/dev/null
+sock="$tmp/atlas/atlas.sock"
+( . "$tmp/atlas/env.sh"; exec "$guard" atlas --serve "$sock" --every 60 --no-ripples ) > "$tmp/atlas/sock.log" 2>&1 &
+sock_pid=$!
+for _ in $(seq 50); do [ -S "$sock" ] && curl -s -o /dev/null --unix-socket "$sock" http://atlas/atlas.json && break; sleep 0.2; done
+expect atlas-sock-line ok "^atlas: serving unix:$sock from " -- cat "$tmp/atlas/sock.log"
+expect atlas-sock-page ok 'id="run-cosine-v2"' -- curl -s --unix-socket "$sock" http://atlas/
+expect atlas-sock-mode ok '^600$' -- stat -c %a "$sock"
+kill -TERM "$sock_pid" 2>/dev/null; wait "$sock_pid" 2>/dev/null
+expect atlas-sock-removed ok '^gone$' -- bash -c '[ ! -e "$1" ] && echo gone' _ "$sock"
+echo plain > "$tmp/atlas/not-a-socket"
+expect atlas-sock-refuses-file fail 'not a socket' -- bash -c '. "$1"; "$2" atlas --serve "$3" --no-ripples' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas/not-a-socket"
+expect atlas-serve-bad-value fail "port number or a socket path" -- "$guard" atlas --serve nope
+expect atlas-refuses-unguarded fail 'no guard/run' -- "$guard" atlas "$tmp/agents"
 
 echo; echo "$pass passed, $fail failed"
 [ $fail -eq 0 ]

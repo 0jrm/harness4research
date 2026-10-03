@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# usage: guard <survey|init|archive|preflight|ripples|manifest|fence|code|launch> [args...]
+# usage: guard <survey|init|archive|preflight|ripples|manifest|fence|code|launch|atlas|version> [args...]
 set -euo pipefail
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 cmd=${1:-help}; shift || true
 case $cmd in
   survey|init|archive) exec bash "$here/lib/$cmd.sh" "$@" ;;
+  atlas) exec python3 "$here/lib/atlas.py" "$@" ;;
   preflight|ripples|manifest|fence|code|launch)
     # Run the enclosing project's protected guard/run, never this harness's templates.
     base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
@@ -36,6 +37,7 @@ Project setup, run from your machine:
   init <repo> --update  refresh guard scripts in a project that already has guard/
   version             this harness's release and schema, and inside a project whether either side is behind
   archive <repo>      tag every remote branch before any cleanup
+  atlas [repo]        read-only HTML chart of runs, ripples, cards, receipts and the drawer; --serve PORT|SOCKET serves it live
 
 Inside a guarded project, guard <command> runs the project's guard/run from the protected branch:
   preflight, ripples, manifest, fence, code
