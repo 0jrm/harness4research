@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # usage: tests/atlas-fixture.sh <dir>
-# Builds a guarded demo project at <dir>/casts-v4-training with an origin, eleven committed runs, two runs only on disk,
+# Builds a guarded demo project at <dir>/casts-v4-training with an origin, twelve committed runs, two runs only on disk,
 # an agent branch, a report only on an unmerged branch, a checkout one commit behind origin/main, fake Slurm rows
 # and a sibling code repo <dir>/casts-loader that a report cites by name.
 # Prints the env lines a caller exports before running ripples or guard atlas against it.
@@ -148,12 +148,13 @@ git add -A; at 2026-09-23T03:12:00 "chore: relax walltime and add a check"
 git push -q -u origin agent/fp32-check; git switch -q main
 
 card lr-sweep-fine "Does a finer sweep around 3e-4 move the baseline?" "the best rate stays within 20% of 3e-4" "validation RMSE of T and S, scripts/score.py" "fraction of casts the model leaves at climatology"
+card lr-sweep-2 "Does the sweep repeat with a new seed?" "the best rate is 3e-4 again" "validation RMSE of T and S, scripts/score.py" "fraction of casts the model leaves at climatology" "supersedes: none"
 printf -- '- **What failed:** job 4840 exited at once.\n- **Cause:** the loader path was relative to the wrong repo.\n- **Fix:** an absolute path.\n' > runs/explore-07/incident.md
 card skynet-train "Does the model train on skynet without the scheduler?" "a skynet run reaches the lr-sweep RMSE" "validation RMSE of T and S, scripts/score.py" "fraction of casts the model leaves at climatology"
 card hand-run "Does a second GPU halve the epoch time?" "two GPUs cut epoch time by 45%" "seconds per epoch from train.log" "validation RMSE of T and S, scripts/score.py"
 card incident-only "Does the float16 loader keep up?" "float16 halves load time" "seconds per sample" "validation RMSE of T and S, scripts/score.py"
 card report-branch "Does dropout 0.1 help?" "dropout 0.1 lowers RMSE by 1%" "validation RMSE of T and S, scripts/score.py" "fraction of casts the model leaves at climatology"
-git add -A; at 2026-09-25T09:00:00 "docs(runs): cards for lr-sweep-fine, skynet-train, hand-run, incident-only and report-branch; explore-07 write-up"
+git add -A; at 2026-09-25T09:00:00 "docs(runs): cards for lr-sweep-fine, lr-sweep-2, skynet-train, hand-run, incident-only and report-branch; explore-07 write-up"
 printf 'id\tts\tfield\tvalue\twhy\tevidence\nx1\t2026-09-25T10:00:00Z\thost\tskynet\tno queue on the GPU box\tskynet:/scratch/runs/hand-run/train.log\nx2\t2026-09-25T10:00:00Z\tgpus\t2\tthe question needs two\tnvidia-smi in train.log\n' > runs/hand-run/execution.tsv
 mkdir -p runs/incident-only/incidents
 printf -- '- **When:** 2026-09-25, on skynet, no Slurm job.\n- **Cause:** the float16 cast overflowed in the loader.\n- **Fix:** cast after the normalisation.\n' > runs/incident-only/incidents/2026-09-25-skynet.md

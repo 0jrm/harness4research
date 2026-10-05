@@ -868,7 +868,7 @@ for tag in $releases; do upgrade_from "$tag"; done
 echo "== atlas"
 mkdir -p "$tmp/atlas"; bash "$here/tests/atlas-fixture.sh" "$tmp/atlas" > "$tmp/atlas/env.sh"
 atlas_before=$(git -C "$tmp/atlas/casts-v4-training" status --porcelain)
-expect atlas-renders ok '13 runs, 2 branches' -- bash -c '. "$1"; "$2" atlas --out "$3/atlas.html" --json "$3/atlas.json"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-renders ok '14 runs, 2 branches' -- bash -c '. "$1"; "$2" atlas --out "$3/atlas.html" --json "$3/atlas.json"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-catches-early-compute ok 'started before the card was committed' -- cat "$tmp/atlas/atlas.html"
 expect atlas-broken-receipt ok 'link broken.*commit</b> deadbee' -- cat "$tmp/atlas/atlas.html"
 expect atlas-drawer-key-diff ok 'max_walltime_minutes 240 to 600' -- cat "$tmp/atlas/atlas.html"
@@ -925,6 +925,8 @@ expect atlas-lineage-inferred ok '^E ~ lr-sweep ~ lr-sweep-fine ~ inferred ~ Tru
 expect atlas-lineage-declared ok '^E ~ q-warmup-v2 ~ cosine-v2 ~ supersedes ~ False$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-lineage-declared-not-inferred ok - -- bash -c '! grep -q "^E ~ q-warmup ~ q-warmup-v2 ~ inferred" "$1"' _ "$tmp/atlas/atlas.tsv"
 expect atlas-lineage-dotted ok '<path class="edge inferred" [^>]*><title>lr-sweep to lr-sweep-fine: inferred from name</title></path><text class="edge-label"[^>]*>inferred from name</text>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-lineage-none-not-inferred ok - -- bash -c '! grep -q "^E ~ [^~]* ~ lr-sweep-2 ~" "$1"' _ "$tmp/atlas/atlas.tsv"
+expect atlas-lineage-none-no-link ok - -- bash -c '! grep -q "href=\"#run-none\"" "$1"' _ "$tmp/atlas/atlas.html"
 expect atlas-lineage-run-note ok 'follows <a href="#run-lr-sweep">lr-sweep</a>, inferred from name' -- cat "$tmp/atlas/atlas.html"
 expect atlas-lineage-names ok '^emu-b00-053-phys2<emu-b00-053 emu-b00-054<emu-b00-053 emu-b00-054b<emu-b00-054 emu-b00-e2b<emu-b00-e2 emu-b00-e2c<emu-b00-e2b $' -- python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import atlas
 ids = {"emu-b00-053", "emu-b00-053-phys2", "emu-b00-054", "emu-b00-054b", "emu-b00-e2", "emu-b00-e2b", "emu-b00-e2c", "emu-store-054", "f2-train-deploy-shift", "f2b-past-only-inputs", "p1-lookahead"}
@@ -932,7 +934,7 @@ print("".join(f"{i}<{p} " for i in sorted(ids) for p in [atlas.name_parent(i, id
 expect atlas-stray-incident ok '^V ~ explore-07 ~ incident.md is a write-up not where the guard looks; move it to incidents/' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-stray-incident-keeps-ripple ok '^N ~ explore-07 ~ ripple on job-states, so stop spending$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-no-network ok - -- bash -c '! grep -Eiq "<link[^>]*https?://|src=\"?https?://" "$1"' _ "$tmp/atlas/atlas.html"
-expect atlas-head-only ok '\(11 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-head-only ok '\(12 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-no-ripples-says-so ok 'ripples not run, so no check reached a verdict' -- cat "$tmp/atlas/head.html"
 expect atlas-head-only-hides-disk-run ok - -- bash -c '! grep -q "run-q-batch" "$1"' _ "$tmp/atlas/head.html"
 expect atlas-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$tmp/atlas/casts-v4-training" "$atlas_before"
