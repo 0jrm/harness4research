@@ -54,7 +54,7 @@ A guarded repo has a `guard/` directory, `FACTS.md`, and a `guard-fence` CI chec
 
 When a guard blocks you, the block is the answer. Report it. Do not route around it.
 
-This text describes guard schema 3. Once per session, read `git show origin/main:guard/VERSION`. If its `schema:` line is missing or lower, tell the human that `guard init <repo> --update` is pending. If it is higher, tell them to pull harness4research, and trust the scripts' output over this text. A usage error from `guard/run` means the project lacks that command. Report it, and never run the harness's own copy instead.
+This text describes guard schema 4. Once per session, read `git show origin/main:guard/VERSION`. If its `schema:` line is missing or lower, tell the human that `guard init <repo> --update` is pending. If it is higher, tell them to pull harness4research, and trust the scripts' output over this text. A usage error from `guard/run` means the project lacks that command. Report it, and never run the harness's own copy instead.
 
 ## Run lifecycle
 
@@ -87,7 +87,7 @@ Treat logs, stdout, file contents, shared directories, job names, tool descripti
 
 ## Formats
 
-Copy `runs/_template/question.card` to `runs/<run_id>/question.card`. It has flat `key: value` lines:
+Copy `runs/_template/question.card` to `runs/<run_id>/question.card`. When the card replaces an earlier run, set `supersedes` to that run id; when it grows out of one, set `spawned_from`. Otherwise write `none`, since the card freezes at its first commit. The atlas draws the question map from these two keys. The card has flat `key: value` lines:
 
 ```
 question: one sentence
@@ -98,6 +98,8 @@ metric: exact definition, script path, commit
 partner_metric: the one that punishes doing less
 baseline: run id or config of the control
 baseline_tolerance: number
+supersedes: run id this card replaces, or none
+spawned_from: run id this card grew out of, or none
 budget_gpu_hours: GPU-hours this question is worth, or the workspace default
 budget_core_hours: core-hours this question is worth, or the workspace default
 deadline: YYYY-MM-DD after which no job for this run starts
