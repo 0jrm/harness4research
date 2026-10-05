@@ -627,6 +627,7 @@ git switch -q -c pr/lineage origin/main
 for r in lin-053 lin-054 lin-054b lin-053-phys2 explore-lin explore-lin-2; do mkdir -p runs/$r; cp runs/_template/question.card runs/$r/; done
 git add -A; git commit -q -m x
 expect fence-lineage-warns ok 'WARN.card-lineage.*lin-054 extends lin-053' -- guard/run fence origin/main HEAD
+expect fence-lineage-says-amend ok 'WARN.card-lineage.*amending the commit that added the card' -- guard/run fence origin/main HEAD
 expect fence-lineage-letter ok 'lin-054b extends lin-054(;|$)' -- lineage
 expect fence-lineage-suffix ok 'lin-053-phys2 extends lin-053(;|$)' -- lineage
 expect fence-lineage-root ok - -- no_lineage ' lin-053 extends|explore-'

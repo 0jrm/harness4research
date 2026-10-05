@@ -75,7 +75,7 @@ while read -r f; do
   p=$(name_parent "$id" "$ids")
   [ -z "$p" ] || undeclared="$undeclared $id extends $p;"
 done < <(git diff --name-only --diff-filter=A "$base...$head" -- 'runs/*/question.card')
-[ -z "$undeclared" ] || say WARN card-lineage "set supersedes or spawned_from (or none) in the card:${undeclared%;}"
+[ -z "$undeclared" ] || say WARN card-lineage "set supersedes or spawned_from (or none) by amending the commit that added the card, since a second commit freezes the run:${undeclared%;}"
 
 unproven=""
 while read -r f; do
