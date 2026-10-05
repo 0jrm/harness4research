@@ -834,6 +834,7 @@ git -C "$D.wt" commit -q -am "chore(guard): set budget"; git -C "$D" update-ref 
 expect doctor-clean-card ok '^pass  guard/budget.card on origin/main has no placeholders$' -- doctor
 expect doctor-all-pass ok '^11 passed, 0 failed, 0 cannot check from here$' -- doctor
 expect doctor-version ok '^pass  guard schema [0-9]+ \(release .*\) against harness schema [0-9]+ .*: current$' -- doctor
+expect doctor-version-once ok - -- bash -c '! grep -E "\(release ([^ )]+)\1\)" <<<"$1"' _ "$(doctor)"
 expect doctor-workflow ok '^pass  .github/workflows/guard-fence.yml on origin/main defines guard-fence / fence$' -- doctor
 doctor > "$tmp/doctor-out"
 expect doctor-no-colour-in-pipe fail - -- grep -q $'\e' "$tmp/doctor-out"
