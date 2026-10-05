@@ -43,9 +43,9 @@ check_skills() {
 }
 
 check_version() {
-  local release
+  local release item
   release=$(git -C "$repo" show "$base:guard/VERSION" 2>/dev/null | awk -F': *' '$1=="release" {print $2; exit}')
-  local item="guard schema $p_schema (release ${release:-unknown}) against harness schema $h_schema ($(harness_release))"
+  item="guard schema $p_schema (release ${release:-unknown}) against harness schema $h_schema ($(harness_release))"
   case $(skew) in
     current) result pass "$item: current" ;;
     project-older) result fail "$item: project older" "Propose the update with guard init $repo --update: ${step}updating-a-guarded-project" ;;
