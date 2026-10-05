@@ -59,9 +59,9 @@ def stamp(epoch):
     return dt.datetime.fromtimestamp(float(epoch), dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def commits(top, path, ref="HEAD"):
-    out = git(top, "log", "--reverse", "--format=%H	%ct	%s", ref, "--", path) or ""
+    out = git(top, "log", "--reverse", "--format=%H\t%ct\t%s", ref, "--", path) or ""
     return [{"sha": sha, "time": stamp(ct), "subject": subject}
-            for sha, ct, subject in (l.split("	", 2) for l in out.splitlines() if l)]
+            for sha, ct, subject in (l.split("\t", 2) for l in out.splitlines() if l)]
 
 def section(md, title):
     m = re.search(rf"^## {re.escape(title)}[^\n]*\n(.*?)(?=^## |\Z)", md or "", re.M | re.S)
