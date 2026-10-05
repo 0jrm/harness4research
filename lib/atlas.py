@@ -686,7 +686,7 @@ def run_block(r, inferred_from=None):
     warn = "".join(f"<li>{E(v)}</li>" for v in r["violations"])
     rel = []
     for k in ("supersedes", "spawned_from"):
-        if not unset(c.get(k)):
+        if not unset(c.get(k)) and c[k] != "none":
             rel.append(f'{k.replace("_", " ")} <a href="#run-{E(c[k])}">{E(c[k])}</a>')
     if inferred_from:
         rel.append(f'follows <a href="#run-{E(inferred_from)}">{E(inferred_from)}</a>, inferred from name')
