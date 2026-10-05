@@ -17,13 +17,13 @@ fail() { echo "PREFLIGHT FAIL: $*" >&2; exit 2; }
 get() { awk -F': *' -v k="$1" '$1==k{print $2; exit}' <<<"$card"; }
 need() {
   local v; v=$(get "$1")
-  [ -n "$v" ] || fail "budget card has no '$1'"
-  [[ $v != *"<"* ]] || fail "budget card '$1' is still a placeholder: $v"
+  [ -n "$v" ] || fail "budget card has no '$1'; a human adds it to guard/budget.card on the protected branch"
+  [[ $v != *"<"* ]] || fail "budget card '$1' is still a placeholder: $v; a human fills it in guard/budget.card on the protected branch"
   echo "$v"
 }
 whole() {
   local v; v=$(need "$1")
-  [[ $v =~ ^[[:space:]]*([0-9]+)[[:space:]]*$ ]] || fail "budget card '$1' must be a whole number: $v"
+  [[ $v =~ ^[[:space:]]*([0-9]+)[[:space:]]*$ ]] || fail "budget card '$1' must be a whole number: $v; a human fixes it in guard/budget.card on the protected branch"
   echo "${BASH_REMATCH[1]}"
 }
 to_min() {
@@ -53,27 +53,27 @@ tasks() {
 }
 
 git rev-parse --verify -q "$base" >/dev/null || fail "guard ref $base not found (git fetch?)"
-card=$(git show "$base:$card_path" 2>/dev/null) || fail "no $card_path on $base"
+card=$(git show "$base:$card_path" 2>/dev/null) || fail "no $card_path on $base; merge the guard pull request, or git fetch"
 changed=$( { git diff --name-only "$base"...HEAD -- guard; git status --porcelain --untracked-files=all -- guard; } | sort -u)
-[ -z "$changed" ] || fail "guard/ differs from $base: $(echo $changed)"
+[ -z "$changed" ] || fail "guard/ differs from $base: $(echo $changed); restore it with git restore --source=$base --staged --worktree -- guard, commit, and remove any untracked file under guard/"
 
 explore=0; [[ $run_id == explore-* ]] && explore=1
 if [ $explore = 0 ]; then
   q="$run_dir/question.card"
-  git ls-files --error-unmatch "$q" >/dev/null 2>&1 || fail "$q is not committed"
-  git diff --quiet HEAD -- "$q" || fail "$q has uncommitted edits"
+  git ls-files --error-unmatch "$q" >/dev/null 2>&1 || fail "$q is not committed; commit it first"
+  git diff --quiet HEAD -- "$q" || fail "$q has uncommitted edits; revert them with git checkout HEAD -- $q, or start a new run id for a new design"
   [ "$(git log --format=%H -- "$q" | wc -l)" -le 1 ] || fail "$q was edited after its first commit; start a new run id instead"
 fi
 
 if [ "${HPC_SPEND_RESERVE:-0}" != 1 ]; then
-  ripples=$(git show "$base:guard/bin/ripples.sh" 2>/dev/null) || fail "ripples could not run (no guard/bin/ripples.sh on $base)"
+  ripples=$(git show "$base:guard/bin/ripples.sh" 2>/dev/null) || fail "ripples could not run (no guard/bin/ripples.sh on $base); a human runs guard init --update"
   rc=0; out=$(bash -c "$ripples" guard/bin/ripples.sh "$run_dir") || rc=$?
-  [ $rc -ne 1 ] || fail "ripples reports $(awk -F'\t' '$1=="RIPPLE" {sub(/ +$/, "", $3); printf "%s%s %s", sep, $2, $3; sep="; "}' <<<"$out"); fix the cause or record it in an incident, or set HPC_SPEND_RESERVE=1 for a diagnostic job"
-  [ $rc -eq 0 ] || fail "ripples could not run (exit $rc)"
+  [ $rc -ne 1 ] || fail "ripples reports $(awk -F'\t' '$1=="RIPPLE" {sub(/ +$/, "", $3); printf "%s%s %s", sep, $2, $3; sep=" | "}' <<<"$out"); fix the cause or record it in an incident, or set HPC_SPEND_RESERVE=1 for a diagnostic job"
+  [ $rc -eq 0 ] || fail "ripples could not run (exit $rc); run guard/run ripples $run_dir to see why"
 fi
 
 stop=$(need stop_date)
-[[ ! $(date +%F) > $stop ]] || fail "past stop_date $stop"
+[[ ! $(date +%F) > $stop ]] || fail "past stop_date $stop; a human extends stop_date in guard/budget.card on the protected branch"
 
 acct=$(need account); start=$(need start_date); max_ch=$(whole max_core_hours)
 reserve=0; [ -z "$(get verification_reserve_core_hours)" ] || reserve=$(whole verification_reserve_core_hours)
@@ -87,10 +87,10 @@ wmin=$(to_min "$wall"); n=$(tasks "$array")
 if [ $explore = 1 ]; then
   max_nodes=$(get explore_max_nodes); max_nodes=${max_nodes:-1}
   max_wall=$(get explore_max_walltime_minutes); max_wall=${max_wall:-60}
-  [ "$n" -eq 1 ] || fail "explore- runs submit one task at a time"
+  [ "$n" -eq 1 ] || fail "explore- runs submit one task at a time; drop --array, or use a run with a question card"
 fi
-[ "$nodes" -le "$max_nodes" ] || fail "--nodes=$nodes exceeds max_nodes_per_job=$max_nodes"
-[ "$wmin" -le "$max_wall" ] || fail "--time=$wall ($wmin min) exceeds max_walltime_minutes=$max_wall"
+[ "$nodes" -le "$max_nodes" ] || fail "--nodes=$nodes exceeds max_nodes_per_job=$max_nodes; ask for fewer"
+[ "$wmin" -le "$max_wall" ] || fail "--time=$wall ($wmin min) exceeds max_walltime_minutes=$max_wall; ask for less, and checkpoint to resume"
 
 spent=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW | awk '{s+=$1} END{printf "%d", s/3600}')
 queued=$(squeue -A "$acct" -u "$USER" -h -t PENDING -o "%C %l" | while read -r c l; do echo "$c $(to_min "$l")"; done \
@@ -99,17 +99,17 @@ proj=$(( nodes * cpn * wmin * n / 60 ))
 if [ "${HPC_SPEND_RESERVE:-0}" = 1 ]; then held=0; else held=$reserve; fi
 avail=$(( max_ch - held ))
 [ $(( spent + queued + proj )) -le "$avail" ] \
-  || fail "spent $spent + queued $queued + this job $proj core-h exceeds $avail available (max $max_ch, reserve held $held)"
+  || fail "spent $spent + queued $queued + this job $proj core-h exceeds $avail available (max $max_ch, reserve held $held); ask for less, wait for queued jobs, or a human raises max_core_hours"
 qget() { [ $explore = 1 ] || awk -F': *' -v k="$1" '$1==k && $2 !~ /</ {print $2; exit}' <<<"$(git show "HEAD:$run_dir/question.card")"; }
 deadline=$(qget deadline)
-[ -z "$deadline" ] || [[ ! $(date +%F) > $deadline ]] || fail "past deadline $deadline in $run_dir/question.card"
+[ -z "$deadline" ] || [[ ! $(date +%F) > $deadline ]] || fail "past deadline $deadline in $run_dir/question.card; a human decides whether a new run continues it"
 run_max=$(qget budget_core_hours); run_max=${run_max:-$(get default_run_core_hours)}
 if [[ $run_max =~ ^[0-9]+$ ]] && [ "$run_max" -gt 0 ]; then
   run_spent=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobName,CPUTimeRAW | awk -F'|' -v r="$run_id" '$1==r {s+=$2} END{printf "%d", s/3600}')
-  [ $(( run_spent + proj )) -le "$run_max" ] || fail "this run spent $run_spent + this job $proj core-h exceeds budget_core_hours=$run_max"
+  [ $(( run_spent + proj )) -le "$run_max" ] || fail "this run spent $run_spent + this job $proj core-h exceeds budget_core_hours=$run_max; a human decides whether a new run continues it"
 fi
 live=$(squeue -A "$acct" -u "$USER" -h | wc -l)
-[ $(( live + n )) -le "$max_conc" ] || fail "$live live + $n new jobs exceeds max_concurrent_jobs=$max_conc"
+[ $(( live + n )) -le "$max_conc" ] || fail "$live live + $n new jobs exceeds max_concurrent_jobs=$max_conc; wait for running jobs to finish"
 
 echo "PREFLIGHT OK: $run_id nodes=$nodes time=${wmin}m tasks=$n projected=$proj spent=$spent queued=$queued available=$avail" >&2
 exec sbatch "$@" --account="$acct" --job-name="$run_id" --comment="run:$run_id" "$job"

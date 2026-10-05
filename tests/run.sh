@@ -26,6 +26,22 @@ path_without() {  # path_without <cmd>: prints a PATH like this one on which <cm
   done
   echo "$out"
 }
+on_tty() {  # on_tty <command...>: runs it with stdout on a pseudo-terminal, TERM=xterm and no NO_COLOR; prints its output, keeps its exit code
+  python3 -c '
+import os, signal, subprocess, sys
+signal.alarm(120)
+m, s = os.openpty()
+p = subprocess.Popen(["env", "-u", "NO_COLOR", "TERM=xterm"] + sys.argv[1:], stdout=s)
+os.close(s)
+out = b""
+while True:
+    try: b = os.read(m, 65536)
+    except OSError: break
+    if not b: break
+    out += b
+sys.stdout.buffer.write(out.replace(b"\r\n", b"\n"))
+sys.exit(p.wait())' "$@"
+}
 
 git init -q --bare -b main "$tmp/origin.git"
 git clone -q "$tmp/origin.git" "$tmp/proj" 2>/dev/null
@@ -107,13 +123,20 @@ git commit -q -am "placeholder reserve"
 expect preflight-reserve-placeholder fail "^PREFLIGHT FAIL: budget card 'verification_reserve_core_hours' is still a placeholder" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 sed -i 's/^verification_reserve_core_hours: .*/verification_reserve_core_hours: 1500/; s/^cores_per_node: .*/cores_per_node: 128 cores/' guard/budget.card
 git commit -q -am "unit in cores_per_node"
-expect preflight-budget-not-integer fail "^PREFLIGHT FAIL: budget card 'cores_per_node' must be a whole number: 128 cores$" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+expect preflight-budget-not-integer fail "^PREFLIGHT FAIL: budget card 'cores_per_node' must be a whole number: 128 cores; a human fixes it in guard/budget.card on the protected branch$" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~2
+sed -i 's/^stop_date: .*/stop_date: 2000-01-01/' guard/budget.card; git commit -q -am "past stop date"
+expect preflight-past-stop fail '^PREFLIGHT FAIL: past stop_date 2000-01-01; a human extends stop_date in guard/budget.card on the protected branch$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+git reset -q --hard HEAD~1
 sed -i 's/max_core_hours: 10000/max_core_hours: 99999/' guard/budget.card; git commit -q -am "raise budget"
 expect preflight-card-edit fail 'guard/ differs' -- guard/run preflight "$R" job.sh
 printf '#!/usr/bin/env bash\necho SBATCH bypassed\n' > guard/bin/preflight.sh; git commit -q -am "neuter preflight"
 expect run-uses-protected-copy fail 'guard/ differs' -- guard/run preflight "$R" job.sh
-git reset -q --hard HEAD~2
+echo stray > guard/untracked
+expect preflight-guard-remedy fail '^PREFLIGHT FAIL: guard/ differs from origin/main: [^;]*guard/untracked[^;]*; restore it with git restore --source=origin/main --staged --worktree -- guard, commit, and remove any untracked file under guard/$' -- guard/run preflight "$R" job.sh
+git restore --source=origin/main --staged --worktree -- guard; git commit -q -m "restore guard"; rm guard/untracked
+expect preflight-guard-remedy-works ok 'SBATCH ' -- guard/run preflight "$R" job.sh
+git reset -q --hard HEAD~3
 echo "metric: changed" >> "$R/question.card"; git commit -q -am "edit card"
 expect preflight-card-frozen fail 'edited after its first commit' -- guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
@@ -131,29 +154,45 @@ echo "default_run_core_hours: 10" >> guard/budget.card; git commit -q -am "defau
 expect preflight-default-run-budget fail 'this job 64 core-h exceeds budget_core_hours=10' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-sketch job.sh --nodes=1 --time=00:30:00
 git reset -q --hard HEAD~1
 printf '100|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
-expect preflight-refuses-on-ripple fail '^PREFLIGHT FAIL: ripples reports job-states 100:FAILED; fix the cause' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
+expect preflight-refuses-on-ripple fail '^PREFLIGHT FAIL: ripples reports job-states 100:FAILED \(diagnose, then commit runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line for each; a resource stop of a launch continues with an execution.tsv restart or resume row instead\); fix the cause' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
+expect ripples-single-entry fail '^RIPPLE	job-states	100:FAILED \(diagnose' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run ripples "$R"
 expect preflight-reserve-skips-ripples ok 'SBATCH .*--job-name=2026-09-29-demo' -- env MOCK_SACCT_ROWS="$tmp/rows" HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
 mkdir -p "$R/incidents"; printf '# Incident 0\njob: 100\n' > "$R/incidents/0.md"; git add -A; git commit -q -m "run: incident 0"
 expect preflight-handled-ripple-passes ok 'SBATCH .*--job-name=2026-09-29-demo' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
 printf '#!/usr/bin/env bash\nexit 3\n' > guard/bin/ripples.sh; git commit -q -am "ripples errors"
-expect preflight-ripples-error-fails-closed fail '^PREFLIGHT FAIL: ripples could not run \(exit 3\)$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+expect preflight-ripples-error-fails-closed fail '^PREFLIGHT FAIL: ripples could not run \(exit 3\); run guard/run ripples runs/2026-09-29-demo to see why$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
 
 echo "== ripples"
 mkdir -p "$R/checks"; printf '#!/bin/bash\necho "nan count 3"; exit 1\n' > "$R/checks/nan.sh"; chmod +x "$R/checks/nan.sh"
 printf '100|2026-09-29-demo|TIMEOUT|14400|240\n101|2026-09-29-demo|COMPLETED|13000|240\n102|2026-09-29-demo|FAILED|10|240\n103|other|FAILED|1|1\n' > "$tmp/rows"
 export MOCK_SACCT_ROWS=$tmp/rows
-expect ripples-states fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED' -- guard/run ripples "$R"
+expect ripples-states fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED \(diagnose, then commit runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line for each; a resource stop of a launch continues with an execution.tsv restart or resume row instead\)$' -- guard/run ripples "$R"
 expect ripples-walltime fail 'RIPPLE.walltime-headroom.100:100% 101:90%' -- guard/run ripples "$R"
 expect ripples-check fail 'RIPPLE.check:nan.sh.nan count 3' -- guard/run ripples "$R"
 expect ripples-watched fail 'RIPPLE.watched-paths' -- guard/run ripples "$R"
 expect ripples-quota fail 'PASS.quota.42%' -- guard/run ripples "$R"
 expect ripples-other-run-ignored fail 'retries.2 not' -- guard/run ripples "$R"
+expect ripples-piped-tsv ok - -- bash -c 'out=$(guard/run ripples "$1" | cat); [ -n "$out" ] && ! grep -vE "^(PASS|RIPPLE|HANDLED|UNCHECKED)	[^	]+	[^	]*$" <<<"$out"' _ "$R"
+expect ripples-tty-exit ok - -- bash -c "$(declare -f on_tty)"'; on_tty guard/run ripples "$1" >/dev/null; [ $? -eq 1 ]' _ "$R"
+expect ripples-tty-opt-out fail '^RIPPLE	job-states	100:TIMEOUT 102:FAILED \(' -- on_tty env HPC_RIPPLES_TSV=1 guard/run ripples "$R"
+expect ripples-term-dumb ok - -- bash -c 'out=$1; [ -n "$out" ] && [ -z "$(tr -dc "\033\t" <<<"$out")" ]' _ "$(on_tty env TERM=dumb guard/run ripples "$R")"
+tty=$(on_tty guard/run ripples "$R")
+expect ripples-tty-ripple ok $'^\e\\[1;31mRIPPLE   \e\\[0m  job-states {17}100:TIMEOUT 102:FAILED \\(diagnose' -- echo "$tty"
+expect ripples-tty-pass ok $'^\e\\[32mPASS     \e\\[0m  quota {22}42%$' -- echo "$tty"
+expect ripples-tty-no-tabs ok - -- test -z "$(tr -dc '\t' <<<"$tty")"
+tty=$(on_tty env NO_COLOR=1 guard/run ripples "$R")
+expect ripples-no-color ok '^RIPPLE {5}job-states {17}100:TIMEOUT' -- echo "$tty"
+expect ripples-no-color-plain ok - -- test -z "$(tr -dc '\033' <<<"$tty")"
+expect ripples-tty-aligned ok - -- test -z "$(awk 'substr($0, 10, 2) != "  " || substr($0, 37, 2) != "  "' <<<"$tty")"
 printf '101|2026-09-29-demo|COMPLETED|100|240\n' > "$tmp/rows"; rm -rf "$R/checks"
 expect ripples-clean ok 'PASS.budget.30 of 10000' -- guard/run ripples "$R"
 expect ripples-no-sacct ok 'UNCHECKED.job-states.*UNCHECKED.walltime-headroom.*UNCHECKED.retries.*UNCHECKED.budget.*PASS.quota.42%' -- \
   env PATH="$(path_without sacct)" bash -c 'set -o pipefail; guard/run ripples "$1" 2>&1 | tr "\n" " "' _ "$R"
+expect ripples-unchecked-remedy ok '^UNCHECKED	budget	sacct not found on PATH on this host; run ripples on the cluster login node to check$' -- env PATH="$(path_without sacct)" guard/run ripples "$R"
+expect ripples-domain-remedy ok '^UNCHECKED	domain-checks	no executable runs/2026-09-29-demo/checks/\*; add a script there that exits non-zero when a result looks wrong$' -- guard/run ripples "$R"
+expect ripples-tty-unchecked ok '^UNCHECKED  budget {21}sacct not found on PATH on this host; run ripples' -- on_tty env NO_COLOR=1 PATH="$(path_without sacct)" guard/run ripples "$R"
 pre=$(git rev-parse HEAD); mkdir -p "$R/incidents"
 printf '100|2026-09-29-demo|TIMEOUT|14400|240\n101|2026-09-29-demo|COMPLETED|100|240\n102|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
 printf '# Incident 0\njob: 10\n' > "$R/incidents/0.md"; git add -A; git commit -q -m "run: incident 0"
@@ -317,16 +356,16 @@ rip=$(env PATH="$(path_without sacct)" guard/run ripples "$F")
 expect ripples-launch-states ok 'RIPPLE	job-states	skynet-20260901T060000Z:SUPERVISOR_FAILED skynet-20260901T030000Z:LAUNCH_FAILED skynet-20260901T020000Z:NODE_FAIL skynet-20260901T010000Z:OUT_OF_MEMORY gpu2-20260901T010000Z:FAILED' -- echo "$rip"
 expect ripples-launch-walltime ok 'RIPPLE	walltime-headroom	skynet-20260901T070000Z:91%' -- echo "$rip"
 expect ripples-launch-retries ok 'RIPPLE	retries	5 not completed' -- echo "$rip"
-expect ripples-launch-budget-unchanged ok '^UNCHECKED	budget	sacct not found on PATH on this host$' -- echo "$rip"
+expect ripples-launch-budget-unchanged ok '^UNCHECKED	budget	sacct not found on PATH on this host; run ripples on the cluster login node to check$' -- echo "$rip"
 expect ripples-gpu-hours ok 'RIPPLE	gpu-hours	22\.1 of 10 GPU-h \(0\.0 in 1 running\)' -- echo "$rip"
-expect ripples-supervision-alive ok 'RIPPLE	host-supervision	skynet-20260901T050000Z:no-supervisor-started-it' -- echo "$rip"
+expect ripples-supervision-alive ok '^RIPPLE	host-supervision	skynet-20260901T050000Z:no-supervisor-started-it \(stop each with guard/run launch --stop <id> --reason=<why>, or tell the human\)$' -- echo "$rip"
 expect ripples-host-memory-pass ok 'PASS	host-memory	[0-9.]+G available; 1 live, at most 80% of --mem' -- echo "$rip"
 expect ripples-strays-pass ok 'PASS	host-strays	$' -- echo "$rip"
 expect ripples-log-errors-pass ok 'PASS	host-log-errors	1 running log\(s\) scanned' -- echo "$rip"
 printf '100|2026-10-02-fixtures|TIMEOUT|14400|240\n' > "$tmp/rows"
 expect ripples-launch-plus-sacct fail 'RIPPLE	job-states	100:TIMEOUT skynet-20260901T060000Z:SUPERVISOR_FAILED' -- env MOCK_SACCT_ROWS=$tmp/rows guard/run ripples "$F"
 expect ripples-launch-plus-budget fail 'PASS	budget	30 of 10000 core-h' -- env MOCK_SACCT_ROWS=$tmp/rows guard/run ripples "$F"
-expect ripples-other-host fail 'UNCHECKED	host-strays	login1 is not in launch_hosts \(skynet\)' -- env MOCK_HOSTNAME=login1 PATH="$(path_without sacct)" guard/run ripples "$F"
+expect ripples-other-host fail 'UNCHECKED	host-strays	login1 is not in launch_hosts \(skynet\); run ripples on a launch host to check$' -- env MOCK_HOSTNAME=login1 PATH="$(path_without sacct)" guard/run ripples "$F"
 expect ripples-other-host-gpu-hours fail 'RIPPLE	gpu-hours	22\.1 of 10' -- env MOCK_HOSTNAME=login1 PATH="$(path_without sacct)" guard/run ripples "$F"
 expect ripples-other-host-no-rows fail 'UNCHECKED	job-states	sacct not found' -- env MOCK_HOSTNAME=login1 PATH="$(path_without sacct)" guard/run ripples "$F"
 kill "$alive_pid" 2>/dev/null; wait "$alive_pid" 2>/dev/null
@@ -340,7 +379,7 @@ git reset -q --hard HEAD~1
 sleep 60 & stray_pid=$!
 printf 'GPU-aaaa, %s\n' "$stray_pid" > "$tmp/apps"
 expect ripples-strays-gpu fail "RIPPLE	host-strays	pid$stray_pid:0\.[0-9]+G:gpu:sleep_60" -- env MOCK_NVSMI_APPS=$tmp/apps guard/run ripples "$F"
-expect ripples-strays-no-nvsmi fail 'UNCHECKED	host-strays	no memory strays; GPU strays unchecked' -- env PATH="$(path_without nvidia-smi)" guard/run ripples "$F"
+expect ripples-strays-no-nvsmi fail 'UNCHECKED	host-strays	no memory strays; GPU strays unchecked, nvidia-smi not found or timed out; put nvidia-smi on PATH and rerun$' -- env PATH="$(path_without nvidia-smi)" guard/run ripples "$F"
 git switch -q -c launch-ignore origin/launch-base; echo 'stray_ignore: ^sleep 60$' >> guard/budget.card; git commit -q -am "ignore"
 expect ripples-strays-ignore fail 'PASS	host-strays	$' -- env HPC_GUARD_REF=HEAD MOCK_NVSMI_APPS=$tmp/apps guard/run ripples "$F"
 git switch -q launch/agent
@@ -475,7 +514,7 @@ same_refusal launch-gates-match-frozen "$R2" job.sh -- "$R2" --time=1 --gpus=non
 git reset -q --hard HEAD~1
 git switch -q -c launch-past; sed -i 's/^stop_date: .*/stop_date: 2000-01-01/' guard/budget.card; git commit -q -am "past"
 export HPC_GUARD_REF=HEAD
-expect launch-past-stop fail 'past stop_date 2000-01-01' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
+expect launch-past-stop fail '^LAUNCH FAIL: past stop_date 2000-01-01; a human extends stop_date in guard/budget.card on the protected branch$' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
 same_refusal launch-gates-match-stop-date "$R2" job.sh -- "$R2" --time=1 --gpus=none --mem=0.01 -- true
 git switch -q -c launch-floor launch/agent; sed -i 's/^host_min_available_gb: .*/host_min_available_gb: 999999/' guard/budget.card; git commit -q -am "floor"
 expect launch-host-memory fail 'MemAvailable .* leaves less than --mem=0.01G plus host_min_available_gb=999999' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
@@ -619,6 +658,29 @@ git switch -q -c pr/no-setting origin/main; mkdir -p runs/ns; cp runs/_template/
 sed -i '/^setting:/d' runs/ns/question.card
 git add -A; git commit -q -m x
 expect fence-card-no-setting fail 'FAIL.setting-key' -- guard/run fence origin/main HEAD
+
+lineage() { guard/run fence origin/main HEAD | grep card-lineage; }
+no_lineage() { ! lineage | grep -qE "$1"; }
+expect template-lineage-keys ok - -- bash -c 'grep -q "^supersedes: <" "$1" && grep -q "^spawned_from: <" "$1"' _ "$here/templates/runs/_template/question.card"
+git switch -q -c pr/lineage origin/main
+for r in lin-053 lin-054 lin-054b lin-053-phys2 explore-lin explore-lin-2; do mkdir -p runs/$r; cp runs/_template/question.card runs/$r/; done
+git add -A; git commit -q -m x
+expect fence-lineage-warns ok 'WARN.card-lineage.*lin-054 extends lin-053' -- guard/run fence origin/main HEAD
+expect fence-lineage-says-amend ok 'WARN.card-lineage.*amending the commit that added the card' -- guard/run fence origin/main HEAD
+expect fence-lineage-letter ok 'lin-054b extends lin-054(;|$)' -- lineage
+expect fence-lineage-suffix ok 'lin-053-phys2 extends lin-053(;|$)' -- lineage
+expect fence-lineage-root ok - -- no_lineage ' lin-053 extends|explore-'
+expect fence-lineage-passes ok - -- bash -c 'out=$(guard/run fence origin/main HEAD) && ! grep -q "^FAIL" <<<"$out"'
+git push -q origin pr/lineage:refs/heads/pr-lineage
+sed -i 's/^supersedes: .*/supersedes: none/' runs/lin-054/question.card
+sed -i 's/^spawned_from: .*/spawned_from: lin-054/' runs/lin-054b/question.card
+sed -i '/^supersedes:/d; /^spawned_from:/d' runs/lin-053-phys2/question.card
+git commit -q -am x
+expect fence-lineage-none ok - -- no_lineage 'lin-054 extends'
+expect fence-lineage-set ok - -- no_lineage 'lin-054b extends'
+expect fence-lineage-missing-keys ok 'lin-053-phys2 extends lin-053$' -- lineage
+git switch -q -c pr/after-lineage origin/pr-lineage; cp runs/_template/report.md runs/lin-054/; git add -A; git commit -q -m x
+expect fence-lineage-added-only ok - -- bash -c 'out=$(guard/run fence origin/pr-lineage HEAD) && grep -q "^PASS.setting-key" <<<"$out" && ! grep -q card-lineage <<<"$out"'
 
 git switch -q -c pr/hyp-na origin/main; mkdir -p runs/hn
 cp runs/_template/question.card runs/hn/; cp runs/_template/report.md runs/hn/
@@ -806,7 +868,7 @@ expect skill-states-schema ok - -- grep -q "describes guard schema $(cat "$here/
 expect contract-names-required ok - -- bash -c 'for k in $(grep "<" "$1/templates/guard/budget.card" | cut -d: -f1); do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
 expect contract-names-every-key ok - -- bash -c 'for k in $(cut -d: -f1 "$1/templates/guard/budget.card"); do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
 expect envelope-vocabulary-pinned ok - -- bash -c 'a=$(sed -n "s/^readonly ENVELOPE_FIELDS=//p" "$1/templates/guard/bin/launch.sh"); b=$(sed -n "s/^fields=//p" "$1/templates/guard/bin/fence.sh"); [ -n "$a" ] && [ "$a" = "$b" ]' _ "$here"
-expect contract-names-check-names ok - -- bash -c 'for k in gpu-hours host-supervision host-memory host-strays host-log-errors execution-within-envelope execution-ledger execution-history; do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
+expect contract-names-check-names ok - -- bash -c 'for k in gpu-hours host-supervision host-memory host-strays host-log-errors execution-within-envelope execution-ledger execution-history card-lineage; do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
 
 echo "== upgrade from each supported release"
 # old_project <tag> <dir>: a project guarded by the harness at <tag>, with the budget filled in and merged to main.
@@ -840,6 +902,7 @@ upgrade_from() {
   expect "$c-workflow-edit-kept" ok 'runs-on: self-hosted' -- cat "$p.up/.github/workflows/guard-fence.yml"
   expect "$c-no-conflicts" fail - -- grep -rlE '^(<{7}|>{7}) ' "$p.up/guard" "$p.up/.github"
   expect "$c-schema" ok "^schema: $(cat "$here/SCHEMA")$" -- cat "$p.up/guard/VERSION"
+  expect "$c-lineage-keys" ok '^spawned_from: <' -- grep -A1 '^supersedes: <' "$p.up/runs/_template/question.card"
   git -C "$p.up" push -q origin guard/update:main; git fetch -q origin; git switch -q -c agent origin/main
   mkdir -p runs/r; cp runs/_template/question.card runs/r/
   printf '#!/bin/bash\n#SBATCH --time=01:00:00\n#SBATCH --nodes=1\n' > job.sh; git add -A; git commit -q -m "run: r"
