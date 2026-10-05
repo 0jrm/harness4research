@@ -870,6 +870,68 @@ expect contract-names-every-key ok - -- bash -c 'for k in $(cut -d: -f1 "$1/temp
 expect envelope-vocabulary-pinned ok - -- bash -c 'a=$(sed -n "s/^readonly ENVELOPE_FIELDS=//p" "$1/templates/guard/bin/launch.sh"); b=$(sed -n "s/^fields=//p" "$1/templates/guard/bin/fence.sh"); [ -n "$a" ] && [ "$a" = "$b" ]' _ "$here"
 expect contract-names-check-names ok - -- bash -c 'for k in gpu-hours host-supervision host-memory host-strays host-log-errors execution-within-envelope execution-ledger execution-history card-lineage; do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
 
+echo "== doctor"
+D=$tmp/doc
+git init -q --bare -b main "$D.git"; git clone -q "$D.git" "$D" 2>/dev/null
+git -C "$D" checkout -q -b main; echo "# d" > "$D/README.md"; git -C "$D" add -A; git -C "$D" commit -q -m init
+git -C "$D" push -q -u origin main; git -C "$D" remote set-head origin -a >/dev/null
+"$guard" init "$D" --worktree "$D.wt" >/dev/null 2>&1
+git -C "$D" update-ref refs/remotes/origin/main guard/init
+git -C "$D" remote set-url origin https://github.com/lab/proj.git
+mkdir -p "$tmp/home/.agents/skills" "$tmp/home-bare"
+for s in "$here"/skills/*/; do ln -s "${s%/}" "$tmp/home/.agents/skills/"; done
+setup=(MOCK_GH_TOKEN=github_pat_agent MOCK_GH_ADMIN=false MOCK_GH_RULES=$'pull_request\ncheck fence'
+  "MOCK_GH_RUNS=success 2026-10-01T12:00:00Z https://github.com/lab/proj/actions/runs/1" MOCK_SACCTMGR_ASSOC='|cpu=600000')
+doctor() { env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK HOME="$tmp/home" "${setup[@]}" "$@" "$guard" doctor "$D"; }
+expect doctor-placeholders fail '^FAIL  guard/budget.card on origin/main still has placeholders: account start_date stop_date' -- doctor
+expect doctor-placeholder-account fail '^FAIL  guard/budget.card on origin/main sets no account$' -- doctor
+expect doctor-remedy-links-readme fail '^      Replace each <placeholder> .*: https://github.com/0jrm/harness4research#3-fill-in-the-guard-and-merge-it$' -- doctor
+git -C "$tmp/proj" show "$good:guard/budget.card" > "$D.wt/guard/budget.card"
+git -C "$D.wt" commit -q -am "chore(guard): set budget"; git -C "$D" update-ref refs/remotes/origin/main guard/init
+expect doctor-clean-card ok '^pass  guard/budget.card on origin/main has no placeholders$' -- doctor
+expect doctor-all-pass ok '^11 passed, 0 failed, 0 cannot check from here$' -- doctor
+expect doctor-version ok '^pass  guard schema [0-9]+ \(release .*\) against harness schema [0-9]+ .*: current$' -- doctor
+expect doctor-workflow ok '^pass  .github/workflows/guard-fence.yml on origin/main defines guard-fence / fence$' -- doctor
+doctor > "$tmp/doctor-out"
+expect doctor-no-colour-in-pipe fail - -- grep -q $'\e' "$tmp/doctor-out"
+expect doctor-no-gh ok '^cannot check from here  whether guard-fence / fence has run on GitHub: gh is not on PATH$' -- doctor PATH="$(path_without gh)"
+expect doctor-cannot-is-not-pass ok '^9 passed, 0 failed, 2 cannot check from here$' -- doctor PATH="$(path_without gh)"
+expect doctor-gh-logged-out ok '^cannot check from here  whether main has an active ruleset requiring guard-fence / fence: gh is not logged in$' -- doctor MOCK_GH_TOKEN=
+expect doctor-not-github ok '^cannot check from here  .*: origin is not a github.com remote$' -- \
+  doctor GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0="$D.git"
+expect doctor-ruleset ok '^pass  main has an active ruleset requiring a pull request and guard-fence / fence$' -- doctor
+expect doctor-ruleset-full-name ok '^pass  main has an active ruleset' -- doctor MOCK_GH_RULES=$'pull_request\ncheck guard-fence / fence'
+expect doctor-ruleset-no-check fail '^FAIL  main has no active rule requiring guard-fence / fence$' -- doctor MOCK_GH_RULES=$'pull_request\ncheck lint'
+expect doctor-ruleset-none fail '^FAIL  main has no active rule requiring a pull request and guard-fence / fence$' -- doctor MOCK_GH_RULES=
+expect doctor-ruleset-free-plan fail '^FAIL  GitHub offers no rulesets on lab/proj: Upgrade to GitHub Pro' -- \
+  doctor MOCK_GH_RULES='!Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)'
+expect doctor-fence-never-ran fail '^FAIL  guard-fence / fence has never completed a run on GitHub$' -- doctor MOCK_GH_RUNS=
+expect doctor-fence-failure-ran ok '^pass  guard-fence / fence has run on GitHub \(last completed run: failure, ' -- doctor "MOCK_GH_RUNS=failure 2026-10-01T12:00:00Z https://x/1"
+expect doctor-fence-broken fail '^FAIL  guard-fence / fence last completed run ended startup_failure' -- doctor "MOCK_GH_RUNS=startup_failure 2026-10-01T12:00:00Z https://x/1"
+expect doctor-ssh fail '^FAIL  SSH_AUTH_SOCK is set in this shell' -- doctor SSH_AUTH_SOCK=/tmp/agent.sock
+expect doctor-classic-token fail '^FAIL  the GitHub token in this shell is a classic or OAuth token with scopes repo, workflow,' -- \
+  doctor MOCK_GH_TOKEN=gho_x MOCK_GH_SCOPES='repo, workflow'
+expect doctor-admin fail '^FAIL  the GitHub login in this shell administers lab/proj' -- doctor MOCK_GH_ADMIN=true
+expect doctor-no-token ok '^pass  no GitHub token in this shell' -- doctor MOCK_GH_TOKEN=
+expect doctor-cap ok '^pass  Slurm caps account gom at GrpTRESMins=cpu=600000$' -- doctor
+expect doctor-user-cap ok '^pass  Slurm caps account gom at GrpTRESMins=cpu=600000$' -- doctor MOCK_SACCTMGR_ASSOC=$'|\ntester|cpu=600000'
+expect doctor-no-cap fail '^FAIL  Slurm sets no GrpTRESMins cap on account gom$' -- doctor MOCK_SACCTMGR_ASSOC=$'|\ntester|'
+expect doctor-other-user-cap fail '^FAIL  Slurm sets no GrpTRESMins cap on account gom$' -- doctor MOCK_SACCTMGR_ASSOC=$'|\nalice|cpu=100\ntester|'
+expect doctor-no-user-var ok '^pass  Slurm caps account gom at GrpTRESMins=cpu=600000$' -- env -u USER -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK HOME="$tmp/home" "${setup[@]}" "$guard" doctor "$D"
+expect doctor-no-account fail '^FAIL  Slurm has no account gom$' -- doctor MOCK_SACCTMGR_ASSOC=
+expect doctor-no-sacctmgr ok '^cannot check from here  whether Slurm caps account gom: sacctmgr is not on this host$' -- doctor PATH="$(path_without sacctmgr)"
+expect doctor-skills-missing fail '^FAIL  skills in ~/.agents/skills do not link to this harness: present \(missing\)' -- doctor HOME="$tmp/home-bare"
+mkdir -p "$tmp/home/.claude"
+expect doctor-skills-claude fail '^FAIL  skills in ~/.claude/skills do not link to this harness' -- doctor
+rmdir "$tmp/home/.claude"
+expect doctor-unguarded fail '^FAIL  guard/run is not on origin/main$' -- env HOME="$tmp/home" "$guard" doctor "$tmp/agents"
+expect doctor-not-a-repo fail 'is not a git repository' -- "$guard" doctor "$tmp/home"
+git -C "$D" status --porcelain > "$tmp/doctor-status"; touch "$tmp/doctor-before"
+doctor >/dev/null; doctor MOCK_GH_TOKEN= SSH_AUTH_SOCK=/x >/dev/null; doctor PATH="$(path_without gh)" >/dev/null
+expect doctor-writes-nothing ok '^$' -- find "$D" "$D.wt" "$tmp/home" -newer "$tmp/doctor-before"
+expect doctor-status-unchanged ok '^$' -- bash -c 'git -C "$1" status --porcelain | diff - "$2"' _ "$D" "$tmp/doctor-status"
+cd "$tmp/wt" || exit 1
+
 echo "== upgrade from each supported release"
 # old_project <tag> <dir>: a project guarded by the harness at <tag>, with the budget filled in and merged to main.
 old_project() {

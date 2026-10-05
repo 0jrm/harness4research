@@ -34,6 +34,8 @@ In the worktree:
 
 ### 4. Protect the default branch
 
+Steps 4 to 6 carry the real protection. `guard doctor <repo>` checks each of them read-only and prints a remedy for anything left to do. An item it cannot check from the current host says so, never counts as a pass, and leaves the exit status at 0.
+
 The `guard-fence / fence` check exists only after the merge in step 3, and GitHub offers it in the ruleset form only after it has run once. Open any small pull request first, then:
 
 1. On GitHub, open the repository and go to **Settings → Rules → Rulesets → New ruleset → New branch ruleset**.
@@ -105,6 +107,7 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 | `guard init <repo> --update [--force]` | your machine | propose the newer guard as a three-way merge that keeps your edits |
 | `guard version` | anywhere | this harness's release and schema; inside a project, which side is behind |
 | `guard archive <repo>` | your machine | tag every remote branch |
+| `guard doctor [repo]` | your machine, the agent's shell, the cluster | read-only checklist of the Quickstart: pass, FAIL, or cannot check from here, with a remedy for each; exit 1 when an item fails |
 | `guard/run preflight <run_dir> <job.sh> [sbatch options]` | cluster | submit or refuse |
 | `guard/run ripples <run_dir>` | cluster | warning signs |
 | `guard/run manifest <run_dir> "$0" "$@"` | inside a job | provenance record |
