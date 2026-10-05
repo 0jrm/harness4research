@@ -19,7 +19,10 @@ card() {  # card <run> <question> <hypothesis> <metric> <partner> [extra key: va
       -e "s|^kill_criteria: .*|kill_criteria: stop if validation error is not 2% below baseline by epoch 20|" \
       -e "s|^negative_result_means: .*|negative_result_means: the schedule is not worth its extra tuning|" \
       -e "s|^out_of_scope: .*|out_of_scope: architecture changes|" "$here/templates/runs/_template/question.card" > "$f"
-  [ $# -gt 5 ] && printf '%s\n' "${@:6}" >> "$f"; return 0
+  local l; for l in "${@:6}"; do  # an extra line replaces the template's line for its key, or is appended
+    awk -v l="$l" -v k="${l%%:*}:" 'index($0, k) == 1 && !d { print l; d = 1; next } { print } END { if (!d) print l }' "$f" > "$f.new"
+    mv "$f.new" "$f"
+  done
 }
 manifest() {  # manifest <run> <job> <time> <host> [inputs]
   { echo "time: $3"; echo "host: $4"; echo "job_id: $2"; echo "run_id: $1"; echo "commit: $(git rev-parse HEAD)"
