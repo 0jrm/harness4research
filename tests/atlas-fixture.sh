@@ -7,7 +7,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 root=$(mkdir -p "$1" && cd "$1" && pwd); proj=$root/casts-v4-training
-export GIT_AUTHOR_NAME=agent GIT_AUTHOR_EMAIL=agent@lab GIT_COMMITTER_NAME=agent GIT_COMMITTER_EMAIL=agent@lab
+export TZ=UTC GIT_AUTHOR_NAME=agent GIT_AUTHOR_EMAIL=agent@lab GIT_COMMITTER_NAME=agent GIT_COMMITTER_EMAIL=agent@lab
 at() { GIT_AUTHOR_DATE="$1" GIT_COMMITTER_DATE="$1" git commit -q -m "$2"; }
 card() {  # card <run> <question> <hypothesis> <metric> <partner> [extra key: value lines]
   mkdir -p "runs/$1"; local f=runs/$1/question.card
@@ -97,7 +97,7 @@ git add -A; at 2026-09-09T09:00:00 "docs(runs): question card for q-warmup-v2"
 
 card cosine-v2 "Does a cosine schedule beat the constant baseline?" "cosine to zero lowers RMSE by 2% at equal steps" "validation RMSE of T and S, scripts/score.py" "fraction of casts the model leaves at climatology" "supersedes: q-warmup-v2"
 git add -A; at 2026-09-10T09:00:00 "docs(runs): question card for cosine-v2"
-manifest cosine-v2 4811 2026-09-10T10:00:00Z hpc-g003; git add -A; at 2026-09-10T10:05:00 "chore(runs): cosine-v2 manifest 4811"
+manifest cosine-v2 4811 2026-09-10T08:30:00Z hpc-g003; git add -A; at 2026-09-10T10:05:00 "chore(runs): cosine-v2 manifest 4811"
 mkdir -p runs/cosine-v2/incidents
 printf 'job: 4811\nroot_cause: batch of 512 casts at float64 exceeded 80 GB on one GPU\nfix: halved batch size in runs/cosine-v2/config.yaml\n' > runs/cosine-v2/incidents/oom-4811.md
 git add -A; at 2026-09-10T14:00:00 "fix(runs): incident for 4811 out of memory"
