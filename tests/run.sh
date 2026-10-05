@@ -2,6 +2,16 @@
 # usage: tests/run.sh
 # End-to-end checks against throwaway git repos and a fake Slurm. Exit 1 on the first unexpected result.
 set -uo pipefail
+# Launch finds a job's processes host-wide by HPC_JOB_ID, and these tests reuse fixed job ids, so two suites on one
+# host would measure and kill each other's jobs. Where the host allows it, the suite runs as PID 1 of a private PID
+# namespace, and every process it leaves dies with it. unshare ignores INT and TERM, so this outer copy forwards them.
+ns=(unshare --user --map-current-user --pid --fork --mount-proc)
+if [ -z "${HPC_TESTS_IN_NS:-}" ] && "${ns[@]}" true 2>/dev/null; then
+  set -m; HPC_TESTS_IN_NS=1 "${ns[@]}" "$0" "$@" & u=$!; set +m
+  for sig in INT TERM HUP; do trap 'kill -'$sig' $(pgrep -P '$u') 2>/dev/null' $sig; done
+  while :; do wait $u; rc=$?; kill -0 $u 2>/dev/null || exit $rc; done
+fi
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 guard=$here/bin/guard
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
