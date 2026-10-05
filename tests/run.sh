@@ -620,6 +620,8 @@ sed -i '/^setting:/d' runs/ns/question.card
 git add -A; git commit -q -m x
 expect fence-card-no-setting fail 'FAIL.setting-key' -- guard/run fence origin/main HEAD
 
+expect template-lineage-keys ok - -- bash -c 'grep -q "^supersedes: <" "$1" && grep -q "^spawned_from: <" "$1"' _ "$here/templates/runs/_template/question.card"
+
 git switch -q -c pr/hyp-na origin/main; mkdir -p runs/hn
 cp runs/_template/question.card runs/hn/; cp runs/_template/report.md runs/hn/
 git add -A; git commit -q -m x
@@ -840,6 +842,7 @@ upgrade_from() {
   expect "$c-workflow-edit-kept" ok 'runs-on: self-hosted' -- cat "$p.up/.github/workflows/guard-fence.yml"
   expect "$c-no-conflicts" fail - -- grep -rlE '^(<{7}|>{7}) ' "$p.up/guard" "$p.up/.github"
   expect "$c-schema" ok "^schema: $(cat "$here/SCHEMA")$" -- cat "$p.up/guard/VERSION"
+  expect "$c-lineage-keys" ok '^spawned_from: <' -- grep -A1 '^supersedes: <' "$p.up/runs/_template/question.card"
   git -C "$p.up" push -q origin guard/update:main; git fetch -q origin; git switch -q -c agent origin/main
   mkdir -p runs/r; cp runs/_template/question.card runs/r/
   printf '#!/bin/bash\n#SBATCH --time=01:00:00\n#SBATCH --nodes=1\n' > job.sh; git add -A; git commit -q -m "run: r"

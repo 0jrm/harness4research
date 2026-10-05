@@ -32,6 +32,10 @@ Launch is off until a human sets `launch_hosts` on the protected branch, as a sp
 
 The question card holds the design and stays frozen. Its optional keys `budget_gpu_hours`, `budget_core_hours` and `deadline` cap one run; `default_run_gpu_hours` and `default_run_core_hours` in `guard/budget.card` are the workspace defaults, `0` meaning no per-run cap. Execution facts go in `runs/<id>/execution.tsv`. A `restart` or `resume` row may cite a resource stop (OUT_OF_MEMORY, HOST_OUT_OF_MEMORY, NODE_FAIL, PREEMPTED, SUPERVISOR_FAILED, CANCELLED, LAUNCH_FAILED), never a science stop (FAILED, TIMEOUT); the lists only grow. Ripples prints `execution-within-envelope` only for a run that has a ledger at HEAD. The fence rules `execution-ledger` and `execution-history` follow the ratchet.
 
+## Card lineage
+
+The question card's optional keys `supersedes` and `spawned_from` name the run id a card replaces or grew out of. The value `none` declares that the card has no parent; a `<...>` placeholder or a missing line leaves it unset. No script requires either key, so a card without them passes preflight, ripples and the fence as before. The atlas draws the question map from them.
+
 ## Versions
 
 `SCHEMA` at the repository root holds one integer. A commit without the file is schema 1. A release raises it when it adds a command, a check name, a status, a card key, a run-file key, or a fence rule. Bug fixes do not raise it. The skill states the schema it describes, and a test keeps the two equal.
@@ -41,7 +45,7 @@ Releases are annotated tags `vS.N`, where S is the schema. `v1.0` is the oldest 
 `guard init` writes `guard/VERSION` in the project:
 
 ```text
-schema: 3
+schema: 4
 installer: <full commit of the harness that wrote this file>
 release: <git describe of that commit>
 pstack: <commit>
