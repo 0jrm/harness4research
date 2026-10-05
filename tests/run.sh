@@ -870,7 +870,7 @@ mkdir -p "$tmp/atlas"; bash "$here/tests/atlas-fixture.sh" "$tmp/atlas" > "$tmp/
 atlas_before=$(git -C "$tmp/atlas/casts-v4-training" status --porcelain)
 expect atlas-renders ok '14 runs, 2 branches' -- bash -c '. "$1"; "$2" atlas --out "$3/atlas.html" --json "$3/atlas.json"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-catches-early-compute ok 'started before the card was committed' -- cat "$tmp/atlas/atlas.html"
-expect atlas-broken-receipt ok 'link broken.*commit</b> deadbee' -- cat "$tmp/atlas/atlas.html"
+expect atlas-broken-receipt ok '<li class="rc-broken"><span class="b b-broken">.*</span><span class="rc-kind">commit</span> <code>deadbee</code>' -- cat "$tmp/atlas/atlas.html"
 expect atlas-drawer-key-diff ok 'max_walltime_minutes 240 to 600' -- cat "$tmp/atlas/atlas.html"
 python3 -c 'import json, sys
 d = json.load(open(sys.argv[1]))
@@ -891,15 +891,15 @@ expect atlas-artifact-absent-host ok 'artifact ~ /unity/g9/nobody/casts-v4/pred.
 expect atlas-artifact-on-disk ok 'artifact ~ runs/cosine-v2/scores.csv ~ local ~ on disk here, not committed$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-job-not-slurm ok 'job ~ skynet interactive, GPU 2 ~ unknown ~ no scheduler job id' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-commit-in-code-repo ok 'commit ~ casts-loader [0-9a-f]{7} ~ ok ~ resolves in casts-loader$' -- cat "$tmp/atlas/atlas.tsv"
-expect atlas-code-row ok '<dt>Code</dt><dd>casts-loader at /' -- cat "$tmp/atlas/atlas.html"
-expect atlas-cause-bullet ok 'rescore.md</b>: the scorer read the wrong month of casts., fix: pinned the month' -- cat "$tmp/atlas/atlas.html"
+expect atlas-code-row ok '<dt>Code repositories</dt><dd><code>casts-loader</code> at <code>/' -- cat "$tmp/atlas/atlas.html"
+expect atlas-cause-bullet ok '<code>rescore.md</code>: the scorer read the wrong month of casts. Fix: pinned the month' -- cat "$tmp/atlas/atlas.html"
 expect atlas-cause-bullet-not-flagged ok - -- bash -c '! grep -q "rescore.md names no root cause" "$1"' _ "$tmp/atlas/atlas.tsv"
 expect atlas-verdict-prose ok '^O ~ lr-sweep ~ supported ~ ' -- cat "$tmp/atlas/atlas.tsv"
-expect atlas-explore-outcome ok '<h3>explore-07</h3><span class="chip explore">explore</span>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-explore-outcome ok '<span class="id">explore-07</span><span class="o o-explore">explore</span>' -- cat "$tmp/atlas/atlas.html"
 expect atlas-explore-no-card-violations ok - -- bash -c '! grep -Eq "^V ~ explore-07 ~ (question card|job .* started|card edited|no partner)" "$1"' _ "$tmp/atlas/atlas.tsv"
 expect atlas-uncommitted-run ok '^V ~ q-batch ~ question card is not committed, so nothing froze it$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-uncommitted-manifest ok '^M ~ q-batch ~ runs/q-batch/manifest-4860.txt ~ False$' -- cat "$tmp/atlas/atlas.tsv"
-expect atlas-uncommitted-note ok 'q-batch</a><span class="loose">2 uncommitted</span>.*' -- cat "$tmp/atlas/atlas.html"
+expect atlas-uncommitted-note ok '<span class="id">q-batch</span>.*<span class="f">2 uncommitted</span>' -- cat "$tmp/atlas/atlas.html"
 expect atlas-uncommitted-cartouche ok 'plus the working tree \(4 uncommitted files\)' -- cat "$tmp/atlas/atlas.html"
 expect atlas-schema ok '^S ~ atlas_schema ~ 1$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-generated-at ok '^S ~ generated_at ~ [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' -- cat "$tmp/atlas/atlas.tsv"
@@ -911,38 +911,58 @@ expect atlas-not-run-is-rare ok - -- bash -c '! grep -q "^O ~ [^~]* ~ not run ~"
 expect atlas-ledger-by-hand ok '^O ~ hand-run ~ recorded by hand ~ ' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-incident-by-hand ok '^O ~ incident-only ~ recorded by hand ~ ' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-ledger-host ok '^W ~ skynet ~ none ~ hand-run$' -- cat "$tmp/atlas/atlas.tsv"
-expect atlas-ledger-host-card ok 'hand-run placed here by execution.tsv rows, recorded by hand, not by a scheduler' -- cat "$tmp/atlas/atlas.html"
+expect atlas-ledger-host-card ok 'hand-run is placed here only by execution.tsv rows: recorded by hand, not by a scheduler, and not counted in the budget' -- cat "$tmp/atlas/atlas.html"
 expect atlas-report-unmerged ok '^O ~ report-branch ~ report unmerged ~ report on origin/docs/report-branch-report, unmerged ~ ' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-report-unmerged-needs-you ok '^N ~ report-branch ~ report waits for review on origin/docs/report-branch-report$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-behind-base ok '^S ~ behind_base ~ 1$' -- cat "$tmp/atlas/atlas.tsv"
-expect atlas-behind-header ok '<dt>Behind</dt><dd class="alarm">1 commit behind origin/main; run git pull</dd>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-behind-header ok '<p class="snap-behind">.* This checkout is 1 commit behind <code>origin/main</code>.*<code class="cmd">git pull</code>' -- cat "$tmp/atlas/atlas.html"
 expect atlas-card-on-base ok '^V ~ behind-card ~ card exists on origin/main; this checkout is 1 commit behind, run git pull$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-card-on-base-not-uncommitted ok - -- bash -c '! grep -q "^V ~ behind-card ~ question card is not committed" "$1"' _ "$tmp/atlas/atlas.tsv"
 expect atlas-report-not-pulled ok '^O ~ behind-card ~ report not pulled ~ report on origin/main;' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-ledger-bad-header ok '^V ~ behind-card ~ execution.tsv header is not id ts field value why evidence' -- cat "$tmp/atlas/atlas.tsv"
-expect atlas-other-column ok 'title="RIPPLE execution-within-envelope x1: host skynet is not in launch_hosts[^"]*"><span class="ripple">execution-within-envelope<' -- cat "$tmp/atlas/atlas.html"
+expect atlas-other-column ok '<td class="c c-ripple"><svg class="i" role="img" aria-label="other: execution-within-envelope">.*<span class="detail">execution-within-envelope: x1: host skynet is not in launch_hosts' -- cat "$tmp/atlas/atlas.html"
 expect atlas-lineage-inferred ok '^E ~ lr-sweep ~ lr-sweep-fine ~ inferred ~ True$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-lineage-declared ok '^E ~ q-warmup-v2 ~ cosine-v2 ~ supersedes ~ False$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-lineage-declared-not-inferred ok - -- bash -c '! grep -q "^E ~ q-warmup ~ q-warmup-v2 ~ inferred" "$1"' _ "$tmp/atlas/atlas.tsv"
-expect atlas-lineage-dotted ok '<path class="edge inferred" [^>]*><title>lr-sweep to lr-sweep-fine: inferred from name</title></path><text class="edge-label"[^>]*>inferred from name</text>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-lineage-dotted ok '<ol class="lineage lineage-inferred"><li><div class="q"><span class="q-date">' -- cat "$tmp/atlas/atlas.html"
 expect atlas-lineage-none-not-inferred ok - -- bash -c '! grep -q "^E ~ [^~]* ~ lr-sweep-2 ~" "$1"' _ "$tmp/atlas/atlas.tsv"
 expect atlas-lineage-none-no-link ok - -- bash -c '! grep -q "href=\"#run-none\"" "$1"' _ "$tmp/atlas/atlas.html"
-expect atlas-lineage-run-note ok 'follows <a href="#run-lr-sweep">lr-sweep</a>, inferred from name' -- cat "$tmp/atlas/atlas.html"
+expect atlas-lineage-run-note ok '<span class="rel rel-inferred">follows <a class="id" href="#run-lr-sweep">lr-sweep</a>, inferred from name</span>' -- cat "$tmp/atlas/atlas.html"
 expect atlas-lineage-names ok '^emu-b00-053-phys2<emu-b00-053 emu-b00-054<emu-b00-053 emu-b00-054b<emu-b00-054 emu-b00-e2b<emu-b00-e2 emu-b00-e2c<emu-b00-e2b $' -- python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import atlas
 ids = {"emu-b00-053", "emu-b00-053-phys2", "emu-b00-054", "emu-b00-054b", "emu-b00-e2", "emu-b00-e2b", "emu-b00-e2c", "emu-store-054", "f2-train-deploy-shift", "f2b-past-only-inputs", "p1-lookahead"}
 print("".join(f"{i}<{p} " for i in sorted(ids) for p in [atlas.name_parent(i, ids - {i})] if p))' "$here/lib"
 expect atlas-stray-incident ok '^V ~ explore-07 ~ incident.md is a write-up not where the guard looks; move it to incidents/' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-stray-incident-keeps-ripple ok '^N ~ explore-07 ~ ripple on job-states, so stop spending$' -- cat "$tmp/atlas/atlas.tsv"
-expect atlas-release-stamp ok '<dt>Guard</dt><dd>schema [0-9]+, release ' -- cat "$tmp/atlas/atlas.html"
-expect atlas-no-release-stamp ok "<dt>Guard</dt><dd>schema 1, installed before release stamps; run guard init $tmp/atlas/casts-v4-training --update</dd>" -- python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import atlas
+expect atlas-release-stamp ok '<dt>Guard version</dt><dd>schema [0-9]+, release ' -- cat "$tmp/atlas/atlas.html"
+expect atlas-no-release-stamp ok "<dt>Guard version</dt><dd>schema 1, installed before release stamps; run <code>guard init $tmp/atlas/casts-v4-training --update</code></dd>" -- python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import atlas
 d = json.load(open(sys.argv[2])); d["version"] = {"installer": "b017edd"}; print(atlas.render(d))' "$here/lib" "$tmp/atlas/atlas.json"
+expect atlas-verdict-stop ok '<p class="verdict-line">Stop spending on 4 runs: each has a ripple.</p>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-needs-you-incident ok 'Write up job 4840 at <code class="cmd">runs/explore-07/incidents/YYYY-MM-DD-4840.md</code>, the only place the guard counts incidents' -- cat "$tmp/atlas/atlas.html"
+expect atlas-needs-you-branch ok 'review it as a pull request: <code class="cmd">git diff --stat origin/main...origin/agent/fp32-check</code>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-needs-you-await ok '<li class="todo-await">.*href="#run-skynet-train"' -- cat "$tmp/atlas/atlas.html"
+atlas_group() {  # atlas_group <html> <group> <run id>: succeeds when the run sits in that run group
+  python3 -c 'import re, sys
+page, group, rid = open(sys.argv[1]).read(), sys.argv[2], sys.argv[3]
+m = re.search(r"<section class=\"rgroup\" id=\"runs-" + group + r"\".*?</section>", page, re.S)
+sys.exit(0 if m and f"id=\"run-{rid}\"" in m.group(0) else 1)' "$@"
+}
+expect atlas-group-stop ok - -- atlas_group "$tmp/atlas/atlas.html" stop explore-07
+expect atlas-group-stop-open ok '<details class="run" id="run-explore-07" open>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-group-rule ok - -- atlas_group "$tmp/atlas/atlas.html" rule q-batch
+expect atlas-group-await ok - -- atlas_group "$tmp/atlas/atlas.html" await skynet-train
+expect atlas-group-not-quiet ok - -- bash -c '! atlas_group "$1" quiet skynet-train' _ "$tmp/atlas/atlas.html"
+expect atlas-no-tooltips ok '^abbr$' -- python3 -c 'import re, sys; print(" ".join(sorted(set(re.findall(r"<(\w+)[^>]* title=", open(sys.argv[1]).read())))))' "$tmp/atlas/atlas.html"
+expect atlas-every-run-opens ok '^14$' -- grep -c '<details class="run" id="run-' <(sed 's/<details class="run"/\n&/g' "$tmp/atlas/atlas.html")
+expect atlas-golden ok - -- bash -c 'diff <("$1/tests/atlas-golden.sh" "$2") "$1/tests/golden/atlas-fixture.html"' _ "$here" "$tmp/golden"
 expect atlas-no-network ok - -- bash -c '! grep -Eiq "<link[^>]*https?://|src=\"?https?://" "$1"' _ "$tmp/atlas/atlas.html"
 expect atlas-head-only ok '\(12 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
-expect atlas-no-ripples-says-so ok 'ripples not run, so no check reached a verdict' -- cat "$tmp/atlas/head.html"
+expect atlas-no-ripples-says-so ok 'Safety checks were not run for this render, so this page cannot say whether anything is wrong.' -- cat "$tmp/atlas/head.html"
+expect atlas-verdict-unknown ok 'class="verdict verdict-unknown" role="status"' -- cat "$tmp/atlas/head.html"
 expect atlas-head-only-hides-disk-run ok - -- bash -c '! grep -q "run-q-batch" "$1"' _ "$tmp/atlas/head.html"
 expect atlas-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$tmp/atlas/casts-v4-training" "$atlas_before"
 expect atlas-runs-filter ok '\(2 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --runs "cosine-*" --runs "explore-*" --title casts --out "$3/filtered.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
-expect atlas-runs-title ok '<small>Chart of the guarded project casts-v4-training, runs cosine-\*, explore-\*</small>casts</h1>' -- cat "$tmp/atlas/filtered.html"
+expect atlas-runs-title ok '<p class="eyebrow">Guard atlas · project <code>casts-v4-training</code> · runs <code>cosine-\*</code>, <code>explore-\*</code></p>' -- cat "$tmp/atlas/filtered.html"
+expect atlas-runs-title-h1 ok '<h1>casts</h1>' -- cat "$tmp/atlas/filtered.html"
 port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 ( . "$tmp/atlas/env.sh"; exec "$guard" atlas --serve "$port" --every 60 --no-ripples ) > "$tmp/atlas/serve.log" 2>&1 &
 serve_pid=$!

@@ -3,7 +3,8 @@
 # Builds a guarded demo project at <dir>/casts-v4-training with an origin, twelve committed runs, two runs only on disk,
 # an agent branch, a report only on an unmerged branch, a checkout one commit behind origin/main, fake Slurm rows
 # and a sibling code repo <dir>/casts-loader that a report cites by name.
-# Prints the env lines a caller exports before running ripples or guard atlas against it.
+# Prints the env lines a caller exports before running ripples or guard atlas against it. ATLAS_FIXTURE_STAMP, when set,
+# replaces the harness commit and release in guard/VERSION, so that with a fixed TZ every commit id is the same on any machine.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 root=$(mkdir -p "$1" && cd "$1" && pwd); proj=$root/casts-v4-training
@@ -38,7 +39,9 @@ sed -e 's|^account: .*|account: gom|' -e 's|^start_date: .*|start_date: 2026-09-
     -e 's|^cores_per_node: .*|cores_per_node: 64|' -e 's|^max_nodes_per_job: .*|max_nodes_per_job: 2|' \
     -e 's|^max_walltime_minutes: .*|max_walltime_minutes: 240|' -e 's|^max_concurrent_jobs: .*|max_concurrent_jobs: 4|' \
     -e 's|^quota_pct_cmd: .*|quota_pct_cmd: echo 41|' "$here/templates/guard/budget.card" > guard/budget.card
-printf 'schema: %s\ninstaller: %s\nrelease: %s\n' "$(cat "$here/SCHEMA")" "$(git -C "$here" rev-parse HEAD)" "$(git -C "$here" describe --tags --always)" > guard/VERSION
+if [ -n "${ATLAS_FIXTURE_STAMP:-}" ]; then installer=0000000000000000000000000000000000000000 release=$ATLAS_FIXTURE_STAMP
+else installer=$(git -C "$here" rev-parse HEAD) release=$(git -C "$here" describe --tags --always); fi
+printf 'schema: %s\ninstaller: %s\nrelease: %s\n' "$(cat "$here/SCHEMA")" "$installer" "$release" > guard/VERSION
 echo 'print("train")' > src/train.py; printf '#!/bin/bash\npython src/train.py "$@"\n' > jobs/train.sh
 git add -A; at 2026-09-02T09:00:00 "feat(guard): install harness4research guard"
 

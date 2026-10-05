@@ -1,0 +1,714 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>casts-v4-training: guard atlas</title>
+<style>:root{
+--paper:#F6F9F9;--raised:#FFFFFF;--ink:#15222A;--sound:#56666F;--rule:#C5D2D7;--rule-strong:#7A8B93;
+--shoal:#DAEAF0;--shoal2:#A8CCDB;--land:#EDDDB4;--passt:#1D5870;--handt:#6A4C10;
+--mag:#9C2878;--magt:#F4DCEA;--stop:#9C2878;--on-stop:#FFFFFF;--cut:var(--paper);
+--sans:system-ui,-apple-system,"Segoe UI","Helvetica Neue",Helvetica,"Noto Sans","Liberation Sans",sans-serif;
+--serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,"DejaVu Serif",serif;
+--mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono","DejaVu Sans Mono",monospace;
+--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;--s8:64px;
+--t-xs:13px;--t-sm:14px;--t-md:16px;--t-lg:19px;--t-xl:24px;--t-2xl:clamp(28px,7.5cqi,44px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+--paper:#0C161C;--raised:#111F27;--ink:#D2DCE0;--sound:#8D9FA7;--rule:#283A43;--rule-strong:#5A707A;
+--shoal:#12303C;--shoal2:#1E4D60;--land:#3B3220;--passt:#9FD0E2;--handt:#E9CF8C;
+--mag:#E07CC3;--magt:#3A1630;--stop:#E07CC3;--on-stop:#0C161C}}
+:root[data-theme="dark"]{--paper:#0C161C;--raised:#111F27;--ink:#D2DCE0;--sound:#8D9FA7;--rule:#283A43;--rule-strong:#5A707A;
+--shoal:#12303C;--shoal2:#1E4D60;--land:#3B3220;--passt:#9FD0E2;--handt:#E9CF8C;--mag:#E07CC3;--magt:#3A1630;--stop:#E07CC3;--on-stop:#0C161C}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-padding-top:64px;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 var(--t-md)/1.55 var(--sans);font-variant-numeric:tabular-nums;container:page/inline-size}
+a{color:var(--passt);text-underline-offset:2px}a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--mag);outline-offset:2px;border-radius:2px}
+code,.id{font-family:var(--mono);font-size:.88em;overflow-wrap:anywhere}
+.id{font-weight:500;color:var(--ink)}a.id{text-decoration:underline;text-decoration-color:var(--rule-strong)}a.id:hover{text-decoration-color:currentColor}
+h1,h2,h3,h4{font-family:var(--sans);margin:0;line-height:1.2;letter-spacing:-.005em}
+p{margin:0}
+.i{width:1em;height:1em;flex:none;vertical-align:-.14em;--cut:var(--paper)}
+.skip{position:absolute;left:-9999px}.skip:focus{left:var(--s4);top:var(--s2);z-index:9;background:var(--raised);padding:var(--s2) var(--s3)}
+
+/* top nav */
+nav.top{position:sticky;top:0;z-index:5;background:var(--paper);border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:var(--s5);
+padding:10px max(20px,calc(50% - 540px));overflow-x:auto;scrollbar-width:none;font-size:var(--t-sm);white-space:nowrap}nav.top::-webkit-scrollbar{display:none}
+nav.top a{color:var(--sound);text-decoration:none}nav.top a:hover{color:var(--ink)}
+.top-title{font-family:var(--mono);font-weight:600;font-size:var(--t-sm)}
+.top-snap{margin-left:auto;color:var(--sound);font-size:var(--t-xs)}
+.dot{display:inline-block;min-width:1.5em;text-align:center;border-radius:99px;background:var(--stop);color:var(--on-stop);font-size:12px;font-weight:600;padding:0 5px;margin-left:2px}
+main{max-width:1080px;margin:0 auto;padding:0 20px var(--s8)}
+section{margin-top:var(--s8)}
+h2{font-size:var(--t-xl);font-weight:650;margin-bottom:var(--s2)}
+.h-small{font-size:var(--t-sm);font-weight:600;color:var(--sound);margin-bottom:var(--s2)}
+h3{font-size:var(--t-lg);font-weight:600}
+h4{font-size:var(--t-sm);font-weight:600;margin:var(--s5) 0 var(--s2)}
+.lede{color:var(--sound);max-width:72ch;margin-bottom:var(--s4)}
+.note{color:var(--sound);font-size:var(--t-sm)}.note.small{font-size:var(--t-xs);margin:var(--s2) 0 var(--s3);max-width:80ch}
+.wide{overflow-x:auto}
+
+/* badges */
+.b{display:inline-flex;align-items:center;gap:5px;font-size:var(--t-xs);line-height:1.25;padding:2px 8px 2px 6px;border-radius:3px;border:1px solid transparent;white-space:nowrap;vertical-align:1px}
+.b-pass,.b-ok{background:var(--shoal);color:var(--passt)}
+.b-handled,.b-local{background:var(--land);color:var(--handt);border-color:currentColor}
+.b-ripple{background:var(--stop);color:var(--on-stop);font-weight:600}.b-ripple .i{--cut:var(--stop)}
+.b-broken{background:var(--magt);color:var(--mag);border-color:var(--mag);font-weight:600}.b-broken .i{--cut:var(--magt)}
+.b-rule{background:var(--magt);color:var(--mag);border-color:var(--mag)}.b-rule .i{--cut:var(--magt)}
+.b-unchecked,.b-unknown{color:var(--sound);border:1px dashed var(--rule-strong);font-style:italic}
+.b-none{color:var(--sound);border:1px dotted var(--rule-strong)}
+.legend{display:flex;flex-wrap:wrap;gap:var(--s2);margin:0 0 var(--s3)}
+.o{display:inline-block;font-size:var(--t-xs);line-height:1.25;padding:2px 8px;border-radius:3px;border:1px solid var(--ink);white-space:nowrap}
+.o-supported{background:var(--shoal);border-color:var(--passt);color:var(--passt)}
+.o-negative{background:var(--land);border-color:var(--handt);color:var(--handt)}
+.o-open,.o-reported{background:var(--raised)}
+.o-escalated{border-color:var(--mag);color:var(--mag);font-weight:600}
+.o-superseded{color:var(--sound);border-color:var(--rule-strong);text-decoration:line-through;text-decoration-thickness:1px}
+.o-not-run{color:var(--sound);border:1px dashed var(--rule-strong);font-style:italic}
+.o-explore{color:var(--sound);border-color:var(--rule)}
+
+/* status strip */
+.status{margin-top:var(--s6);display:grid;gap:var(--s4)}
+.eyebrow{color:var(--sound);font-size:var(--t-sm)}
+.status h1{font-family:var(--mono);font-size:var(--t-2xl);font-weight:600;letter-spacing:-.02em;overflow-wrap:anywhere}
+.snap{font-size:var(--t-sm)}.snap time{font-weight:600}.age{color:var(--sound)}.age-old{color:var(--mag);font-weight:600}
+.verdict{display:flex;gap:var(--s3);align-items:flex-start;padding:var(--s4) var(--s5);border:1.5px solid var(--ink);background:var(--raised)}
+.verdict>.i{font-size:28px;margin-top:2px}
+.verdict-line{font-size:var(--t-lg);font-weight:650;line-height:1.35;margin-bottom:var(--s1)}
+.verdict p:not(.verdict-line){color:var(--sound);max-width:80ch}
+.verdict-stop{border-color:var(--stop);background:var(--magt)}.verdict-stop>.i{color:var(--stop);--cut:var(--magt)}
+.verdict-rule{border-color:var(--mag)}.verdict-rule>.i{color:var(--mag);--cut:var(--raised)}
+.verdict-unknown{border-style:dashed;border-color:var(--rule-strong)}.verdict-unknown>.i{color:var(--sound)}
+.verdict-quiet>.i{color:var(--passt)}
+.verdict-stop p:not(.verdict-line){color:var(--ink)}
+.counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));border:1px solid var(--rule);background:var(--raised)}
+.count{display:flex;flex-direction:column;padding:var(--s3) var(--s4);text-decoration:none;color:var(--sound);border-left:1px solid var(--rule);font-size:var(--t-sm);line-height:1.3}
+.count:first-child{border-left:0}
+.count b{font-size:var(--t-xl);color:var(--ink);font-weight:650;line-height:1.1;margin-bottom:2px}
+.count-stop b{color:var(--stop)}.count-rule b{color:var(--mag)}
+.count:hover span{color:var(--ink);text-decoration:underline}
+.status-budget{padding-top:var(--s2)}
+.needs h2{font-size:var(--t-lg);margin:var(--s3) 0 var(--s2)}
+.todo{list-style:none;margin:0;padding:0;border-top:1px solid var(--rule)}
+.todo>li{display:flex;gap:var(--s3);padding:var(--s3) 0;border-bottom:1px solid var(--rule)}
+.todo>li>.i{font-size:18px;margin-top:3px;color:var(--sound)}
+.todo-stop>.i{color:var(--stop)}.todo-rule>.i{color:var(--mag)}.todo-branch>.i{color:var(--handt)}
+.todo>li>div{min-width:0;flex:1}
+.todo .id{margin-right:var(--s2)}
+.todo p,.todo ul{margin:var(--s1) 0 0;font-size:var(--t-sm);color:var(--sound);max-width:86ch}
+.todo ul{padding-left:18px}
+.cmd{display:inline-block;background:var(--raised);border:1px solid var(--rule);padding:0 6px;border-radius:3px;color:var(--ink);user-select:all;margin:2px 0}
+.about{border:1px solid var(--rule);padding:0 var(--s4)}
+.about>summary{padding:var(--s3) 0;cursor:pointer;color:var(--sound);font-size:var(--t-sm)}
+.about[open]>summary{border-bottom:1px solid var(--rule);margin-bottom:var(--s3)}
+.about .note{margin:var(--s3) 0 var(--s4)}
+.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px var(--s4);margin:0;font-size:var(--t-sm)}
+.kv>div{display:contents}.kv dt{color:var(--sound)}.kv dd{margin:0}
+.kv-limits{margin-top:var(--s4)}
+
+/* budget bar */
+.bar{margin:28px 0 var(--s2);position:relative}
+.bar-track{position:relative;height:28px;border:1px solid var(--ink);background:var(--raised)}
+.bar-spent{position:absolute;inset:0 auto 0 0;background:var(--shoal2);border-right:2px solid var(--passt);min-width:2px}
+.bar-unknown{position:absolute;inset:0;display:flex;align-items:center;padding-left:var(--s2);font-size:var(--t-xs);font-style:italic;color:var(--sound)}
+.bar-reserve{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,var(--magt) 0 5px,transparent 5px 9px);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.bar-reserve em{font-style:normal;font-size:var(--t-xs);color:var(--mag);background:var(--raised);padding:0 4px;white-space:nowrap}
+.bar-line{position:absolute;top:-8px;bottom:-8px;border-left:2px solid var(--mag)}
+.bar-line em{position:absolute;bottom:100%;right:4px;font-style:normal;font-size:var(--t-xs);color:var(--mag);white-space:nowrap;line-height:1.2;padding-bottom:1px}
+.bar-axis{position:relative;height:20px;font-size:var(--t-xs);color:var(--sound)}
+.bar-axis span{position:absolute;top:3px;transform:translateX(-50%)}
+.bar-axis span:first-child{transform:none}.bar-axis span:last-child{transform:translateX(-100%)}
+.bar-unit{font-size:var(--t-xs);color:var(--sound);text-align:right}
+.bar-key{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s6);margin:var(--s2) 0 0}
+.bar-key div{display:flex;flex-direction:column-reverse}
+.bar-key dt{font-size:var(--t-xs);color:var(--sound)}.bar-key dd{margin:0;font-weight:650;font-size:var(--t-lg)}
+
+/* hosts */
+.hosts{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:var(--s3)}
+.host{padding:var(--s3) var(--s4);border:1px solid var(--ink);background:var(--raised)}
+.host header{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s1) var(--s3);margin-bottom:var(--s1)}
+.host h3{font-size:var(--t-md);font-family:var(--mono)}
+.host-fenced h3{font-family:var(--sans)}
+.host-count{margin-left:auto;font-size:var(--t-xs);color:var(--sound)}
+.host p{font-size:var(--t-sm);color:var(--sound)}.host-runs{margin-top:var(--s1)}
+.fence{display:inline-flex;gap:4px;align-items:center;font-size:var(--t-xs);font-weight:600}
+.fence-fenced{color:var(--passt)}.fence-gated{color:var(--handt)}.fence-open{color:var(--mag)}.fence-open .i{--cut:var(--raised)}.fence-unseen{color:var(--sound);font-style:italic;font-weight:400}
+.host-gated{border:1.5px dashed var(--handt)}
+.host-open{border:1.5px dashed var(--mag)}
+.host-unseen{border:1.5px dotted var(--rule-strong);background:transparent}
+.host-unseen h3{font-family:var(--sans)}
+
+/* checks */
+.notice{display:flex;gap:var(--s3);align-items:flex-start;border:1px dashed var(--rule-strong);padding:var(--s3) var(--s4);font-size:var(--t-sm);margin:0 0 var(--s4);max-width:86ch}
+.notice>.i{font-size:18px;color:var(--sound);margin-top:2px}
+.empty{display:flex;gap:var(--s3);padding:var(--s4);border:1px dashed var(--rule-strong);font-size:var(--t-sm)}
+.empty>.i{font-size:20px;color:var(--sound)}
+table{border-collapse:collapse;width:100%;font-size:var(--t-sm)}
+th{font-weight:600;text-align:left;color:var(--sound);padding:6px 8px;border-bottom:1px solid var(--ink);font-size:var(--t-xs)}
+td,tbody th{padding:8px;border-bottom:1px solid var(--rule);vertical-align:top;text-align:left}
+tbody th{color:var(--ink);font-size:var(--t-sm);font-weight:500}
+.checks th.c,.checks td.c{text-align:center;padding-left:3px;padding-right:3px;width:44px}
+.checks abbr{text-decoration:none}
+.checks td.c .i{font-size:17px}
+.c-pass{color:var(--rule-strong)}.c-handled{color:var(--handt)}.c-ripple{color:var(--stop)}.c-unchecked,.c-none{color:var(--rule-strong)}
+.checks td.c-ripple{background:var(--magt)}.checks td.c-ripple .i{--cut:var(--magt)}
+.checks td.c-handled{background:var(--land)}
+.checks tbody th{white-space:nowrap}
+.what ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.what{min-width:260px}.what li{display:flex;flex-wrap:wrap;gap:2px var(--s2);align-items:baseline}.what .detail{font-size:var(--t-xs);color:var(--sound);overflow-wrap:anywhere}
+.fold{margin-top:var(--s3)}
+.fold>summary{cursor:pointer;font-size:var(--t-sm);color:var(--passt);width:fit-content}
+.fold>summary:hover{color:var(--ink)}
+.idlist{display:flex;flex-wrap:wrap;gap:4px var(--s4);margin-top:var(--s2);font-size:var(--t-sm)}.todo .idlist .id{margin-right:0}
+
+/* questions */
+.lineage{list-style:none;margin:0;padding:0}
+.lineage-root{border-top:1px solid var(--rule)}
+.lineage-root>li{border-bottom:1px solid var(--rule)}
+.lineage .lineage{margin-left:calc(72px + var(--s4));border-left:2px solid var(--rule-strong);padding-left:var(--s3)}.lineage .lineage .lineage{margin-left:0}
+.q{display:grid;grid-template-columns:72px minmax(0,1fr);gap:var(--s4);padding:var(--s3) 0}
+.lineage .lineage .q{grid-template-columns:minmax(0,1fr)}.lineage .lineage .q-date{display:none}
+.q-date{font-size:var(--t-sm);color:var(--sound);padding-top:2px}
+.q-nocard{color:var(--mag);font-size:var(--t-xs);font-weight:600}
+.q-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px var(--s2)}
+.q-text{font-family:var(--serif);font-size:var(--t-md);line-height:1.45;margin-top:4px;max-width:78ch;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.q-missing{color:var(--sound);font-style:italic}
+.rel{font-size:var(--t-xs);color:var(--sound)}
+
+/* runs */
+.jump{display:flex;flex-wrap:wrap;gap:var(--s2);margin-bottom:var(--s4)}
+.jump a{font-size:var(--t-sm);text-decoration:none;border:1px solid var(--rule);background:var(--raised);padding:4px 10px;border-radius:3px;color:var(--ink)}
+.jump a:hover{border-color:var(--ink)}.jump b{font-weight:650;margin-left:4px}
+.rgroup{margin-top:var(--s6)}
+.rgroup>h3{font-size:var(--t-md);margin-bottom:var(--s2);color:var(--sound)}
+.rgroup>h3 .n{font-weight:400}
+#runs-stop>h3{color:var(--stop)}#runs-rule>h3{color:var(--mag)}
+.run{border-top:1px solid var(--rule)}.rgroup .run:last-child{border-bottom:1px solid var(--rule)}
+.run>summary{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:var(--s3);padding:var(--s3) var(--s2);cursor:pointer;list-style:none;align-items:start}
+.run>summary::-webkit-details-marker{display:none}
+.run>summary:hover{background:var(--raised)}
+.run[open]>summary{background:var(--raised);border-bottom:1px solid var(--rule)}
+.rs-icon{font-size:17px;padding-top:2px;color:var(--sound)}
+.rs-stop{color:var(--stop)}.rs-stop .i{--cut:var(--paper)}.rs-rule{color:var(--mag)}.rs-look{color:var(--handt)}.rs-quiet{color:var(--rule-strong)}
+.run[open] .rs-stop .i,.run>summary:hover .rs-stop .i{--cut:var(--raised)}
+.rs-main{min-width:0;display:grid;gap:2px}
+.rs-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px var(--s2)}
+.rs-line .id{font-size:var(--t-md)}
+.rs-q{font-family:var(--serif);color:var(--sound);font-size:var(--t-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.run[open] .rs-q{display:none}
+.rs-when{font-size:var(--t-xs);color:var(--sound);padding-top:3px;white-space:nowrap}
+.rs-when::after{content:" ▸";color:var(--rule-strong)}.run[open] .rs-when::after{content:" ▾"}
+.f{font-size:var(--t-xs);color:var(--sound)}.f+.f::before{content:"· ";color:var(--rule-strong)}
+.f-stop{color:var(--stop);font-weight:600}.f-rule{color:var(--mag);font-weight:600}
+.run-body{padding:var(--s4) var(--s2) var(--s5) calc(22px + var(--s3) + var(--s2))}
+.rels{display:flex;gap:var(--s3);margin-bottom:var(--s3)}
+.probs{list-style:none;padding:0;margin:0 0 var(--s4);display:grid;gap:6px;font-size:var(--t-sm)}
+.question{font-family:var(--serif);font-size:var(--t-lg);line-height:1.45;margin:0 0 var(--s3);max-width:68ch}
+.card{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--s3) var(--s5);margin:0;font-size:var(--t-sm)}
+.card dt{color:var(--sound);font-size:var(--t-xs);font-weight:600}.card dd{margin:2px 0 0}
+.card-verdict{display:block;margin-top:6px;color:var(--ink);font-weight:600}
+.missing{color:var(--mag);display:inline-flex;gap:5px;align-items:baseline}.missing .i{--cut:var(--paper)}
+.plain{margin:0;padding-left:18px;font-size:var(--t-sm);display:grid;gap:4px}
+.prose{font-size:var(--t-sm);max-width:86ch}.prose p+p,.prose .wide{margin-top:var(--s2)}
+.mdt{font-size:var(--t-xs)}
+.files{list-style:none;padding:0;margin:var(--s2) 0 0;font-size:var(--t-xs);columns:2 320px}
+
+/* timeline */
+.tl{margin:var(--s5) 0 0}
+.tl-grid{display:grid;grid-template-columns:76px minmax(0,1fr);column-gap:var(--s2)}
+.tl-labels{display:grid;grid-auto-rows:30px;padding-top:22px;font-size:var(--t-xs);color:var(--sound)}
+.tl-labels span{align-self:center}
+.tl-plot{position:relative;padding-top:22px;border-bottom:1px solid var(--ink)}
+.tl-lane{position:relative;height:30px;border-top:1px solid var(--rule)}
+.tl-before{position:absolute;left:0;top:22px;bottom:0;background:repeating-linear-gradient(135deg,var(--magt) 0 6px,transparent 6px 10px)}
+.tl-before-hit{background:var(--magt)}
+.tl-freeze{position:absolute;top:0;bottom:0;border-left:2px dashed var(--ink)}
+.tl-freeze em{position:absolute;top:0;left:6px;font-style:normal;font-size:var(--t-xs);color:var(--ink);white-space:nowrap;line-height:18px}
+.tl-freeze[style*="left:9"] em,.tl-freeze[style*="left:8"] em,.tl-freeze[style*="left:7"] em,.tl-freeze[style*="left:6"] em{left:auto;right:6px}
+.tl-cardbar{position:absolute;right:0;top:13px;height:4px;background:var(--ink)}
+.m{position:absolute;top:50%;transform:translate(-50%,-50%);display:block}
+.m-job{width:10px;height:16px;background:var(--raised);border:1.5px solid var(--passt)}
+.m-jobfail{width:10px;height:16px;background:var(--stop);border:1.5px solid var(--stop)}
+.m-inc{width:12px;height:12px;border-radius:50%;background:var(--raised);border:1.5px solid var(--handt)}
+.m-incbad{width:12px;height:12px;border-radius:50%;background:var(--stop)}
+.m-edit{width:12px;height:12px;background:var(--mag);transform:translate(-50%,-50%) rotate(45deg)}
+.m-report{width:12px;height:12px;border-radius:50%;background:var(--ink)}
+.tl-axis{display:flex;justify-content:space-between;font-size:var(--t-xs);color:var(--sound);padding-top:3px}
+.tl-key{display:flex;flex-wrap:wrap;gap:4px var(--s4);font-size:var(--t-xs);color:var(--sound);margin-top:var(--s2)}
+.tl-key span{display:inline-flex;align-items:center;gap:6px}
+.k{position:relative;display:inline-block;transform:none}.k.m-edit{transform:rotate(45deg);width:9px;height:9px}
+.k-before{width:18px;height:12px;background:repeating-linear-gradient(135deg,var(--magt) 0 3px,transparent 3px 5px);border:1px solid var(--mag)}
+.events{margin-top:var(--s2)}
+.evlist{list-style:none;padding:0;margin:var(--s2) 0 0;font-size:var(--t-xs);display:grid;gap:2px}
+.evlist li{display:grid;grid-template-columns:100px 72px minmax(0,1fr);gap:var(--s2)}
+.evlist time,.evlist .lane{color:var(--sound)}
+
+/* evidence */
+.ev{margin-top:var(--s2);table-layout:fixed}
+.ev td{overflow-wrap:anywhere}.ev td.num{font-weight:500}
+.ev .h-claim{width:38%}.ev .h-value{width:24%}
+.row-broken td{background:var(--magt)}
+.rc>summary{cursor:pointer;display:inline-flex;gap:var(--s2);align-items:center;font-size:var(--t-sm)}
+.rc-strip{display:inline-flex;gap:2px;font-size:15px}
+.rc-strip .rc-ok{color:var(--passt)}.rc-strip .rc-local{color:var(--handt)}.rc-strip .rc-unknown{color:var(--sound)}.rc-strip .rc-broken{color:var(--mag)}
+.rc-strip .rc-broken .i{--cut:var(--paper)}.row-broken .rc-strip .rc-broken .i{--cut:var(--magt)}
+.rc ul{list-style:none;padding:0;margin:var(--s2) 0 0;display:grid;gap:6px}
+.rc li{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:2px var(--s2);align-items:baseline;font-size:var(--t-xs)}
+.rc-kind{font-weight:600}.rc li code{overflow-wrap:anywhere}
+.rc-note{grid-column:2/-1;color:var(--sound)}
+
+/* branches */
+.branch{border:1.5px solid var(--handt);background:var(--raised);padding:var(--s3) var(--s4);margin-bottom:var(--s3)}
+.branch header{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center}
+.branch header .id{font-size:var(--t-md);margin-right:var(--s2)}
+.branch .meta{font-size:var(--t-sm);color:var(--sound);margin-top:var(--s1)}
+.branch h4{margin:var(--s3) 0 var(--s1);font-size:var(--t-xs);color:var(--sound)}
+.chips{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:4px}
+.chips li{font-size:var(--t-xs);border:1px solid var(--rule);padding:1px 6px;border-radius:3px;background:var(--paper)}
+.quiet td{font-size:var(--t-sm)}.quiet td.num{white-space:nowrap}
+footer{margin-top:var(--s8);font-size:var(--t-xs);color:var(--sound);border-top:1px solid var(--rule);padding-top:var(--s3)}
+
+/* narrow */
+@container page (max-width:900px){.top-snap{display:none}}
+@container page (max-width:760px){
+ nav.top{gap:var(--s4)}
+ .counts{grid-template-columns:1fr 1fr}.count{border-left:0;border-top:1px solid var(--rule)}.count:nth-child(-n+2){border-top:0}.count:nth-child(even){border-left:1px solid var(--rule)}
+ .checks th.c,.checks td.c{display:none}
+ .checks thead{display:none}.checks,.checks tbody,.checks tr,.checks th,.checks td{display:block}
+ .checks tr{border-bottom:1px solid var(--rule);padding:var(--s2) 0}.checks tbody th,.checks td{border:0;padding:2px 0}
+ .q{grid-template-columns:1fr;gap:2px}
+ .lineage .lineage{margin-left:var(--s3)}
+ .run>summary{grid-template-columns:20px minmax(0,1fr);padding-inline:0}
+ .rs-when{grid-column:2;padding-top:0}
+ .run-body{padding-left:0;padding-right:0}
+ .tl-grid{grid-template-columns:64px minmax(0,1fr)}
+ .tl-freeze em{white-space:normal;width:max-content;max-width:180px;background:var(--paper)}
+ .ev thead{display:none}.ev,.ev tbody,.ev tr,.ev td{display:block;width:auto}
+ .ev tr{border-bottom:1px solid var(--rule);padding:var(--s2) 0}.ev td{border:0;padding:2px 0}
+ .ev .rcpt{width:auto}
+ .evlist li{grid-template-columns:96px minmax(0,1fr)}.evlist .lane{display:none}
+ .bar-line em{right:auto;left:auto;transform:translateX(-100%)}
+ .quiet thead{display:none}.quiet,.quiet tbody,.quiet tr,.quiet td{display:block}.quiet tr{padding:var(--s2) 0;border-bottom:1px solid var(--rule)}.quiet td{border:0;padding:1px 0}
+}
+@container page (max-width:440px){
+ main{padding-inline:16px}
+ .verdict{padding:var(--s3)}
+ .bar-reserve em{display:none}
+ .counts{grid-template-columns:1fr}.count{border-left:0 !important;border-top:1px solid var(--rule) !important;flex-direction:row;align-items:baseline;gap:var(--s2)}.count:first-child{border-top:0 !important}
+ .count b{font-size:var(--t-lg)}
+}
+
+@media print{
+ :root{--paper:#fff;--raised:#fff}
+ body{font-size:11pt}
+ nav.top,.skip,.jump{display:none}
+ *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ details>summary{list-style:none}
+ details:not([open])>*:not(summary){display:block}
+ details::details-content{content-visibility:visible;display:block}
+ .run,.host,.branch,.verdict,tr{break-inside:avoid}
+ .rs-when::after{content:none}
+ a{color:inherit;text-decoration:none}
+}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+/* states the design reference predates: the outcomes and inferred lineage of atlas_schema 1 */
+.o-no-scheduler-record{color:var(--sound);border:1px dashed var(--rule-strong);font-style:italic}
+.o-recorded-by-hand{background:var(--raised);border:1px dotted var(--ink)}
+.o-report-unmerged,.o-report-not-pulled{color:var(--handt);border:1px dashed var(--handt)}
+.lineage .lineage-inferred{border-left-style:dotted}
+.rel-inferred{font-style:italic}
+.snap-behind{color:var(--mag);font-size:var(--t-sm)}
+.card dd,.detail,.rc-note,.prose,.todo p,.todo li{overflow-wrap:anywhere}
+</style></head><body>
+<a class="skip" href="#status">Skip to status</a>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+<symbol id="i-pass" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5 8.3l2.1 2.1L11.2 6" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+<symbol id="i-handled" viewBox="0 0 16 16"><path d="M8 1.4L14.6 8 8 14.6 1.4 8z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.2 8h5.6" stroke="currentColor" stroke-width="1.7"/></symbol>
+<symbol id="i-ripple" viewBox="0 0 16 16"><path d="M5.2 1h5.6L15 5.2v5.6L10.8 15H5.2L1 10.8V5.2z" fill="currentColor"/><path d="M4.4 8h7.2" stroke="var(--cut)" stroke-width="2.2"/></symbol>
+<symbol id="i-unchecked" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.6 2.1"/></symbol>
+<symbol id="i-none" viewBox="0 0 16 16"><path d="M3.5 8h9" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2 1.6"/></symbol>
+<symbol id="i-local" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.7a6.3 6.3 0 0 0 0 12.6z" fill="currentColor"/></symbol>
+<symbol id="i-broken" viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="13" height="13" rx="1" fill="currentColor"/><path d="M5 5l6 6M11 5l-6 6" stroke="var(--cut)" stroke-width="1.8"/></symbol>
+<symbol id="i-rule" viewBox="0 0 16 16"><path d="M8 1.2L15.2 14.4H.8z" fill="currentColor"/><path d="M8 5.6v4.3M8 11.2v1.4" stroke="var(--cut)" stroke-width="1.7"/></symbol>
+<symbol id="i-branch" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="4.5" cy="12.5" r="2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="11.5" cy="5.5" r="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4.5 5.5v5M11.5 7.5c0 2.5-7 1.5-7 3" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="i-await" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.2V8l2.6 1.8" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+<symbol id="i-file" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M9.5 1.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="i-quiet" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.6" fill="currentColor"/></symbol>
+</svg>
+<nav class="top" aria-label="Sections"><span class="top-title">casts-v4-training</span><a href="#status">Status</a><a href="#compute">Compute</a><a href="#checks">Checks <b class="dot">4</b></a><a href="#questions">Questions</a><a href="#runs">Runs</a><a href="#branches">Branches</a><span class="top-snap">GENERATED</span></nav>
+<main>
+<header class="status" id="status">
+<p class="eyebrow">Guard atlas</p>
+<h1>casts-v4-training</h1>
+<p class="snap">Snapshot taken <time datetime="GENERATED" data-age>GENERATED</time>. The page does not update itself.</p><p class="snap-behind"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg> This checkout is 1 commit behind <code>origin/main</code>, so cards and reports merged there may be missing here. Run <code class="cmd">git pull</code>, then render again.</p>
+<div class="verdict verdict-stop" role="status"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg><div><p class="verdict-line">Stop spending on 4 runs: each has a ripple.</p><p>A <strong>ripple</strong> is a guard safety check that says stop spending compute on a run until a person has looked. 10 runs of 14 passed every check that ran.</p></div></div>
+<nav class="counts" aria-label="Counts">
+<a class="count count-stop" href="#checks"><b>4</b><span>runs with a ripple</span></a>
+<a class="count count-rule" href="#runs-rule"><b>5</b><span>runs broke a rule</span></a>
+<a class="count count-await" href="#runs-await"><b>10</b><span>cards with no report</span></a>
+<a class="count count-branch" href="#branches"><b>1</b><span>branch touches guarded files</span></a>
+<a class="count count-file" href="#about"><b>4</b><span>uncommitted files</span></a>
+</nav>
+<div class="status-budget"><h2 class="h-small">Budget, 2026-09-01 to 2026-12-31</h2><figure class="bar" role="img" aria-label="900 of 2000 core-hours spent; 800 left for agent work; 300 held for verification; ripples fire at 1600.">
+<div class="bar-track"><span class="bar-spent" style="width:45.00%"></span><span class="bar-reserve" style="left:85.00%;width:15.00%"><em>verification reserve</em></span><span class="bar-line" style="left:80%"><em>ripples fire at 1,600</em></span></div>
+<div class="bar-axis" aria-hidden="true"><span style="left:0%">0</span><span style="left:25%">500</span><span style="left:50%">1,000</span><span style="left:75%">1,500</span><span style="left:100%">2,000</span></div><figcaption class="bar-unit">core-hours</figcaption></figure>
+<dl class="bar-key"><div><dt>Spent</dt><dd>900</dd></div><div><dt>Left for agent work</dt><dd>800</dd></div><div><dt>Held for verification</dt><dd>300</dd></div><div><dt>Cap</dt><dd>2,000</dd></div></dl></div>
+<section class="needs" aria-labelledby="needs-h"><h2 id="needs-h">Needs you</h2><ol class="todo"><li class="todo-stop"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg><div><a class="id" href="#run-cosine-v2">cosine-v2</a> <span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>walltime: near walltime</span><p>Job 4830 used 92% of its walltime. Read the run, then re-check: <code class="cmd">bash guard/run ripples runs/cosine-v2</code></p></div></li><li class="todo-stop"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg><div><a class="id" href="#run-explore-07">explore-07</a> <span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>jobs: failed, no incident</span><p>Job 4840 FAILED. Write up job 4840 at <code class="cmd">runs/explore-07/incidents/YYYY-MM-DD-4840.md</code>, the only place the guard counts incidents. Then re-check: <code class="cmd">bash guard/run ripples runs/explore-07</code></p></div></li><li class="todo-stop"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg><div><a class="id" href="#run-fp32-check">fp32-check</a> <span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>card: card edited</span><p>runs/fp32-check/question.card edited after its first commit. Read the run, then re-check: <code class="cmd">bash guard/run ripples runs/fp32-check</code></p></div></li><li class="todo-stop"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg><div><a class="id" href="#run-hand-run">hand-run</a> <span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>other: execution-within-envelope</span><p>execution-within-envelope: x1: host skynet is not in launch_hosts (none). Read the run, then re-check: <code class="cmd">bash guard/run ripples runs/hand-run</code></p></div></li><li class="todo-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg><div><a class="id" href="#run-behind-card">behind-card</a> <span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>2 rule breaks</span><ul><li>Card exists on origin/main; this checkout is 1 commit behind, run git pull.</li><li>execution.tsv header is not id ts field value why evidence, so neither the guard nor this page reads its rows.</li></ul></div></li><li class="todo-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg><div><a class="id" href="#run-explore-07">explore-07</a> <span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>1 rule break</span><ul><li>incident.md is a write-up not where the guard looks; move it to incidents/&lt;date&gt;-&lt;job&gt;.md.</li></ul></div></li><li class="todo-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg><div><a class="id" href="#run-fp32-check">fp32-check</a> <span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>1 rule break</span><ul><li>Card edited 1 time(s) after its first commit.</li></ul></div></li><li class="todo-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg><div><a class="id" href="#run-q-batch">q-batch</a> <span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>1 rule break</span><ul><li>Question card is not committed, so nothing froze it.</li></ul></div></li><li class="todo-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg><div><a class="id" href="#run-q-warmup-v2">q-warmup-v2</a> <span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>1 rule break</span><ul><li>No partner metric, so doing less could satisfy the metric.</li></ul></div></li><li class="todo-branch"><svg class="i" aria-hidden="true"><use href="#i-branch"/></svg><div><code class="id">origin/agent/fp32-check</code> <span class="b b-handled"><svg class="i" aria-hidden="true"><use href="#i-handled"/></svg>touches the guard</span><p>Changes 1 guard or workflow file and 1 watched path. The fence blocks it from merging; review it as a pull request: <code class="cmd">git diff --stat origin/main...origin/agent/fp32-check</code></p></div></li><li class="todo-await"><svg class="i" aria-hidden="true"><use href="#i-await"/></svg><div><span class="id">10 question cards with no report</span><p>A card without a report has no verdict yet.</p><p class="idlist"><a class="id" href="#run-behind-card">behind-card</a><a class="id" href="#run-fp32-check">fp32-check</a><a class="id" href="#run-hand-run">hand-run</a><a class="id" href="#run-incident-only">incident-only</a><a class="id" href="#run-lr-sweep-2">lr-sweep-2</a><a class="id" href="#run-lr-sweep-fine">lr-sweep-fine</a><a class="id" href="#run-q-batch">q-batch</a><a class="id" href="#run-q-warmup-v2">q-warmup-v2</a><a class="id" href="#run-report-branch">report-branch</a><a class="id" href="#run-skynet-train">skynet-train</a></p></div></li><li class="todo-file"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg><div><span class="id">4 uncommitted files in the working tree</span><p>Receipts that point at them grade <em>local</em>, not <em>ok</em>, until they are committed. <code class="cmd">git status --short runs/</code></p></div></li></ol></section>
+<details class="about" id="about"><summary>About this render</summary>
+<dl class="kv">
+<div><dt>Protected branch</dt><dd><code>origin/main</code> at <code>ae1f3a3</code></dd></div>
+<div><dt>Runs read at</dt><dd>HEAD <code>488aec8</code> plus the working tree (4 uncommitted files)</dd></div>
+<div><dt>Code repositories</dt><dd><code>casts-loader</code> at <code>/FIXTURE/casts-loader</code></dd></div>
+<div><dt>Guard version</dt><dd>schema 3, release v0.0-golden</dd></div>
+<div><dt>Spend source</dt><dd>core-hours from sacct, through the budget ripple</dd></div>
+<div><dt>Checkout</dt><dd><code>/FIXTURE/casts-v4-training</code></dd></div>
+</dl>
+<p class="note">Read-only. The page holds no state and writes nothing back; every action it suggests is a command to copy or a pull request. Earlier versions used a nautical vocabulary (Waters, Soundings, Datum, Drawer, Lifeline); <em>ripple</em> is kept because the guard prints it.</p>
+</details>
+</header>
+<section id="compute" aria-labelledby="compute-h"><h2 id="compute-h">Compute and budget</h2>
+<p class="lede">Where compute ran, read from job manifests, and what fence stood around it.</p>
+<div class="hosts"><article class="host host-fenced"><header><h3>Slurm cluster</h3><span class="fence fence-fenced"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>Fenced</span><span class="host-count">4 nodes, 5 runs</span></header><p>Account gom: preflight checks and a capped sub-account.</p></article><article class="host host-open"><header><h3>skynet</h3><span class="fence fence-open"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>No fence</span><span class="host-count">2 runs</span></header><p>Not in launch_hosts: compute here passed no gate. hand-run is placed here only by execution.tsv rows: recorded by hand, not by a scheduler, and not counted in the budget.</p><p class="host-runs idlist"><a class="id" href="#run-explore-07">explore-07</a><a class="id" href="#run-hand-run">hand-run</a></p></article></div>
+<dl class="kv kv-limits"><div><dt>Account</dt><dd>gom</dd></div><div><dt>Per job</dt><dd>2 nodes, 240 min walltime</dd></div><div><dt>Concurrent jobs</dt><dd>4</dd></div><div><dt>Explore runs</dt><dd>1 node, 60 min</dd></div><div><dt>Handled failures per run</dt><dd>2</dd></div><div><dt>Disk quota used</dt><dd>41%</dd></div></dl>
+</section>
+<section id="checks" aria-labelledby="checks-h"><h2 id="checks-h">Safety checks</h2>
+<p class="lede">The project’s own <code>guard/run ripples</code>, once per run, from this checkout. Runs with something other than a pass come first.</p>
+
+<p class="legend" aria-hidden="true"><span class="b b-pass"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>pass</span><span class="b b-handled"><svg class="i" aria-hidden="true"><use href="#i-handled"/></svg>handled by an incident</span><span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>ripple: stop spending</span><span class="b b-unchecked"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg>unchecked</span><span class="b b-none"><svg class="i" aria-hidden="true"><use href="#i-none"/></svg>not reported</span></p>
+<div class="wide"><table class="checks"><thead><tr><th scope="col">Run</th><th scope="col" class="c"><abbr title="Guard files untouched">guard</abbr></th><th scope="col" class="c"><abbr title="Card frozen">card</abbr></th><th scope="col" class="c"><abbr title="Watched paths untouched">watched</abbr></th><th scope="col" class="c"><abbr title="Job states">jobs</abbr></th><th scope="col" class="c"><abbr title="Walltime headroom">walltime</abbr></th><th scope="col" class="c"><abbr title="Retries">retries</abbr></th><th scope="col" class="c"><abbr title="Handled failures under the cap">failures</abbr></th><th scope="col" class="c"><abbr title="Budget under 80%">budget</abbr></th><th scope="col" class="c"><abbr title="Disk quota under 80%">quota</abbr></th><th scope="col" class="c"><abbr title="Domain checks">domain</abbr></th><th scope="col" class="c"><abbr title="Other checks">other</abbr></th><th scope="col" class="what">Not passing</th></tr></thead><tbody><tr><th scope="row"><a class="id" href="#run-hand-run">hand-run</a></th><td class="c c-pass"><svg class="i" role="img" aria-label="guard-untouched: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="question-card-frozen: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="watched-paths: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="job-states: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="walltime-headroom: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="retries: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="handled-failures: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="budget: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="quota: pass"><use href="#i-pass"/></svg></td><td class="c c-unchecked"><svg class="i" role="img" aria-label="domain: no domain check"><use href="#i-unchecked"/></svg></td><td class="c c-ripple"><svg class="i" role="img" aria-label="other: execution-within-envelope"><use href="#i-ripple"/></svg></td><td class="what"><ul><li><span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>other: execution-within-envelope</span> <span class="detail">execution-within-envelope: x1: host skynet is not in launch_hosts (none)</span></li></ul></td></tr><tr><th scope="row"><a class="id" href="#run-explore-07">explore-07</a></th><td class="c c-pass"><svg class="i" role="img" aria-label="guard-untouched: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="question-card-frozen: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="watched-paths: pass"><use href="#i-pass"/></svg></td><td class="c c-ripple"><svg class="i" role="img" aria-label="job-states: failed, no incident"><use href="#i-ripple"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="walltime-headroom: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="retries: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="handled-failures: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="budget: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="quota: pass"><use href="#i-pass"/></svg></td><td class="c c-unchecked"><svg class="i" role="img" aria-label="domain: no domain check"><use href="#i-unchecked"/></svg></td><td class="c c-none"><svg class="i" role="img" aria-label="other: none reported"><use href="#i-none"/></svg></td><td class="what"><ul><li><span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>jobs: failed, no incident</span> <span class="detail">job 4840 FAILED</span></li></ul></td></tr><tr><th scope="row"><a class="id" href="#run-fp32-check">fp32-check</a></th><td class="c c-pass"><svg class="i" role="img" aria-label="guard-untouched: pass"><use href="#i-pass"/></svg></td><td class="c c-ripple"><svg class="i" role="img" aria-label="question-card-frozen: card edited"><use href="#i-ripple"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="watched-paths: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="job-states: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="walltime-headroom: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="retries: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="handled-failures: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="budget: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="quota: pass"><use href="#i-pass"/></svg></td><td class="c c-unchecked"><svg class="i" role="img" aria-label="domain: no domain check"><use href="#i-unchecked"/></svg></td><td class="c c-none"><svg class="i" role="img" aria-label="other: none reported"><use href="#i-none"/></svg></td><td class="what"><ul><li><span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>card: card edited</span> <span class="detail">runs/fp32-check/question.card edited after its first commit</span></li></ul></td></tr><tr><th scope="row"><a class="id" href="#run-cosine-v2">cosine-v2</a></th><td class="c c-pass"><svg class="i" role="img" aria-label="guard-untouched: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="question-card-frozen: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="watched-paths: pass"><use href="#i-pass"/></svg></td><td class="c c-handled"><svg class="i" role="img" aria-label="job-states: failed, handled"><use href="#i-handled"/></svg></td><td class="c c-ripple"><svg class="i" role="img" aria-label="walltime-headroom: near walltime"><use href="#i-ripple"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="retries: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="handled-failures: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="budget: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="quota: pass"><use href="#i-pass"/></svg></td><td class="c c-pass"><svg class="i" role="img" aria-label="domain: 1 of 1 pass"><use href="#i-pass"/></svg></td><td class="c c-none"><svg class="i" role="img" aria-label="other: none reported"><use href="#i-none"/></svg></td><td class="what"><ul><li><span class="b b-handled"><svg class="i" aria-hidden="true"><use href="#i-handled"/></svg>jobs: failed, handled</span> <span class="detail">job 4811 OUT_OF_MEMORY, written up in incidents/oom-4811.md</span></li><li><span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>walltime: near walltime</span> <span class="detail">job 4830 used 92% of its walltime</span></li></ul></td></tr></tbody></table></div>
+<details class="fold"><summary>10 more runs passed all 9 checks</summary><p class="idlist"><a class="id" href="#run-behind-card">behind-card</a><a class="id" href="#run-incident-only">incident-only</a><a class="id" href="#run-lr-sweep">lr-sweep</a><a class="id" href="#run-lr-sweep-2">lr-sweep-2</a><a class="id" href="#run-lr-sweep-fine">lr-sweep-fine</a><a class="id" href="#run-q-batch">q-batch</a><a class="id" href="#run-q-warmup">q-warmup</a><a class="id" href="#run-q-warmup-v2">q-warmup-v2</a><a class="id" href="#run-report-branch">report-branch</a><a class="id" href="#run-skynet-train">skynet-train</a></p></details>
+</section>
+<section id="questions" aria-labelledby="questions-h"><h2 id="questions-h">Questions</h2>
+<p class="lede">Every question card in the order it was frozen. A card that names <code>supersedes</code> or <code>spawned_from</code> sits under the card it came from. Explore runs need no card and are left out.</p>
+<p class="legend" aria-hidden="true"><span class="o o-supported">supported</span><span class="o o-negative">clean negative</span><span class="o o-open">open</span><span class="o o-superseded">superseded</span><span class="o o-no-scheduler-record">no scheduler record</span><span class="o o-recorded-by-hand">recorded by hand</span><span class="o o-report-unmerged">report unmerged</span></p>
+<p class="note small"><strong>No scheduler record</strong> means the guard found no job manifest for the card. The run may still have happened on a host without a scheduler; the guard cannot tell. It does not mean “not run”. A dotted rule nests a card under the id it looks like it grew out of, when neither card names the other.</p>
+<ol class="lineage lineage-root"><li><div class="q"><span class="q-date"><time datetime="2026-09-03T10:00:00.000Z">Sep 3</time></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-lr-sweep">lr-sweep</a> <span class="o o-supported">supported</span></p>
+<p class="q-text">Which constant learning rate is the baseline for casts-v4?</p></div></div><ol class="lineage lineage-inferred"><li><div class="q"><span class="q-date"><time datetime="2026-09-25T09:00:00.000Z">Sep 25</time></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-lr-sweep-fine">lr-sweep-fine</a> <span class="o o-no-scheduler-record">no scheduler record</span><span class="rel rel-inferred">follows <a class="id" href="#run-lr-sweep">lr-sweep</a>, inferred from name</span></p>
+<p class="q-text">Does a finer sweep around 3e-4 move the baseline?</p></div></div></li></ol></li><li><div class="q"><span class="q-date"><time datetime="2026-09-06T09:00:00.000Z">Sep 6</time></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-q-warmup">q-warmup</a> <span class="o o-negative">clean negative</span></p>
+<p class="q-text">Does a linear warmup lower validation error on casts-v4?</p></div></div><ol class="lineage"><li><div class="q"><span class="q-date"><time datetime="2026-09-09T09:00:00.000Z">Sep 9</time></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-q-warmup-v2">q-warmup-v2</a> <span class="o o-superseded">superseded</span><span class="b b-unchecked"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg>no scheduler record</span><span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>no partner metric</span><span class="rel">spawned from <a class="id" href="#run-q-warmup">q-warmup</a></span></p>
+<p class="q-text">Does a longer warmup of 4000 steps help?</p></div></div><ol class="lineage"><li><div class="q"><span class="q-date"><time datetime="2026-09-10T09:00:00.000Z">Sep 10</time></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-cosine-v2">cosine-v2</a> <span class="o o-supported">supported</span><span class="rel">supersedes <a class="id" href="#run-q-warmup-v2">q-warmup-v2</a></span></p>
+<p class="q-text">Does a cosine schedule beat the constant baseline?</p></div></div></li></ol></li></ol></li><li><div class="q"><span class="q-date"><time datetime="2026-09-20T09:00:00.000Z">Sep 20</time></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-fp32-check">fp32-check</a> <span class="o o-open">open</span></p>
+<p class="q-text">Does training in float32 change the result?</p></div></div></li><li><div class="q"><span class="q-date"><time datetime="2026-09-25T09:00:00.000Z">Sep 25</time></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-hand-run">hand-run</a> <span class="o o-recorded-by-hand">recorded by hand</span></p>
+<p class="q-text">Does a second GPU halve the epoch time?</p></div></div></li><li><div class="q"><span class="q-date"><time datetime="2026-09-25T09:00:00.000Z">Sep 25</time></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-incident-only">incident-only</a> <span class="o o-recorded-by-hand">recorded by hand</span></p>
+<p class="q-text">Does the float16 loader keep up?</p></div></div></li><li><div class="q"><span class="q-date"><time datetime="2026-09-25T09:00:00.000Z">Sep 25</time></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-lr-sweep-2">lr-sweep-2</a> <span class="o o-no-scheduler-record">no scheduler record</span></p>
+<p class="q-text">Does the sweep repeat with a new seed?</p></div></div></li><li><div class="q"><span class="q-date"><time datetime="2026-09-25T09:00:00.000Z">Sep 25</time></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-report-branch">report-branch</a> <span class="o o-report-unmerged">report unmerged</span><span class="b b-unchecked"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg>no scheduler record</span></p>
+<p class="q-text">Does dropout 0.1 help?</p></div></div></li><li><div class="q"><span class="q-date"><time datetime="2026-09-25T09:00:00.000Z">Sep 25</time></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-skynet-train">skynet-train</a> <span class="o o-no-scheduler-record">no scheduler record</span></p>
+<p class="q-text">Does the model train on skynet without the scheduler?</p></div></div></li><li><div class="q"><span class="q-date"><time datetime="2026-09-28T09:00:00.000Z">Sep 28</time></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-behind-card">behind-card</a> <span class="o o-report-not-pulled">report not pulled</span><span class="b b-unchecked"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg>no scheduler record</span></p>
+<p class="q-text">Does the cosine floor matter?</p></div></div></li><li><div class="q"><span class="q-date"><span class="q-nocard">card not committed</span></span>
+<div class="q-body"><p class="q-head"><a class="id" href="#run-q-batch">q-batch</a> <span class="o o-open">open</span></p>
+<p class="q-text">Does a batch of 256 casts train as well as 512?</p></div></div></li></ol>
+</section>
+<section id="runs" aria-labelledby="runs-h"><h2 id="runs-h">Runs</h2>
+<p class="lede">14 runs, grouped by what they need from you, then newest first. Open one for its card, timeline and receipts.</p>
+<nav class="jump" aria-label="Run groups"><a href="#runs-stop">Stop: a ripple fired <b>4</b></a><a href="#runs-rule">A rule was broken <b>3</b></a><a href="#runs-await">Awaiting a report <b>5</b></a><a href="#runs-quiet">Nothing flagged <b>2</b></a></nav><section class="rgroup" id="runs-stop" aria-labelledby="runs-stop-h"><h3 id="runs-stop-h">Stop: a ripple fired <span class="n">4</span></h3>
+<details class="run" id="run-hand-run" open><summary><span class="rs-icon rs-stop"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">hand-run</span><span class="o o-recorded-by-hand">recorded by hand</span><span class="f f-stop">1 ripple</span></span><span class="rs-q">Does a second GPU halve the epoch time?</span></span><span class="rs-when"><time datetime="2026-09-25T09:00:00.000Z">Sep 25</time></span></summary><div class="run-body">
+<p class="note">Ran without a scheduler record; known only from execution.tsv rows or an incident.</p><ul class="probs"><li><span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>other: execution-within-envelope</span> execution-within-envelope: x1: host skynet is not in launch_hosts (none)</li></ul>
+<p class="question">Does a second GPU halve the epoch time?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>two GPUs cut epoch time by 45%</dd></div>
+<div><dt>Metric</dt><dd>seconds per epoch from train.log</dd></div>
+<div><dt>Partner metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Kill if</dt><dd>stop if validation error is not 2% below baseline by epoch 20</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span></div>
+<div class="tl-plot" style="--rows:1"><span class="tl-before" style="width:4.55%"></span><span class="tl-freeze" style="left:4.55%"><em>card frozen Sep 25, 09:00 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:4.55%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 25, 08:57</span><span>Sep 25, 10:03</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span></figcaption></figure>
+<details class="fold events"><summary>1 event in order</summary><ol class="evlist"><li><time datetime="2026-09-25T09:00:00.000Z">Sep 25, 09:00</time><span class="lane">card</span><span>card frozen (5569f17)</span></li></ol></details>
+<p class="note">No report and no scheduler record yet, so no claim to trace.</p>
+
+
+
+</div></details><details class="run" id="run-explore-07" open><summary><span class="rs-icon rs-stop"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">explore-07</span><span class="o o-explore">explore</span><span class="f f-stop">1 ripple</span><span class="f f-rule">1 rule break</span></span><span class="rs-q">Does the loader stall on the new disk?</span></span><span class="rs-when"><time datetime="2026-09-22T11:05:00.000Z">Sep 22</time></span></summary><div class="run-body">
+<ul class="probs"><li><span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>jobs: failed, no incident</span> job 4840 FAILED</li><li><span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>rule</span> incident.md is a write-up not where the guard looks; move it to incidents/&lt;date&gt;-&lt;job&gt;.md.</li></ul>
+<p class="note">Explore run: exempt from question cards, capped at 1 node and 60 min per job.</p>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span><span>jobs</span></div>
+<div class="tl-plot" style="--rows:2"><span class="tl-before tl-before-hit" style="width:12.12%"></span><span class="tl-freeze" style="left:12.12%"><em>card frozen Sep 22, 11:05 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:12.12%"></span></div><div class="tl-lane"><span class="m m-job" style="left:4.55%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 22, 10:57</span><span>Sep 22, 12:03</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span><span><i class="k m-job"></i>job</span></figcaption></figure>
+<details class="fold events"><summary>2 events in order</summary><ol class="evlist"><li><time datetime="2026-09-22T11:00:00.000Z">Sep 22, 11:00</time><span class="lane">jobs</span><span>job local-1758537600 on skynet</span></li><li><time datetime="2026-09-22T11:05:00.000Z">Sep 22, 11:05</time><span class="lane">card</span><span>card frozen (eeafb49)</span></li></ol></details>
+<p class="note">Explore runs carry no report.</p>
+
+
+
+</div></details><details class="run" id="run-fp32-check" open><summary><span class="rs-icon rs-stop"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">fp32-check</span><span class="o o-open">open</span><span class="f f-stop">1 ripple</span><span class="f f-rule">1 rule break</span></span><span class="rs-q">Does training in float32 change the result?</span></span><span class="rs-when"><time datetime="2026-09-21T09:30:00.000Z">Sep 21</time></span></summary><div class="run-body">
+<ul class="probs"><li><span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>card: card edited</span> runs/fp32-check/question.card edited after its first commit</li><li><span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>rule</span> Card edited 1 time(s) after its first commit.</li></ul>
+<p class="question">Does training in float32 change the result?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>float32 RMSE is within 0.2% of float64</dd></div>
+<div><dt>Metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Partner metric</dt><dd>fraction of casts the model leaves at climatology</dd></div>
+<div><dt>Kill if</dt><dd>stop if float32 diverges before epoch 5</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span><span>jobs</span></div>
+<div class="tl-plot" style="--rows:2"><span class="tl-before" style="width:4.55%"></span><span class="tl-freeze" style="left:4.55%"><em>card frozen Sep 20, 09:00 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:4.55%"></span><span class="m m-edit" style="left:95.45%"></span></div><div class="tl-lane"><span class="m m-job" style="left:93.60%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 20, 07:46</span><span>Sep 21, 10:43</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span><span><i class="k m-job"></i>job</span><span><i class="k m-edit"></i>card edited</span></figcaption></figure>
+<details class="fold events"><summary>3 events in order</summary><ol class="evlist"><li><time datetime="2026-09-20T09:00:00.000Z">Sep 20, 09:00</time><span class="lane">card</span><span>card frozen (e38d2b9)</span></li><li><time datetime="2026-09-21T09:00:00.000Z">Sep 21, 09:00</time><span class="lane">jobs</span><span>job 4850 on hpc-g004</span></li><li><time datetime="2026-09-21T09:30:00.000Z">Sep 21, 09:30</time><span class="lane">card</span><span>card edited: chore(runs): fp32-check manifest, adjust kill criteria</span></li></ol></details>
+<p class="note">Jobs ran, but there is no report yet, so no claim to trace.</p>
+
+
+
+</div></details><details class="run" id="run-cosine-v2" open><summary><span class="rs-icon rs-stop"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">cosine-v2</span><span class="o o-supported">supported</span><span class="f f-stop">1 ripple</span><span class="f f-rule">1 broken receipt</span><span class="f">2 incidents</span><span class="f">1 uncommitted</span></span><span class="rs-q">Does a cosine schedule beat the constant baseline?</span></span><span class="rs-when"><time datetime="2026-09-14T17:00:00.000Z">Sep 14</time></span></summary><div class="run-body"><p class="rels"><span class="rel">supersedes <a class="id" href="#run-q-warmup-v2">q-warmup-v2</a></span></p>
+<ul class="probs"><li><span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>walltime: near walltime</span> job 4830 used 92% of its walltime</li><li><span class="b b-handled"><svg class="i" aria-hidden="true"><use href="#i-handled"/></svg>jobs: failed, handled</span> job 4811 OUT_OF_MEMORY, written up in incidents/oom-4811.md</li></ul>
+<p class="question">Does a cosine schedule beat the constant baseline?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>cosine to zero lowers RMSE by 2% at equal steps<span class="card-verdict">Report: hypothesis supported. Verdict: continue</span></dd></div>
+<div><dt>Metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Partner metric</dt><dd>fraction of casts the model leaves at climatology</dd></div>
+<div><dt>Kill if</dt><dd>stop if validation error is not 2% below baseline by epoch 20</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span><span>jobs</span><span>incidents</span><span>report</span></div>
+<div class="tl-plot" style="--rows:4"><span class="tl-before" style="width:4.55%"></span><span class="tl-freeze" style="left:4.55%"><em>card frozen Sep 10, 09:00 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:4.55%"></span></div><div class="tl-lane"><span class="m m-jobfail" style="left:5.42%"></span><span class="m m-job" style="left:9.79%"></span><span class="m m-job" style="left:45.63%"></span></div><div class="tl-lane"><span class="m m-inc" style="left:8.92%"></span><span class="m m-inc" style="left:95.45%"></span></div><div class="tl-lane"><span class="m m-report" style="left:95.45%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 10</span><span>Sep 14</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span><span><i class="k m-job"></i>job</span><span><i class="k m-jobfail"></i>job failed</span><span><i class="k m-inc"></i>incident</span><span><i class="k m-report"></i>report</span></figcaption></figure>
+<details class="fold events"><summary>7 events in order</summary><ol class="evlist"><li><time datetime="2026-09-10T09:00:00.000Z">Sep 10, 09:00</time><span class="lane">card</span><span>card frozen (f0721cb)</span></li><li><time datetime="2026-09-10T10:00:00.000Z">Sep 10, 10:00</time><span class="lane">jobs</span><span>job 4811 on hpc-g003, failed</span></li><li><time datetime="2026-09-10T14:00:00.000Z">Sep 10, 14:00</time><span class="lane">incidents</span><span>incident oom-4811.md for job 4811</span></li><li><time datetime="2026-09-10T15:00:00.000Z">Sep 10, 15:00</time><span class="lane">jobs</span><span>job 4812 on hpc-g003</span></li><li><time datetime="2026-09-12T08:00:00.000Z">Sep 12, 08:00</time><span class="lane">jobs</span><span>job 4830 on hpc-g004</span></li><li><time datetime="2026-09-14T17:00:00.000Z">Sep 14, 17:00</time><span class="lane">incidents</span><span>incident rescore.md</span></li><li><time datetime="2026-09-14T17:00:00.000Z">Sep 14, 17:00</time><span class="lane">report</span><span>report.md</span></li></ol></details>
+<h4>Evidence</h4>
+<p class="legend legend-rc" aria-hidden="true"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds: committed, or resolves</span><span class="b b-local"><svg class="i" aria-hidden="true"><use href="#i-local"/></svg>local: on disk here, not committed</span><span class="b b-unknown"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg>unknown: cannot be checked from here</span><span class="b b-broken"><svg class="i" aria-hidden="true"><use href="#i-broken"/></svg>broken: points at nothing</span></p>
+<p class="note small"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg> Card hash on every receipt: <em>not recorded</em>, unknown. Manifests record the card hash from roadmap item 3.</p>
+<table class="ev"><thead><tr><th scope="col" class="h-claim">Claim</th><th scope="col" class="h-value">Value</th><th scope="col">Receipts</th></tr></thead><tbody><tr class=""><td class="claim">RMSE drop against lr-sweep</td><td class="num">3.1% (0.5%)</td><td class="rcpt"><details class="rc"><summary><span class="rc-strip" aria-hidden="true"><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span></span><span>4 of 4 hold</span></summary>
+<ul><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">artifact</span> <code>runs/cosine-v2/manifest-4830.txt</code><span class="rc-note">committed at HEAD</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">job</span> <code>4830</code><span class="rc-note">manifest on hpc-g004</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">commit</span> <code>f652f11</code><span class="rc-note">resolves in the project</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">inputs</span> <code>1 listed</code><span class="rc-note">data/casts-v4.nc 81264512 1758000000</span></li></ul></details></td></tr><tr class=""><td class="claim">Climatology fraction</td><td class="num">0.8% (0.2%)</td><td class="rcpt"><details class="rc"><summary><span class="rc-strip" aria-hidden="true"><span class="rc-local"><svg class="i" aria-hidden="true"><use href="#i-local"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span></span><span>3 of 4 hold</span></summary>
+<ul><li class="rc-local"><span class="b b-local"><svg class="i" aria-hidden="true"><use href="#i-local"/></svg>local</span><span class="rc-kind">artifact</span> <code>runs/cosine-v2/scores.csv</code><span class="rc-note">on disk here, not committed</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">job</span> <code>4830</code><span class="rc-note">manifest on hpc-g004</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">commit</span> <code>f652f11</code><span class="rc-note">resolves in the project</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">inputs</span> <code>1 listed</code><span class="rc-note">data/casts-v4.nc 81264512 1758000000</span></li></ul></details></td></tr><tr class="row-broken"><td class="claim">RMSE at half the steps</td><td class="num">1.2%</td><td class="rcpt"><details class="rc"><summary><span class="rc-strip" aria-hidden="true"><span class="rc-broken"><svg class="i" aria-hidden="true"><use href="#i-broken"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span></span><span>3 of 4 hold, <strong>1 broken</strong></span></summary>
+<ul><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">artifact</span> <code>runs/cosine-v2/manifest-4812.txt</code><span class="rc-note">committed at HEAD</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">job</span> <code>4812</code><span class="rc-note">manifest on hpc-g003</span></li><li class="rc-broken"><span class="b b-broken"><svg class="i" aria-hidden="true"><use href="#i-broken"/></svg>broken</span><span class="rc-kind">commit</span> <code>deadbee</code><span class="rc-note">does not resolve in the project or casts-loader</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">inputs</span> <code>1 listed</code><span class="rc-note">data/casts-v4.nc 81264512 1758000000</span></li></ul></details></td></tr><tr class=""><td class="claim">Max |dT| at the casts</td><td class="num">0.02 degC</td><td class="rcpt"><details class="rc"><summary><span class="rc-strip" aria-hidden="true"><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span></span><span>4 of 4 hold</span></summary>
+<ul><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">artifact</span> <code>runs/cosine-v2/manifest-4830.txt</code><span class="rc-note">committed at HEAD</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">job</span> <code>4830</code><span class="rc-note">manifest on hpc-g004</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">commit</span> <code>f652f11</code><span class="rc-note">resolves in the project</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">inputs</span> <code>1 listed</code><span class="rc-note">data/casts-v4.nc 81264512 1758000000</span></li></ul></details></td></tr><tr class=""><td class="claim">Predictions on the shared disk</td><td class="num">4 files</td><td class="rcpt"><details class="rc"><summary><span class="rc-strip" aria-hidden="true"><span class="rc-unknown"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg></span><span class="rc-unknown"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span></span><span>1 of 3 hold</span></summary>
+<ul><li class="rc-unknown"><span class="b b-unknown"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg>unknown</span><span class="rc-kind">artifact</span> <code>/unity/g9/nobody/casts-v4/pred.nc</code><span class="rc-note">absolute path not on this host</span></li><li class="rc-unknown"><span class="b b-unknown"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg>unknown</span><span class="rc-kind">job</span> <code>skynet interactive, GPU 2</code><span class="rc-note">no scheduler job id, so no manifest to match</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">commit</span> <code>casts-loader f7940e6</code><span class="rc-note">resolves in casts-loader</span></li></ul></details></td></tr></tbody></table>
+<h4>Incidents</h4><ul class="plain"><li><code>oom-4811.md</code>, job 4811: batch of 512 casts at float64 exceeded 80 GB on one GPU. Fix: halved batch size in runs/cosine-v2/config.yaml</li><li><code>rescore.md</code>: the scorer read the wrong month of casts. Fix: pinned the month in scripts/score.py.</li></ul>
+<h4>Deviations from the card</h4><ul class="plain prose"><li>Batch size halved after incident oom-4811, logged before the rerun.</li></ul>
+<h4>Next step</h4><div class="prose"><p>Repeat with three seeds before the thesis figure.</p></div>
+<details class="fold"><summary>1 uncommitted file</summary><ul class="files"><li><code>runs/cosine-v2/scores.csv</code></li></ul></details></div></details></section><section class="rgroup" id="runs-rule" aria-labelledby="runs-rule-h"><h3 id="runs-rule-h">A rule was broken <span class="n">3</span></h3>
+<details class="run" id="run-behind-card"><summary><span class="rs-icon rs-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">behind-card</span><span class="o o-report-not-pulled">report not pulled</span><span class="f f-rule">2 rule breaks</span><span class="f">1 uncommitted</span></span><span class="rs-q">Does the cosine floor matter?</span></span><span class="rs-when"><time datetime="2026-09-28T09:00:00.000Z">Sep 28</time></span></summary><div class="run-body">
+<p class="note">Report on origin/main; this checkout is behind it, run git pull.</p><ul class="probs"><li><span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>rule</span> Card exists on origin/main; this checkout is 1 commit behind, run git pull.</li><li><span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>rule</span> execution.tsv header is not id ts field value why evidence, so neither the guard nor this page reads its rows.</li></ul>
+<p class="question">Does the cosine floor matter?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>a floor of 1e-6 changes nothing</dd></div>
+<div><dt>Metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Partner metric</dt><dd>fraction of casts the model leaves at climatology</dd></div>
+<div><dt>Kill if</dt><dd>stop if validation error is not 2% below baseline by epoch 20</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span></div>
+<div class="tl-plot" style="--rows:1"><span class="tl-before" style="width:4.55%"></span><span class="tl-freeze" style="left:4.55%"><em>card frozen Sep 28, 09:00 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:4.55%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 28, 08:57</span><span>Sep 28, 10:03</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span></figcaption></figure>
+<details class="fold events"><summary>1 event in order</summary><ol class="evlist"><li><time datetime="2026-09-28T09:00:00.000Z">Sep 28, 09:00</time><span class="lane">card</span><span>card frozen (ae1f3a3)</span></li></ol></details>
+<p class="note">No report and no scheduler record yet, so no claim to trace.</p>
+
+
+
+<details class="fold"><summary>1 uncommitted file</summary><ul class="files"><li><code>runs/behind-card/execution.tsv</code></li></ul></details></div></details><details class="run" id="run-q-batch"><summary><span class="rs-icon rs-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">q-batch</span><span class="o o-open">open</span><span class="f f-rule">1 rule break</span><span class="f">2 uncommitted</span></span><span class="rs-q">Does a batch of 256 casts train as well as 512?</span></span><span class="rs-when"><time datetime="2026-09-24T09:00:00.000Z">Sep 24</time></span></summary><div class="run-body">
+<ul class="probs"><li><span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>rule</span> Question card is not committed, so nothing froze it.</li></ul>
+<p class="question">Does a batch of 256 casts train as well as 512?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>batch 256 matches RMSE within 0.5%</dd></div>
+<div><dt>Metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Partner metric</dt><dd>fraction of casts the model leaves at climatology</dd></div>
+<div><dt>Kill if</dt><dd>stop if validation error is not 2% below baseline by epoch 20</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>jobs</span></div>
+<div class="tl-plot" style="--rows:1">
+<div class="tl-lane"><span class="m m-job" style="left:4.55%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 24, 08:57</span><span>Sep 24, 10:03</span></div></div>
+<figcaption class="tl-key"><span>Explore run: no card to freeze.</span><span><i class="k m-job"></i>job</span></figcaption></figure>
+<details class="fold events"><summary>1 event in order</summary><ol class="evlist"><li><time datetime="2026-09-24T09:00:00.000Z">Sep 24, 09:00</time><span class="lane">jobs</span><span>job 4860 on hpc-g004</span></li></ol></details>
+<p class="note">Jobs ran, but there is no report yet, so no claim to trace.</p>
+
+
+
+<details class="fold"><summary>2 uncommitted files</summary><ul class="files"><li><code>runs/q-batch/manifest-4860.txt</code></li><li><code>runs/q-batch/question.card</code></li></ul></details></div></details><details class="run" id="run-q-warmup-v2"><summary><span class="rs-icon rs-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">q-warmup-v2</span><span class="o o-superseded">superseded</span><span class="f f-rule">1 rule break</span></span><span class="rs-q">Does a longer warmup of 4000 steps help?</span></span><span class="rs-when"><time datetime="2026-09-09T09:00:00.000Z">Sep 9</time></span></summary><div class="run-body"><p class="rels"><span class="rel">spawned from <a class="id" href="#run-q-warmup">q-warmup</a></span></p>
+<ul class="probs"><li><span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>rule</span> No partner metric, so doing less could satisfy the metric.</li></ul>
+<p class="question">Does a longer warmup of 4000 steps help?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>4000 steps lowers RMSE by 2%</dd></div>
+<div><dt>Metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Partner metric</dt><dd><span class="missing"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>None set. Doing less could satisfy the metric.</span></dd></div>
+<div><dt>Kill if</dt><dd>stop if validation error is not 2% below baseline by epoch 20</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span></div>
+<div class="tl-plot" style="--rows:1"><span class="tl-before" style="width:4.55%"></span><span class="tl-freeze" style="left:4.55%"><em>card frozen Sep 9, 09:00 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:4.55%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 9, 08:57</span><span>Sep 9, 10:03</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span></figcaption></figure>
+<details class="fold events"><summary>1 event in order</summary><ol class="evlist"><li><time datetime="2026-09-09T09:00:00.000Z">Sep 9, 09:00</time><span class="lane">card</span><span>card frozen (29be896)</span></li></ol></details>
+<p class="note">No report and no scheduler record yet, so no claim to trace.</p>
+
+
+
+</div></details></section><section class="rgroup" id="runs-await" aria-labelledby="runs-await-h"><h3 id="runs-await-h">Awaiting a report <span class="n">5</span></h3>
+<details class="run" id="run-incident-only"><summary><span class="rs-icon rs-await"><svg class="i" aria-hidden="true"><use href="#i-await"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">incident-only</span><span class="o o-recorded-by-hand">recorded by hand</span><span class="f">1 incident</span></span><span class="rs-q">Does the float16 loader keep up?</span></span><span class="rs-when"><time datetime="2026-09-26T09:00:00.000Z">Sep 26</time></span></summary><div class="run-body">
+<p class="note">Ran without a scheduler record; known only from execution.tsv rows or an incident.</p>
+<p class="question">Does the float16 loader keep up?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>float16 halves load time</dd></div>
+<div><dt>Metric</dt><dd>seconds per sample</dd></div>
+<div><dt>Partner metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Kill if</dt><dd>stop if validation error is not 2% below baseline by epoch 20</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span><span>incidents</span></div>
+<div class="tl-plot" style="--rows:2"><span class="tl-before" style="width:4.55%"></span><span class="tl-freeze" style="left:4.55%"><em>card frozen Sep 25, 09:00 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:4.55%"></span></div><div class="tl-lane"><span class="m m-inc" style="left:95.45%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 25, 07:48</span><span>Sep 26, 10:12</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span><span><i class="k m-inc"></i>incident</span></figcaption></figure>
+<details class="fold events"><summary>2 events in order</summary><ol class="evlist"><li><time datetime="2026-09-25T09:00:00.000Z">Sep 25, 09:00</time><span class="lane">card</span><span>card frozen (5569f17)</span></li><li><time datetime="2026-09-26T09:00:00.000Z">Sep 26, 09:00</time><span class="lane">incidents</span><span>incident 2026-09-25-skynet.md</span></li></ol></details>
+<p class="note">No report and no scheduler record yet, so no claim to trace.</p>
+<h4>Incidents</h4><ul class="plain"><li><code>2026-09-25-skynet.md</code>: the float16 cast overflowed in the loader. Fix: cast after the normalisation.</li></ul>
+
+
+</div></details><details class="run" id="run-lr-sweep-2"><summary><span class="rs-icon rs-await"><svg class="i" aria-hidden="true"><use href="#i-await"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">lr-sweep-2</span><span class="o o-no-scheduler-record">no scheduler record</span></span><span class="rs-q">Does the sweep repeat with a new seed?</span></span><span class="rs-when"><time datetime="2026-09-25T09:00:00.000Z">Sep 25</time></span></summary><div class="run-body">
+<p class="note">Card frozen, but no manifest, ledger row or incident, so the atlas cannot tell whether it ran.</p>
+<p class="question">Does the sweep repeat with a new seed?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>the best rate is 3e-4 again</dd></div>
+<div><dt>Metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Partner metric</dt><dd>fraction of casts the model leaves at climatology</dd></div>
+<div><dt>Kill if</dt><dd>stop if validation error is not 2% below baseline by epoch 20</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span></div>
+<div class="tl-plot" style="--rows:1"><span class="tl-before" style="width:4.55%"></span><span class="tl-freeze" style="left:4.55%"><em>card frozen Sep 25, 09:00 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:4.55%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 25, 08:57</span><span>Sep 25, 10:03</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span></figcaption></figure>
+<details class="fold events"><summary>1 event in order</summary><ol class="evlist"><li><time datetime="2026-09-25T09:00:00.000Z">Sep 25, 09:00</time><span class="lane">card</span><span>card frozen (5569f17)</span></li></ol></details>
+<p class="note">No report and no scheduler record yet, so no claim to trace.</p>
+
+
+
+</div></details><details class="run" id="run-lr-sweep-fine"><summary><span class="rs-icon rs-await"><svg class="i" aria-hidden="true"><use href="#i-await"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">lr-sweep-fine</span><span class="o o-no-scheduler-record">no scheduler record</span></span><span class="rs-q">Does a finer sweep around 3e-4 move the baseline?</span></span><span class="rs-when"><time datetime="2026-09-25T09:00:00.000Z">Sep 25</time></span></summary><div class="run-body"><p class="rels"><span class="rel rel-inferred">follows <a class="id" href="#run-lr-sweep">lr-sweep</a>, inferred from name</span></p>
+<p class="note">Card frozen, but no manifest, ledger row or incident, so the atlas cannot tell whether it ran.</p>
+<p class="question">Does a finer sweep around 3e-4 move the baseline?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>the best rate stays within 20% of 3e-4</dd></div>
+<div><dt>Metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Partner metric</dt><dd>fraction of casts the model leaves at climatology</dd></div>
+<div><dt>Kill if</dt><dd>stop if validation error is not 2% below baseline by epoch 20</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span></div>
+<div class="tl-plot" style="--rows:1"><span class="tl-before" style="width:4.55%"></span><span class="tl-freeze" style="left:4.55%"><em>card frozen Sep 25, 09:00 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:4.55%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 25, 08:57</span><span>Sep 25, 10:03</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span></figcaption></figure>
+<details class="fold events"><summary>1 event in order</summary><ol class="evlist"><li><time datetime="2026-09-25T09:00:00.000Z">Sep 25, 09:00</time><span class="lane">card</span><span>card frozen (5569f17)</span></li></ol></details>
+<p class="note">No report and no scheduler record yet, so no claim to trace.</p>
+
+
+
+</div></details><details class="run" id="run-report-branch"><summary><span class="rs-icon rs-await"><svg class="i" aria-hidden="true"><use href="#i-await"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">report-branch</span><span class="o o-report-unmerged">report unmerged</span></span><span class="rs-q">Does dropout 0.1 help?</span></span><span class="rs-when"><time datetime="2026-09-25T09:00:00.000Z">Sep 25</time></span></summary><div class="run-body">
+<p class="note">Report on origin/docs/report-branch-report, unmerged.</p>
+<p class="question">Does dropout 0.1 help?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>dropout 0.1 lowers RMSE by 1%</dd></div>
+<div><dt>Metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Partner metric</dt><dd>fraction of casts the model leaves at climatology</dd></div>
+<div><dt>Kill if</dt><dd>stop if validation error is not 2% below baseline by epoch 20</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span></div>
+<div class="tl-plot" style="--rows:1"><span class="tl-before" style="width:4.55%"></span><span class="tl-freeze" style="left:4.55%"><em>card frozen Sep 25, 09:00 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:4.55%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 25, 08:57</span><span>Sep 25, 10:03</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span></figcaption></figure>
+<details class="fold events"><summary>1 event in order</summary><ol class="evlist"><li><time datetime="2026-09-25T09:00:00.000Z">Sep 25, 09:00</time><span class="lane">card</span><span>card frozen (5569f17)</span></li></ol></details>
+<p class="note">No report and no scheduler record yet, so no claim to trace.</p>
+
+
+
+</div></details><details class="run" id="run-skynet-train"><summary><span class="rs-icon rs-await"><svg class="i" aria-hidden="true"><use href="#i-await"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">skynet-train</span><span class="o o-no-scheduler-record">no scheduler record</span></span><span class="rs-q">Does the model train on skynet without the scheduler?</span></span><span class="rs-when"><time datetime="2026-09-25T09:00:00.000Z">Sep 25</time></span></summary><div class="run-body">
+<p class="note">Card frozen, but no manifest, ledger row or incident, so the atlas cannot tell whether it ran.</p>
+<p class="question">Does the model train on skynet without the scheduler?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>a skynet run reaches the lr-sweep RMSE</dd></div>
+<div><dt>Metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Partner metric</dt><dd>fraction of casts the model leaves at climatology</dd></div>
+<div><dt>Kill if</dt><dd>stop if validation error is not 2% below baseline by epoch 20</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span></div>
+<div class="tl-plot" style="--rows:1"><span class="tl-before" style="width:4.55%"></span><span class="tl-freeze" style="left:4.55%"><em>card frozen Sep 25, 09:00 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:4.55%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 25, 08:57</span><span>Sep 25, 10:03</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span></figcaption></figure>
+<details class="fold events"><summary>1 event in order</summary><ol class="evlist"><li><time datetime="2026-09-25T09:00:00.000Z">Sep 25, 09:00</time><span class="lane">card</span><span>card frozen (5569f17)</span></li></ol></details>
+<p class="note">No report and no scheduler record yet, so no claim to trace.</p>
+
+
+
+</div></details></section><section class="rgroup" id="runs-quiet" aria-labelledby="runs-quiet-h"><h3 id="runs-quiet-h">Nothing flagged <span class="n">2</span></h3>
+<details class="run" id="run-q-warmup"><summary><span class="rs-icon rs-quiet"><svg class="i" aria-hidden="true"><use href="#i-quiet"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">q-warmup</span><span class="o o-negative">clean negative</span></span><span class="rs-q">Does a linear warmup lower validation error on casts-v4?</span></span><span class="rs-when"><time datetime="2026-09-08T15:00:00.000Z">Sep 8</time></span></summary><div class="run-body">
+
+<p class="question">Does a linear warmup lower validation error on casts-v4?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>warmup of 1000 steps lowers RMSE by 2%<span class="card-verdict">Report: hypothesis refuted. Verdict: kill</span></dd></div>
+<div><dt>Metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Partner metric</dt><dd>fraction of casts the model leaves at climatology</dd></div>
+<div><dt>Kill if</dt><dd>stop if validation error is not 2% below baseline by epoch 20</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span><span>jobs</span><span>report</span></div>
+<div class="tl-plot" style="--rows:3"><span class="tl-before" style="width:4.55%"></span><span class="tl-freeze" style="left:4.55%"><em>card frozen Sep 6, 09:00 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:4.55%"></span></div><div class="tl-lane"><span class="m m-job" style="left:6.23%"></span></div><div class="tl-lane"><span class="m m-report" style="left:95.45%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 6</span><span>Sep 8</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span><span><i class="k m-job"></i>job</span><span><i class="k m-report"></i>report</span></figcaption></figure>
+<details class="fold events"><summary>3 events in order</summary><ol class="evlist"><li><time datetime="2026-09-06T09:00:00.000Z">Sep 6, 09:00</time><span class="lane">card</span><span>card frozen (f369a19)</span></li><li><time datetime="2026-09-06T10:00:00.000Z">Sep 6, 10:00</time><span class="lane">jobs</span><span>job 4790 on hpc-c041</span></li><li><time datetime="2026-09-08T15:00:00.000Z">Sep 8, 15:00</time><span class="lane">report</span><span>report.md</span></li></ol></details>
+<h4>Evidence</h4>
+<p class="legend legend-rc" aria-hidden="true"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds: committed, or resolves</span><span class="b b-local"><svg class="i" aria-hidden="true"><use href="#i-local"/></svg>local: on disk here, not committed</span><span class="b b-unknown"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg>unknown: cannot be checked from here</span><span class="b b-broken"><svg class="i" aria-hidden="true"><use href="#i-broken"/></svg>broken: points at nothing</span></p>
+<p class="note small"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg> Card hash on every receipt: <em>not recorded</em>, unknown. Manifests record the card hash from roadmap item 3.</p>
+<table class="ev"><thead><tr><th scope="col" class="h-claim">Claim</th><th scope="col" class="h-value">Value</th><th scope="col">Receipts</th></tr></thead><tbody><tr class=""><td class="claim">RMSE change with warmup</td><td class="num">+0.3% (0.4%)</td><td class="rcpt"><details class="rc"><summary><span class="rc-strip" aria-hidden="true"><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span></span><span>4 of 4 hold</span></summary>
+<ul><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">artifact</span> <code>runs/q-warmup/manifest-4790.txt</code><span class="rc-note">committed at HEAD</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">job</span> <code>4790</code><span class="rc-note">manifest on hpc-c041</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">commit</span> <code>40f731f</code><span class="rc-note">resolves in the project</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">inputs</span> <code>1 listed</code><span class="rc-note">data/casts-v4.nc 81264512 1758000000</span></li></ul></details></td></tr></tbody></table>
+
+
+
+</div></details><details class="run" id="run-lr-sweep"><summary><span class="rs-icon rs-quiet"><svg class="i" aria-hidden="true"><use href="#i-quiet"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">lr-sweep</span><span class="o o-supported">supported</span></span><span class="rs-q">Which constant learning rate is the baseline for casts-v4?</span></span><span class="rs-when"><time datetime="2026-09-05T16:00:00.000Z">Sep 5</time></span></summary><div class="run-body">
+
+<p class="question">Which constant learning rate is the baseline for casts-v4?</p>
+<dl class="card">
+<div><dt>Hypothesis</dt><dd>a rate near 3e-4 minimises validation error<span class="card-verdict">Report: hypothesis supported. Verdict: continue. No kill criterion triggered.</span></dd></div>
+<div><dt>Metric</dt><dd>validation RMSE of T and S, scripts/score.py</dd></div>
+<div><dt>Partner metric</dt><dd>fraction of casts the model leaves at climatology</dd></div>
+<div><dt>Kill if</dt><dd>stop if validation error is not 2% below baseline by epoch 20</dd></div>
+</dl><details class="fold"><summary>Rest of the card</summary><dl class="card"><div><dt>Decision it informs</dt><dd>which schedule the full training run uses</dd></div><div><dt>Setting</dt><dd>casts-v4 split, model at src/train.py</dd></div><div><dt>Baseline</dt><dd>lr-sweep</dd></div><div><dt>Baseline tolerance</dt><dd>0.01</dd></div><div><dt>A negative result means</dt><dd>the schedule is not worth its extra tuning</dd></div><div><dt>Out of scope</dt><dd>architecture changes</dd></div></dl></details>
+<figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span><span>jobs</span><span>report</span></div>
+<div class="tl-plot" style="--rows:3"><span class="tl-before" style="width:4.55%"></span><span class="tl-freeze" style="left:4.55%"><em>card frozen Sep 3, 10:00 · after: compute allowed →</em></span>
+<div class="tl-lane"><span class="tl-cardbar" style="left:4.55%"></span></div><div class="tl-lane"><span class="m m-job" style="left:6.29%"></span><span class="m m-job" style="left:6.37%"></span></div><div class="tl-lane"><span class="m m-report" style="left:95.45%"></span></div></div>
+<div></div><div class="tl-axis"><span>Sep 3</span><span>Sep 5</span></div></div>
+<figcaption class="tl-key"><span><i class="k k-before"></i>before the card was frozen</span><span><i class="k m-job"></i>job</span><span><i class="k m-report"></i>report</span></figcaption></figure>
+<details class="fold events"><summary>4 events in order</summary><ol class="evlist"><li><time datetime="2026-09-03T10:00:00.000Z">Sep 3, 10:00</time><span class="lane">card</span><span>card frozen (a7286ac)</span></li><li><time datetime="2026-09-03T11:02:00.000Z">Sep 3, 11:02</time><span class="lane">jobs</span><span>job 4801 on hpc-c041</span></li><li><time datetime="2026-09-03T11:05:00.000Z">Sep 3, 11:05</time><span class="lane">jobs</span><span>job 4802 on hpc-c042</span></li><li><time datetime="2026-09-05T16:00:00.000Z">Sep 5, 16:00</time><span class="lane">report</span><span>report.md</span></li></ol></details>
+<h4>Evidence</h4>
+<p class="legend legend-rc" aria-hidden="true"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds: committed, or resolves</span><span class="b b-local"><svg class="i" aria-hidden="true"><use href="#i-local"/></svg>local: on disk here, not committed</span><span class="b b-unknown"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg>unknown: cannot be checked from here</span><span class="b b-broken"><svg class="i" aria-hidden="true"><use href="#i-broken"/></svg>broken: points at nothing</span></p>
+<p class="note small"><svg class="i" aria-hidden="true"><use href="#i-unchecked"/></svg> Card hash on every receipt: <em>not recorded</em>, unknown. Manifests record the card hash from roadmap item 3.</p>
+<table class="ev"><thead><tr><th scope="col" class="h-claim">Claim</th><th scope="col" class="h-value">Value</th><th scope="col">Receipts</th></tr></thead><tbody><tr class=""><td class="claim">Best constant rate</td><td class="num">3e-4</td><td class="rcpt"><details class="rc"><summary><span class="rc-strip" aria-hidden="true"><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span></span><span>4 of 4 hold</span></summary>
+<ul><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">artifact</span> <code>runs/lr-sweep/manifest-4802.txt</code><span class="rc-note">committed at HEAD</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">job</span> <code>4802</code><span class="rc-note">manifest on hpc-c042</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">commit</span> <code>d41759e</code><span class="rc-note">resolves in the project</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">inputs</span> <code>1 listed</code><span class="rc-note">data/casts-v4.nc 81264512 1758000000</span></li></ul></details></td></tr><tr class=""><td class="claim">Validation RMSE at best rate</td><td class="num">0.412 (0.006)</td><td class="rcpt"><details class="rc"><summary><span class="rc-strip" aria-hidden="true"><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span><span class="rc-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg></span></span><span>4 of 4 hold</span></summary>
+<ul><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">artifact</span> <code>runs/lr-sweep/manifest-4801.txt</code><span class="rc-note">committed at HEAD</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">job</span> <code>4801</code><span class="rc-note">manifest on hpc-c041</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">commit</span> <code>d41759e</code><span class="rc-note">resolves in the project</span></li><li class="rc-ok"><span class="b b-ok"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>holds</span><span class="rc-kind">inputs</span> <code>1 listed</code><span class="rc-note">data/casts-v4.nc 81264512 1758000000</span></li></ul></details></td></tr></tbody></table>
+
+
+<h4>Next step</h4><div class="prose"><p>Use 3e-4 as the baseline for schedule comparisons.</p></div>
+</div></details></section>
+</section>
+<section id="branches" aria-labelledby="branches-h"><h2 id="branches-h">Unmerged branches</h2>
+<p class="lede">Branches ahead of <code>origin/main</code>. Any that change the guard, the workflow or a watched path come first; the fence blocks those from merging.</p>
+<article class="branch"><header><code class="id">origin/agent/fp32-check</code><span class="b b-handled"><svg class="i" aria-hidden="true"><use href="#i-handled"/></svg>touches 1 guard file</span><span class="b b-handled"><svg class="i" aria-hidden="true"><use href="#i-handled"/></svg>touches 1 watched path</span></header><p class="meta">1 commit ahead, 2 files changed, last <time datetime="2026-09-23T03:12:00+00:00">Sep 23</time>: chore: relax walltime and add a check</p>
+<h4>Guard files</h4><ul class="chips"><li class="chip-guard"><code>guard/budget.card (max_walltime_minutes 240 to 600)</code></li></ul><h4>Watched paths</h4><ul class="chips"><li class="chip-watch"><code>runs/fp32-check/checks/nonfinite</code></li></ul></article>
+<details class="fold"><summary>1 branch touch nothing guarded</summary><div class="wide"><table class="quiet"><thead><tr><th scope="col">Branch</th><th scope="col">Ahead</th><th scope="col">Last commit</th></tr></thead><tbody><tr><td><code>origin/docs/report-branch-report</code></td><td class="num">1 commit, 1 file</td><td><time datetime="2026-09-27T09:00:00+00:00">Sep 27</time> docs(runs): report-branch report</td></tr></tbody></table></div></details>
+</section>
+<footer>Generated by guard atlas from <code>/FIXTURE/casts-v4-training</code>. Regenerate after a wake to refresh. The page holds no state and writes nothing back.</footer>
+</main>
+<script>(function(){
+function openTarget(){var id=location.hash.slice(1);if(!id)return;var el=document.getElementById(id);for(var p=el;p;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;}
+window.addEventListener('hashchange',openTarget);openTarget();
+window.addEventListener('beforeprint',function(){document.querySelectorAll('details').forEach(function(d){d.dataset.wasOpen=d.open;d.open=true;});});
+window.addEventListener('afterprint',function(){document.querySelectorAll('details').forEach(function(d){d.open=d.dataset.wasOpen==='true';});});
+var t=document.querySelector('[data-age]');if(t){var h=(Date.now()-new Date(t.getAttribute('datetime')))/36e5;if(h>=0){var s=h<1?'less than an hour ago':h<48?Math.round(h)+' hours ago':Math.round(h/24)+' days ago';var a=document.createElement('span');a.className='age'+(h>24?' age-old':'');a.textContent=' ('+s+')';t.after(a);}}
+})();</script>
+</body></html>
