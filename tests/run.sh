@@ -937,7 +937,10 @@ expect atlas-release-stamp ok '<dt>Guard version</dt><dd>schema [0-9]+, release 
 expect atlas-no-release-stamp ok "<dt>Guard version</dt><dd>schema 1, installed before release stamps; run <code>guard init $tmp/atlas/casts-v4-training --update</code></dd>" -- python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import atlas
 d = json.load(open(sys.argv[2])); d["version"] = {"installer": "b017edd"}; print(atlas.render(d))' "$here/lib" "$tmp/atlas/atlas.json"
 expect atlas-verdict-stop ok '<p class="verdict-line">Stop spending on 4 runs: each has a ripple.</p>' -- cat "$tmp/atlas/atlas.html"
-expect atlas-needs-you-incident ok 'Write up job 4840 at <code class="cmd">runs/explore-07/incidents/YYYY-MM-DD-4840.md</code>, the only place the guard counts incidents' -- cat "$tmp/atlas/atlas.html"
+expect atlas-needs-you-incident ok 'Write up job 4840 at <code class="cmd">runs/explore-07/incidents/YYYY-MM-DD-4840.md</code>, the only place the guard counts incidents' -- python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import atlas
+d = json.load(open(sys.argv[2]))
+for r in d["runs"]: r["stray_incidents"] = []
+print(atlas.render(d))' "$here/lib" "$tmp/atlas/atlas.json"
 expect atlas-needs-you-branch ok 'review it as a pull request: <code class="cmd">git diff --stat origin/main...origin/agent/fp32-check</code>' -- cat "$tmp/atlas/atlas.html"
 expect atlas-needs-you-await ok '<li class="todo-await">.*href="#run-skynet-train"' -- cat "$tmp/atlas/atlas.html"
 atlas_group() {  # atlas_group <html> <group> <run id>: succeeds when the run sits in that run group
@@ -953,6 +956,9 @@ expect atlas-group-await ok - -- atlas_group "$tmp/atlas/atlas.html" await skyne
 expect atlas-group-not-quiet ok - -- bash -c '! atlas_group "$1" quiet skynet-train' _ "$tmp/atlas/atlas.html"
 expect atlas-no-tooltips ok '^abbr$' -- python3 -c 'import re, sys; print(" ".join(sorted(set(re.findall(r"<(\w+)[^>]* title=", open(sys.argv[1]).read())))))' "$tmp/atlas/atlas.html"
 expect atlas-every-run-opens ok '^14$' -- grep -c '<details class="run" id="run-' <(sed 's/<details class="run"/\n&/g' "$tmp/atlas/atlas.html")
+expect atlas-needs-you-stray ok 'A write-up exists at <code>runs/explore-07/incident.md</code>, but the guard does not count it there. Move it: <code class="cmd">git mv runs/explore-07/incident.md runs/explore-07/incidents/YYYY-MM-DD-4840.md</code>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-needs-you-unmerged ok 'href="#run-report-branch">report-branch</a> <span class="b b-handled">.*report unmerged</span><p>Its report is only on <code>origin/docs/report-branch-report</code>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-timeline-ledger ok '<span>execution.tsv x1: host skynet, recorded by hand</span>' -- cat "$tmp/atlas/atlas.html"
 expect atlas-golden ok - -- bash -c 'diff <("$1/tests/atlas-golden.sh" "$2") "$1/tests/golden/atlas-fixture.html"' _ "$here" "$tmp/golden"
 expect atlas-no-network ok - -- bash -c '! grep -Eiq "<link[^>]*https?://|src=\"?https?://" "$1"' _ "$tmp/atlas/atlas.html"
 expect atlas-head-only ok '\(12 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"

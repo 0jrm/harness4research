@@ -316,3 +316,4 @@ footer{margin-top:var(--s8);font-size:var(--t-xs);color:var(--sound);border-top:
 .rel-inferred{font-style:italic}
 .snap-behind{color:var(--mag);font-size:var(--t-sm)}
 .card dd,.detail,.rc-note,.prose,.todo p,.todo li{overflow-wrap:anywhere}
+.m-hand{width:10px;height:16px;background:var(--raised);border:1.5px dashed var(--ink)}

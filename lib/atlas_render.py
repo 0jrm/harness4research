@@ -284,8 +284,13 @@ def render(data):
                 for j in (x.split(":")[0] for x in entries(line)):
                     m = next((m for m in r["manifests"] if m.get("job_id") == j), None)
                     path = f"runs/{r['id']}/incidents/{ymd(when(m.get('time'))) if m else 'YYYY-MM-DD'}-{j}.md"
-                    acts.append(f"Write up job {E(j)} at {cmd(path)}, the only place the guard counts incidents. "
-                                f"Then re-check: {cmd('bash guard/run ripples runs/' + r['id'])}")
+                    stray = r.get("stray_incidents") or []
+                    if stray:
+                        acts.append(f"A write-up exists at <code>{E(stray[0])}</code>, but the guard does not count it there. "
+                                    f"Move it: {cmd('git mv ' + stray[0] + ' ' + path)}, then re-check: {cmd('bash guard/run ripples runs/' + r['id'])}")
+                    else:
+                        acts.append(f"Write up job {E(j)} at {cmd(path)}, the only place the guard counts incidents. "
+                                    f"Then re-check: {cmd('bash guard/run ripples runs/' + r['id'])}")
                 act = "<br>".join(acts)
             elif k == "handled-failures":
                 act = ("Decide whether this run should stop. To allow more failures, change <code>max_handled_failures</code> in "
@@ -301,6 +306,11 @@ def render(data):
                                          n(len(br["watched"]), "watched path") if br["watched"] else ""] if x)
         todo.append(("branch", f'<code class="id">{E(br["name"])}</code> {badge("handled", "touches the guard" if br["drawer"] else "touches a watched path")}'
                                f'<p>Changes {parts}. The fence blocks it from merging; review it as a pull request: {cmd("git diff --stat " + data["base"] + "..." + br["name"])}</p>'))
+    for r in runs:
+        if r["outcome"] == "report unmerged":
+            ref = r["report_refs"][0]
+            todo.append(("branch", f'{idlink(r["id"])} {badge("handled", "report unmerged")}<p>Its report is only on <code>{E(ref)}</code>. '
+                                   f'Review and merge it to give the card a verdict: {cmd("git diff --stat " + data["base"] + "..." + ref + " -- runs/" + r["id"])}</p>'))
     if await_runs:
         todo.append(("await", f'<span class="id">{n(len(await_runs), "question card")} with no report</span><p>A card without a report has no verdict yet.</p>'
                               f'<p class="idlist">{"".join(idlink(r["id"]) for r in await_runs)}</p>'))
@@ -454,6 +464,8 @@ def render(data):
         ev += [("card", when(h["time"]), "edit", f"card edited: {h['subject']}") for h in hist[1:]]
         ev += [("jobs", when(m.get("time")), "jobfail" if m.get("job_id") in failed else "job",
                 f"job {m.get('job_id')} on {m.get('host')}{', failed' if m.get('job_id') in failed else ''}") for m in r["manifests"]]
+        ev += [("jobs", when(x["ts"]), "hand", f"execution.tsv {x['id']}: {x['field']} {x['value']}, recorded by hand")
+               for x in (r.get("execution") or {}).get("rows", [])]
         ev += [("incidents", when(i["time"]), "incbad" if unset(i["root_cause"]) else "inc",
                 f"incident {i['path'].split('/')[-1]}{' for job ' + i['job'] if i['job'] else ''}") for i in r["incidents"]]
         if r["report"]:
@@ -479,6 +491,7 @@ def render(data):
         has = lambda k: any(e[2] == k for e in tev)
         key = (('<span><i class="k k-before"></i>before the card was frozen</span>' if frozen else "<span>Explore run: no card to freeze.</span>")
                + ('<span><i class="k m-job"></i>job</span>' if has("job") else "") + ('<span><i class="k m-jobfail"></i>job failed</span>' if has("jobfail") else "")
+               + ('<span><i class="k m-hand"></i>execution.tsv row, recorded by hand</span>' if has("hand") else "")
                + ('<span><i class="k m-inc"></i>incident</span>' if has("inc") else "") + ('<span><i class="k m-incbad"></i>incident, no root cause</span>' if has("incbad") else "")
                + ('<span><i class="k m-edit"></i>card edited</span>' if has("edit") else "") + ('<span><i class="k m-report"></i>report</span>' if has("report") else ""))
         evs = "".join(f'<li><time datetime="{iso(t)}">{fdt(t)}</time><span class="lane">{l}</span><span>{E(label)}</span></li>'
