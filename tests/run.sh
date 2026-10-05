@@ -26,6 +26,22 @@ path_without() {  # path_without <cmd>: prints a PATH like this one on which <cm
   done
   echo "$out"
 }
+on_tty() {  # on_tty <command...>: runs it with stdout on a pseudo-terminal, TERM=xterm and no NO_COLOR; prints its output, keeps its exit code
+  python3 -c '
+import os, signal, subprocess, sys
+signal.alarm(120)
+m, s = os.openpty()
+p = subprocess.Popen(["env", "-u", "NO_COLOR", "TERM=xterm"] + sys.argv[1:], stdout=s)
+os.close(s)
+out = b""
+while True:
+    try: b = os.read(m, 65536)
+    except OSError: break
+    if not b: break
+    out += b
+sys.stdout.buffer.write(out.replace(b"\r\n", b"\n"))
+sys.exit(p.wait())' "$@"
+}
 
 git init -q --bare -b main "$tmp/origin.git"
 git clone -q "$tmp/origin.git" "$tmp/proj" 2>/dev/null
@@ -131,7 +147,8 @@ echo "default_run_core_hours: 10" >> guard/budget.card; git commit -q -am "defau
 expect preflight-default-run-budget fail 'this job 64 core-h exceeds budget_core_hours=10' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-sketch job.sh --nodes=1 --time=00:30:00
 git reset -q --hard HEAD~1
 printf '100|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
-expect preflight-refuses-on-ripple fail '^PREFLIGHT FAIL: ripples reports job-states 100:FAILED; fix the cause' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
+expect preflight-refuses-on-ripple fail '^PREFLIGHT FAIL: ripples reports job-states 100:FAILED \(diagnose, then commit runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line for each; a resource stop of a launch continues with an execution.tsv restart or resume row instead\); fix the cause' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
+expect ripples-single-entry fail '^RIPPLE	job-states	100:FAILED \(diagnose' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run ripples "$R"
 expect preflight-reserve-skips-ripples ok 'SBATCH .*--job-name=2026-09-29-demo' -- env MOCK_SACCT_ROWS="$tmp/rows" HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
 mkdir -p "$R/incidents"; printf '# Incident 0\njob: 100\n' > "$R/incidents/0.md"; git add -A; git commit -q -m "run: incident 0"
 expect preflight-handled-ripple-passes ok 'SBATCH .*--job-name=2026-09-29-demo' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
@@ -144,16 +161,31 @@ echo "== ripples"
 mkdir -p "$R/checks"; printf '#!/bin/bash\necho "nan count 3"; exit 1\n' > "$R/checks/nan.sh"; chmod +x "$R/checks/nan.sh"
 printf '100|2026-09-29-demo|TIMEOUT|14400|240\n101|2026-09-29-demo|COMPLETED|13000|240\n102|2026-09-29-demo|FAILED|10|240\n103|other|FAILED|1|1\n' > "$tmp/rows"
 export MOCK_SACCT_ROWS=$tmp/rows
-expect ripples-states fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED' -- guard/run ripples "$R"
+expect ripples-states fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED \(diagnose, then commit runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line for each; a resource stop of a launch continues with an execution.tsv restart or resume row instead\)$' -- guard/run ripples "$R"
 expect ripples-walltime fail 'RIPPLE.walltime-headroom.100:100% 101:90%' -- guard/run ripples "$R"
 expect ripples-check fail 'RIPPLE.check:nan.sh.nan count 3' -- guard/run ripples "$R"
 expect ripples-watched fail 'RIPPLE.watched-paths' -- guard/run ripples "$R"
 expect ripples-quota fail 'PASS.quota.42%' -- guard/run ripples "$R"
 expect ripples-other-run-ignored fail 'retries.2 not' -- guard/run ripples "$R"
+expect ripples-piped-tsv ok - -- bash -c 'out=$(guard/run ripples "$1" | cat); [ -n "$out" ] && ! grep -vE "^(PASS|RIPPLE|HANDLED|UNCHECKED)	[^	]+	[^	]*$" <<<"$out"' _ "$R"
+expect ripples-tty-exit ok - -- bash -c "$(declare -f on_tty)"'; on_tty guard/run ripples "$1" >/dev/null; [ $? -eq 1 ]' _ "$R"
+expect ripples-tty-opt-out fail '^RIPPLE	job-states	100:TIMEOUT 102:FAILED \(' -- on_tty env HPC_RIPPLES_TSV=1 guard/run ripples "$R"
+expect ripples-term-dumb ok - -- bash -c 'out=$1; [ -n "$out" ] && [ -z "$(tr -dc "\033\t" <<<"$out")" ]' _ "$(on_tty env TERM=dumb guard/run ripples "$R")"
+tty=$(on_tty guard/run ripples "$R")
+expect ripples-tty-ripple ok $'^\e\\[1;31mRIPPLE   \e\\[0m  job-states {17}100:TIMEOUT 102:FAILED \\(diagnose' -- echo "$tty"
+expect ripples-tty-pass ok $'^\e\\[32mPASS     \e\\[0m  quota {22}42%$' -- echo "$tty"
+expect ripples-tty-no-tabs ok - -- test -z "$(tr -dc '\t' <<<"$tty")"
+tty=$(on_tty env NO_COLOR=1 guard/run ripples "$R")
+expect ripples-no-color ok '^RIPPLE {5}job-states {17}100:TIMEOUT' -- echo "$tty"
+expect ripples-no-color-plain ok - -- test -z "$(tr -dc '\033' <<<"$tty")"
+expect ripples-tty-aligned ok - -- test -z "$(awk 'substr($0, 10, 2) != "  " || substr($0, 37, 2) != "  "' <<<"$tty")"
 printf '101|2026-09-29-demo|COMPLETED|100|240\n' > "$tmp/rows"; rm -rf "$R/checks"
 expect ripples-clean ok 'PASS.budget.30 of 10000' -- guard/run ripples "$R"
 expect ripples-no-sacct ok 'UNCHECKED.job-states.*UNCHECKED.walltime-headroom.*UNCHECKED.retries.*UNCHECKED.budget.*PASS.quota.42%' -- \
   env PATH="$(path_without sacct)" bash -c 'set -o pipefail; guard/run ripples "$1" 2>&1 | tr "\n" " "' _ "$R"
+expect ripples-unchecked-remedy ok '^UNCHECKED	budget	sacct not found on PATH on this host; run ripples on the cluster login node to check$' -- env PATH="$(path_without sacct)" guard/run ripples "$R"
+expect ripples-domain-remedy ok '^UNCHECKED	domain-checks	no executable runs/2026-09-29-demo/checks/\*; add a script there that exits non-zero when a result looks wrong$' -- guard/run ripples "$R"
+expect ripples-tty-unchecked ok '^UNCHECKED  budget {21}sacct not found on PATH on this host; run ripples' -- on_tty env NO_COLOR=1 PATH="$(path_without sacct)" guard/run ripples "$R"
 pre=$(git rev-parse HEAD); mkdir -p "$R/incidents"
 printf '100|2026-09-29-demo|TIMEOUT|14400|240\n101|2026-09-29-demo|COMPLETED|100|240\n102|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
 printf '# Incident 0\njob: 10\n' > "$R/incidents/0.md"; git add -A; git commit -q -m "run: incident 0"
@@ -317,16 +349,16 @@ rip=$(env PATH="$(path_without sacct)" guard/run ripples "$F")
 expect ripples-launch-states ok 'RIPPLE	job-states	skynet-20260901T060000Z:SUPERVISOR_FAILED skynet-20260901T030000Z:LAUNCH_FAILED skynet-20260901T020000Z:NODE_FAIL skynet-20260901T010000Z:OUT_OF_MEMORY gpu2-20260901T010000Z:FAILED' -- echo "$rip"
 expect ripples-launch-walltime ok 'RIPPLE	walltime-headroom	skynet-20260901T070000Z:91%' -- echo "$rip"
 expect ripples-launch-retries ok 'RIPPLE	retries	5 not completed' -- echo "$rip"
-expect ripples-launch-budget-unchanged ok '^UNCHECKED	budget	sacct not found on PATH on this host$' -- echo "$rip"
+expect ripples-launch-budget-unchanged ok '^UNCHECKED	budget	sacct not found on PATH on this host; run ripples on the cluster login node to check$' -- echo "$rip"
 expect ripples-gpu-hours ok 'RIPPLE	gpu-hours	22\.1 of 10 GPU-h \(0\.0 in 1 running\)' -- echo "$rip"
-expect ripples-supervision-alive ok 'RIPPLE	host-supervision	skynet-20260901T050000Z:no-supervisor-started-it' -- echo "$rip"
+expect ripples-supervision-alive ok '^RIPPLE	host-supervision	skynet-20260901T050000Z:no-supervisor-started-it \(stop each with guard/run launch --stop <id> --reason=<why>, or tell the human\)$' -- echo "$rip"
 expect ripples-host-memory-pass ok 'PASS	host-memory	[0-9.]+G available; 1 live, at most 80% of --mem' -- echo "$rip"
 expect ripples-strays-pass ok 'PASS	host-strays	$' -- echo "$rip"
 expect ripples-log-errors-pass ok 'PASS	host-log-errors	1 running log\(s\) scanned' -- echo "$rip"
 printf '100|2026-10-02-fixtures|TIMEOUT|14400|240\n' > "$tmp/rows"
 expect ripples-launch-plus-sacct fail 'RIPPLE	job-states	100:TIMEOUT skynet-20260901T060000Z:SUPERVISOR_FAILED' -- env MOCK_SACCT_ROWS=$tmp/rows guard/run ripples "$F"
 expect ripples-launch-plus-budget fail 'PASS	budget	30 of 10000 core-h' -- env MOCK_SACCT_ROWS=$tmp/rows guard/run ripples "$F"
-expect ripples-other-host fail 'UNCHECKED	host-strays	login1 is not in launch_hosts \(skynet\)' -- env MOCK_HOSTNAME=login1 PATH="$(path_without sacct)" guard/run ripples "$F"
+expect ripples-other-host fail 'UNCHECKED	host-strays	login1 is not in launch_hosts \(skynet\); run ripples on a launch host to check$' -- env MOCK_HOSTNAME=login1 PATH="$(path_without sacct)" guard/run ripples "$F"
 expect ripples-other-host-gpu-hours fail 'RIPPLE	gpu-hours	22\.1 of 10' -- env MOCK_HOSTNAME=login1 PATH="$(path_without sacct)" guard/run ripples "$F"
 expect ripples-other-host-no-rows fail 'UNCHECKED	job-states	sacct not found' -- env MOCK_HOSTNAME=login1 PATH="$(path_without sacct)" guard/run ripples "$F"
 kill "$alive_pid" 2>/dev/null; wait "$alive_pid" 2>/dev/null
@@ -340,7 +372,7 @@ git reset -q --hard HEAD~1
 sleep 60 & stray_pid=$!
 printf 'GPU-aaaa, %s\n' "$stray_pid" > "$tmp/apps"
 expect ripples-strays-gpu fail "RIPPLE	host-strays	pid$stray_pid:0\.[0-9]+G:gpu:sleep_60" -- env MOCK_NVSMI_APPS=$tmp/apps guard/run ripples "$F"
-expect ripples-strays-no-nvsmi fail 'UNCHECKED	host-strays	no memory strays; GPU strays unchecked' -- env PATH="$(path_without nvidia-smi)" guard/run ripples "$F"
+expect ripples-strays-no-nvsmi fail 'UNCHECKED	host-strays	no memory strays; GPU strays unchecked, nvidia-smi not found or timed out; put nvidia-smi on PATH and rerun$' -- env PATH="$(path_without nvidia-smi)" guard/run ripples "$F"
 git switch -q -c launch-ignore origin/launch-base; echo 'stray_ignore: ^sleep 60$' >> guard/budget.card; git commit -q -am "ignore"
 expect ripples-strays-ignore fail 'PASS	host-strays	$' -- env HPC_GUARD_REF=HEAD MOCK_NVSMI_APPS=$tmp/apps guard/run ripples "$F"
 git switch -q launch/agent

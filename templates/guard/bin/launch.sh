@@ -13,7 +13,7 @@
 #   --sacct                                    this project's launches as sacct rows JobID|JobName|State|ElapsedRaw|TimelimitRaw
 #   --handled <run_dir>                        "<job_id> execution.tsv:<row>" for every committed restart or resume row
 #   --checks <run_dir>                         check lines for ripples: STATUS<TAB>check<TAB>detail,
-#                                              or ENTRIES<TAB>check<TAB><id>:<detail> ... for ripples' sort_out
+#                                              or ENTRIES<TAB>check<TAB><id>:<detail> ...<TAB>next step for ripples' sort_out
 #
 # Invariants:
 #   - Every record file is written once, by one writer, through link(2), so a reader sees it whole or not at all.
@@ -41,7 +41,7 @@ usage() {
   echo "       guard/run launch --stop <job_id> [--reason=<text>] | --list [run_dir]" >&2; exit 64
 }
 fail() { echo "LAUNCH FAIL: $*" >&2; exit 2; }
-say() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
+say() { printf '%s\t%s\t%s' "$1" "$2" "$3"; [ $# -lt 4 ] || printf '\t%s' "$4"; printf '\n'; }
 now() { date -u +%FT%TZ; }
 epoch() { printf '%(%s)T' -1; }
 iso_epoch() { date -u -d "${1:-@0}" +%s 2>/dev/null || echo 0; }
@@ -363,18 +363,18 @@ cmd_checks() {
   local rd=${1%/} rid bad summary; rid=$(basename "$rd")
   if ledger_rows "$rd" >/dev/null; then
     ledger_check "$rd"
-    if [ -n "$bad" ]; then say RIPPLE execution-within-envelope "${bad#; }"; else say PASS execution-within-envelope "$summary"; fi
+    if [ -n "$bad" ]; then say RIPPLE execution-within-envelope "${bad#; }; the ledger is append-only, so the next call is the human's"; else say PASS execution-within-envelope "$summary"; fi
   fi
   [ "$(launch_hosts)" != none ] || return 0
   local spent running nrun cap live=0 ent="" d id st el kb lim log m avail floor remote=0 hosts="" i sup
-  if [ -d "$sd" ] && ! timeout 10 ls "$sd" >/dev/null 2>&1; then say UNCHECKED gpu-hours "cannot read $sd"
+  if [ -d "$sd" ] && ! timeout 10 ls "$sd" >/dev/null 2>&1; then say UNCHECKED gpu-hours "cannot read $sd within 10 s; check that host_state_dir is mounted and readable"
   else
     gpu_seconds ""; cap=$(card_or_default max_gpu_hours 0)
-    if [ $(( spent * 100 )) -gt $(( cap * 3600 * 80 )) ]; then say RIPPLE gpu-hours "$(gpu_h "$spent") of $cap GPU-h ($(gpu_h "$running") in $nrun running)"
+    if [ $(( spent * 100 )) -gt $(( cap * 3600 * 80 )) ]; then say RIPPLE gpu-hours "$(gpu_h "$spent") of $cap GPU-h ($(gpu_h "$running") in $nrun running), over 80%; a human decides whether to raise max_gpu_hours"
     else say PASS gpu-hours "$(gpu_h "$spent") of $cap GPU-h ($(gpu_h "$running") in $nrun running)"; fi
   fi
   if ! on_launch_host; then
-    for m in host-supervision host-memory host-strays host-log-errors; do say UNCHECKED "$m" "$host is not in launch_hosts ($(launch_hosts))"; done; return 0
+    for m in host-supervision host-memory host-strays host-log-errors; do say UNCHECKED "$m" "$host is not in launch_hosts ($(launch_hosts)); run ripples on a launch host to check"; done; return 0
   fi
 
   local -a live_ids=() live_dirs=()
@@ -389,7 +389,7 @@ cmd_checks() {
     elif ! pid_is "$sup" "$r"; then rk "$d" start job_pid; ent="$ent $id:pid$r-has-no-supervisor"
     else rk "$d" start log_fd; [ "$r" = ok ] || ent="$ent $id:log_fd-${r// /_}"; fi
   done
-  if [ -n "$ent" ]; then say ENTRIES host-supervision "${ent# }"
+  if [ -n "$ent" ]; then say ENTRIES host-supervision "${ent# }" "stop each with guard/run launch --stop <id> --reason=<why>, or tell the human"
   elif [ $remote -gt 0 ]; then say UNCHECKED host-supervision "$remote launch(es) unended on$(tr ' ' '\n' <<<"$hosts" | sort -u | tr '\n' ' ' | sed 's/ $//'); run ripples there"
   else say PASS host-supervision "$live live, supervised"; fi
 
@@ -406,11 +406,11 @@ cmd_checks() {
     done
   done
   [ "$avail" -lt $(( 2 * floor )) ] && ent="$ent host:$(kb_gb "$avail")G-available-floor-$(kb_gb "$floor")G"
-  if [ -n "$ent" ]; then say ENTRIES host-memory "${ent# }"; else say PASS host-memory "$(kb_gb "$avail")G available; $live live, at most 80% of --mem"; fi
+  if [ -n "$ent" ]; then say ENTRIES host-memory "${ent# }" "a supervisor stops its job at --mem; a human clears leftover shm or frees host memory"; else say PASS host-memory "$(kb_gb "$avail")G available; $live live, at most 80% of --mem"; fi
 
   local s rc; s=$(strays); rc=$?
-  if [ -n "$s" ]; then say RIPPLE host-strays "$(tr '\n' ' ' <<<"$s" | sed 's/ $//')"
-  elif [ $rc -ne 0 ]; then say UNCHECKED host-strays "no memory strays; GPU strays unchecked, nvidia-smi not found or timed out"
+  if [ -n "$s" ]; then say RIPPLE host-strays "$(tr '\n' ' ' <<<"$s" | sed 's/ $//'); a human ends them or adds them to stray_ignore"
+  elif [ $rc -ne 0 ]; then say UNCHECKED host-strays "no memory strays; GPU strays unchecked, nvidia-smi not found or timed out; put nvidia-smi on PATH and rerun"
   else say PASS host-strays ""; fi
 
   ent=""
@@ -419,7 +419,7 @@ cmd_checks() {
     if m=$(timeout 10 tail -c 1048576 "$log" 2>/dev/null | grep -E -o -m1 "$LOG_ERRORS"); then ent="$ent ${live_ids[i]}:${m// /_}"
     elif [ ! -r "$log" ]; then ent="$ent ${live_ids[i]}:log-unreadable"; fi
   done
-  if [ -n "$ent" ]; then say ENTRIES host-log-errors "${ent# }"; else say PASS host-log-errors "$live running log(s) scanned"; fi
+  if [ -n "$ent" ]; then say ENTRIES host-log-errors "${ent# }" "read each log and diagnose, then commit $rd/incidents/<n>.md with a job: <id> line for each"; else say PASS host-log-errors "$live running log(s) scanned"; fi
 }
 
 # strays: this user's processes holding a GPU compute context or more than half of host_max_mem_gb of RssAnon, minus
