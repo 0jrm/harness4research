@@ -20,10 +20,11 @@ case $cmd in
     top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
     project_version "$top"
     [ $p_guarded = 1 ] || { echo "$top has no guard on $p_base"; exit 0; }
-    echo "$(basename "$top") guard schema $p_schema, installed from ${p_from:-unknown}"
+    echo "$(basename "$top") guard schema $p_schema, ${p_release:+release $p_release, }installed from ${p_from:-unknown}"
     case $(skew) in
       current) echo "current" ;;
-      project-older) echo "project older: guard init $top --update" ;;
+      project-older) if [ -n "$p_release" ]; then echo "project older: guard init $top --update"
+        else echo "project older, installed before release stamps; run guard init $top --update"; fi ;;
       harness-older) echo "harness older or on another branch: git -C $here pull" ;;
       unknown-install) echo "install commit unknown: guard init $top --update --force" ;;
     esac ;;

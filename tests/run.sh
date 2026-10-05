@@ -728,6 +728,7 @@ git -C "$tmp/proj" fetch -q origin
 expect update-noop ok 'already current' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt3"
 expect init-refuses-guarded fail 'already guarded' -- "$guard" init "$tmp/proj" --worktree "$tmp/wt6"
 expect version-current ok '^current$' -- "$guard" version
+expect version-release ok 'guard schema [0-9]+, release [^,]+, installed from ' -- "$guard" version
 good=$(git rev-parse origin/main)
 set_version() {  # set_version <sed expression>: commit an edited guard/VERSION straight to main
   git switch -q --detach origin/main; sed -i "$1" guard/VERSION; git commit -q -am "version: $1"
@@ -748,6 +749,10 @@ expect version-project-older ok '^project older' -- "$guard" version
 expect update-schema-1 ok 'guard/VERSION' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt6"
 expect update-writes-schema ok "^schema: $(cat "$here/SCHEMA")$" -- grep '^schema:' "$tmp/wt6/guard/VERSION"
 git -C "$tmp/proj" worktree remove --force "$tmp/wt6"; git -C "$tmp/proj" branch -q -D guard/update
+git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
+set_version '/^schema:/d; /^release:/d'
+expect version-no-release-stamp ok "^project older, installed before release stamps; run guard init $tmp/[^ ]+ --update$" -- "$guard" version
+expect version-no-release-header ok 'guard schema 1, installed from ' -- "$guard" version
 git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
 old_rev=$(git -C "$here" rev-parse "$(git -C "$here" log -1 --format=%H -S'hypothesis: n/a' -- templates/runs/_template/report.md)^")
 old_install() {  # old_install: commit to main the guard files as the harness at $old_rev installed them
