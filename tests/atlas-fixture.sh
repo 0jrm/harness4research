@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # usage: tests/atlas-fixture.sh <dir>
-# Builds a guarded demo project at <dir>/casts-v4-training with an origin, six committed runs, one run only on disk,
-# an agent branch, fake Slurm rows and a sibling code repo <dir>/casts-loader that a report cites by name.
+# Builds a guarded demo project at <dir>/casts-v4-training with an origin, ten committed runs, two runs only on disk,
+# an agent branch, a report only on an unmerged branch, a checkout one commit behind origin/main, fake Slurm rows
+# and a sibling code repo <dir>/casts-loader that a report cites by name.
 # Prints the env lines a caller exports before running ripples or guard atlas against it.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -148,6 +149,27 @@ mkdir -p runs/fp32-check/checks; printf '#!/bin/bash\necho ok\n' > runs/fp32-che
 sed -i 's/^max_walltime_minutes: .*/max_walltime_minutes: 600/' guard/budget.card
 git add -A; at 2026-09-23T03:12:00 "chore: relax walltime and add a check"
 git push -q -u origin agent/fp32-check; git switch -q main
+
+card skynet-train "Does the model train on skynet without the scheduler?" "a skynet run reaches the lr-sweep RMSE" "validation RMSE of T and S, scripts/score.py" "fraction of casts the model leaves at climatology"
+card hand-run "Does a second GPU halve the epoch time?" "two GPUs cut epoch time by 45%" "seconds per epoch from train.log" "validation RMSE of T and S, scripts/score.py"
+card incident-only "Does the float16 loader keep up?" "float16 halves load time" "seconds per sample" "validation RMSE of T and S, scripts/score.py"
+card report-branch "Does dropout 0.1 help?" "dropout 0.1 lowers RMSE by 1%" "validation RMSE of T and S, scripts/score.py" "fraction of casts the model leaves at climatology"
+git add -A; at 2026-09-25T09:00:00 "docs(runs): cards for skynet-train, hand-run, incident-only and report-branch"
+printf 'id\tts\tfield\tvalue\twhy\tevidence\nx1\t2026-09-25T10:00:00Z\thost\tskynet\tno queue on the GPU box\tskynet:/scratch/runs/hand-run/train.log\nx2\t2026-09-25T10:00:00Z\tgpus\t2\tthe question needs two\tnvidia-smi in train.log\n' > runs/hand-run/execution.tsv
+mkdir -p runs/incident-only/incidents
+printf -- '- **When:** 2026-09-25, on skynet, no Slurm job.\n- **Cause:** the float16 cast overflowed in the loader.\n- **Fix:** cast after the normalisation.\n' > runs/incident-only/incidents/2026-09-25-skynet.md
+git add -A; at 2026-09-26T09:00:00 "chore(runs): hand-run ledger and incident-only incident"
+git push -q
+git switch -q -c docs/report-branch-report
+printf '# report-branch\n\nhypothesis: refuted\nVerdict against kill criteria: kill\n' > runs/report-branch/report.md
+git add -A; at 2026-09-27T09:00:00 "docs(runs): report-branch report"
+git push -q -u origin docs/report-branch-report; git switch -q main
+git clone -q "$root/casts-v4-training.git" "$root/teammate" 2>/dev/null
+( cd "$root/teammate"; card behind-card "Does the cosine floor matter?" "a floor of 1e-6 changes nothing" "validation RMSE of T and S, scripts/score.py" "fraction of casts the model leaves at climatology"
+  printf '# behind-card\n\nhypothesis: supported\nVerdict against kill criteria: continue\n' > runs/behind-card/report.md
+  git add -A; at 2026-09-28T09:00:00 "docs(runs): behind-card card and report, merged from a PR"; git push -q )
+rm -rf "$root/teammate"; git fetch -q
+mkdir -p runs/behind-card; printf 'ts\twhat\twhy\tevidence\n' > runs/behind-card/execution.tsv
 
 card q-batch "Does a batch of 256 casts train as well as 512?" "batch 256 matches RMSE within 0.5%" "validation RMSE of T and S, scripts/score.py" "fraction of casts the model leaves at climatology"
 manifest q-batch 4860 2026-09-24T09:00:00Z hpc-g004

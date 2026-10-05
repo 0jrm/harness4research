@@ -17,6 +17,8 @@ import argparse, datetime as dt, fnmatch, glob, html, json, os, re, signal, sock
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+ATLAS_SCHEMA = 1  # of the --json data; bump on a renamed or removed field, never for an added one
+
 def git(top, *args, ok=False):
     p = subprocess.run(["git", "-C", top, "--no-optional-locks", *args], capture_output=True, text=True)
     if p.returncode and not ok:
@@ -56,8 +58,8 @@ def when(s):
 def stamp(epoch):
     return dt.datetime.fromtimestamp(float(epoch), dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-def commits(top, path):
-    out = git(top, "log", "--reverse", "--format=%H\t%ct\t%s", "HEAD", "--", path) or ""
+def commits(top, path, ref="HEAD"):
+    out = git(top, "log", "--reverse", "--format=%H\t%ct\t%s", ref, "--", path) or ""
     return [{"sha": sha, "time": stamp(ct), "subject": subject}
             for sha, ct, subject in (l.split("\t", 2) for l in out.splitlines() if l)]
 
@@ -86,6 +88,14 @@ def evidence_rows(block):
     if all(i is None for i in col.values()):
         col = dict(zip(EVIDENCE, range(len(EVIDENCE))))
     return [{k: r[i] if i is not None and i < len(r) else "" for k, i in col.items()} for r in rows[1:]]
+
+LEDGER = ("id", "ts", "field", "value", "why", "evidence")
+
+def ledger(text):
+    lines = [l.split("\t") for l in (text or "").splitlines() if l.strip()]
+    header_ok = bool(lines) and tuple(lines[0]) == LEDGER
+    rows = [dict(zip(LEDGER, l + [""] * len(LEDGER))) for l in lines[1:]] if header_ok else []
+    return header_ok, rows
 
 def ripples(top, base, run_dir):
     env = {k: v for k, v in os.environ.items() if k != "HPC_GUARD_LOCAL"}
@@ -123,6 +133,15 @@ def mtime(top, path):
 def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=None, title=None):
     head = git(top, "rev-parse", "HEAD").strip()
     base_sha = (git(top, "rev-parse", base) or "").strip()
+    behind = int((git(top, "rev-list", "--count", f"HEAD..{base}") or "0").strip() or 0)
+    ahead_refs = {}
+    for ref in (git(top, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin") or "").split():
+        if ref in (base, "origin/HEAD", "origin") or ref.endswith("/HEAD"):
+            continue
+        ahead = int((git(top, "rev-list", "--count", f"{base}..{ref}") or "0").strip() or 0)
+        if ahead:
+            ahead_refs[ref] = ahead
+    elsewhere = {ref: set(ls(top, "ls-tree", "-r", "--name-only", ref, "--", "runs/")) for ref in [base, *ahead_refs]}
     budget = kv(show(top, base, "guard/budget.card"))
     version = kv(show(top, base, "guard/VERSION"))
     watch = [l.split("#")[0].strip() for l in (show(top, base, "guard/watch.list") or "").splitlines()]
@@ -156,9 +175,15 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
         uncommitted = sorted(f for f in loose if f.startswith(d))
         paths = sorted(set(committed) | set(uncommitted))
         card_path = d + "question.card"
-        card = kv(read(card_path))
+        card_from = "here" if card_path in paths else base if card_path in elsewhere[base] else None
+        card = kv(read(card_path) if card_from == "here" else show(top, base, card_path) if card_from else None)
         on_disk = worktree and os.path.isfile(os.path.join(top, card_path))
-        blob = (git(top, "hash-object", card_path) if on_disk else git(top, "rev-parse", f"HEAD:{card_path}", ok=True)) or ""
+        blob = (git(top, "hash-object", card_path) if on_disk else
+                git(top, "rev-parse", f"{'HEAD' if card_from == 'here' else base}:{card_path}", ok=True)) or ""
+        execution = None
+        if d + "execution.tsv" in paths:
+            header_ok, rows = ledger(read(d + "execution.tsv"))
+            execution = {"path": d + "execution.tsv", "committed": d + "execution.tsv" in files, "header_ok": header_ok, "rows": rows}
         manifests = []
         for f in paths:
             if re.search(r"/manifest-[^/]+\.txt$", f):
@@ -185,8 +210,14 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
                       "evidence": evidence_rows(section(report_text, "Evidence")), "deviations": dev,
                       "time": born(d + "report.md", commits(top, d + "report.md"), last=True),
                       "next": section(report_text, "Next step")}
-        runs.append({"id": rid, "card": card, "card_blob": blob.strip(), "card_history": commits(top, card_path),
-                     "manifests": manifests, "incidents": incidents, "report": report, "ripples": [],
+        report_refs = [] if report else [ref for ref, have in elsewhere.items() if d + "report.md" in have]
+        hist, frozen_on = commits(top, card_path), "HEAD"
+        if not hist and card_path in elsewhere[base]:
+            hist, frozen_on = commits(top, card_path, base), base
+        runs.append({"id": rid, "card": card, "card_blob": blob.strip(), "card_from": card_from,
+                     "card_history": hist, "card_frozen_on": frozen_on if hist else None,
+                     "manifests": manifests, "incidents": incidents, "execution": execution, "report": report,
+                     "report_refs": report_refs, "ripples": [],
                      "committed_files": committed, "uncommitted_files": uncommitted,
                      "checks": sorted(f.split("/")[-1] for f in paths if "/checks/" in f)})
     if run_ripples:
@@ -198,15 +229,15 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
     code = find_code(top, cited, given_code or {})
     for r in runs:
         trace_evidence(top, r, tree, code, worktree)
-        r["outcome"] = outcome(r, runs)
-        r["violations"] = violations(r)
+        r["outcome"], r["outcome_detail"] = outcome(r, runs, base)
+        r["violations"] = violations(r, base, behind)
+        r["severity"] = severity(r)
+        r["needs_you"] = needs_you(r, base)
+        last = max((e for e in events(r) if e[1]), key=lambda e: e[1], default=None)
+        r["last_event"] = {"type": EVENT_TYPE.get(last[2], EVENT_TYPE.get(last[0])), "what": last[3],
+                           "time": last[1].astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")} if last else None
     branches = []
-    for ref in (git(top, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin") or "").split():
-        if ref in (base, "origin/HEAD", "origin") or ref.endswith("/HEAD"):
-            continue
-        ahead = int((git(top, "rev-list", "--count", f"{base}..{ref}") or "0").strip() or 0)
-        if not ahead:
-            continue
+    for ref, ahead in ahead_refs.items():
         changed = (git(top, "diff", "--name-only", f"{base}...{ref}") or "").split()
         drawer = []
         for f in changed:
@@ -224,11 +255,18 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
                          "watched": watched, "time": stamp(last[0]) if last[0] else "", "subject": last[-1]})
     origin = (git(top, "remote", "get-url", "origin") or top).strip().rstrip("/")
     project = re.sub(r"\.git$", "", re.split(r"[/:]", origin)[-1])
-    return {"project": project, "title": title or project, "globs": list(globs), "top": top, "base": base,
-            "base_sha": base_sha, "head": head, "worktree": worktree,
+    now = dt.datetime.now(dt.timezone.utc)
+    data = {"atlas_schema": ATLAS_SCHEMA, "project": project, "title": title or project, "globs": list(globs), "top": top, "base": base,
+            "base_sha": base_sha, "head": head, "behind_base": behind, "worktree": worktree,
             "uncommitted": sum(len(r["uncommitted_files"]) for r in runs), "code": code, "rippled": run_ripples,
             "budget": budget, "version": version, "watch": watch, "runs": runs, "branches": branches,
-            "generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
+            "generated": now.strftime("%Y-%m-%d %H:%M UTC"), "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "summary": {"runs": len(runs), "ripples": sum(r["severity"] == "ripple" for r in runs),
+                        "handled": sum(any(l["status"] == "HANDLED" for l in r["ripples"]) for r in runs),
+                        "unchecked": sum(any(l["status"] == "UNCHECKED" for l in r["ripples"]) for r in runs),
+                        "needs_you": sum(bool(r["needs_you"]) for r in runs)}}
+    data["waters"] = waters(data)
+    return data
 
 SLURM = re.compile(r"[0-9][0-9_]*")
 COMMIT = re.compile(r"(?:([\w.-]+)\s+)?([0-9a-f]{7,40})")
@@ -308,23 +346,53 @@ def trace_evidence(top, run, tree, code, worktree):
                               "; ".join(m["inputs"]) or "no inputs.list for this run"))
         e["links"] = links
 
-def outcome(r, runs):
+OUTCOMES = {
+    "explore": "explore run, so no card and no verdict",
+    "supported": "report verdict: continue",
+    "negative": "report verdict: kill, a clean negative",
+    "escalated": "report verdict: escalate, so a human decides",
+    "reported": "report has no verdict the atlas knows",
+    "report unmerged": "report on {ref}, unmerged",
+    "report not pulled": "report on {ref}; this checkout is behind it, run git pull",
+    "superseded": "superseded by {ref}",
+    "open": "jobs recorded by a scheduler, no report yet",
+    "recorded by hand": "ran without a scheduler record; known only from execution.tsv rows or an incident",
+    "no scheduler record": "card frozen, but no manifest, ledger row or incident, so the atlas cannot tell whether it ran",
+    "not run": "card not committed and no record of any run",
+}
+
+def outcome(r, runs, base):
+    def said(key, ref=""):
+        return key, OUTCOMES[key].format(ref=ref)
     if r["id"].startswith("explore-"):
-        return "explore"
+        return said("explore")
     rep = r["report"]
     if rep:
         v = re.sub(r"\W", "", (rep["verdict"].split() or [""])[0].lower())
-        return {"kill": "negative", "continue": "supported", "escalate": "escalated"}.get(v, "reported")
-    if any(o["card"].get("supersedes") == r["id"] for o in runs):
-        return "superseded"
-    return "open" if r["manifests"] else "not run"
+        return said({"kill": "negative", "continue": "supported", "escalate": "escalated"}.get(v, "reported"))
+    if r["report_refs"]:
+        ref = r["report_refs"][0]
+        return said("report not pulled" if ref == base else "report unmerged", ref)
+    by = next((o["id"] for o in runs if o["card"].get("supersedes") == r["id"]), None)
+    if by:
+        return said("superseded", by)
+    if r["manifests"]:
+        return said("open")
+    if (r["execution"] and r["execution"]["rows"]) or r["incidents"]:
+        return said("recorded by hand")
+    return said("no scheduler record" if r["card_history"] else "not run")
 
-def violations(r):
+def violations(r, base, behind):
     out = []
     explore = r["id"].startswith("explore-")
     frozen = when(r["card_history"][0]["time"]) if r["card_history"] else None
-    if not explore and not frozen:
+    if not explore and r["card_frozen_on"] == base:
+        out.append(f"card exists on {base}; " + (f"this checkout is {n(behind, 'commit')} behind, run git pull" if behind
+                                                    else "this checkout does not have it, run git pull"))
+    elif not explore and not frozen:
         out.append("question card is not committed, so nothing froze it")
+    if r["execution"] and not r["execution"]["header_ok"]:
+        out.append(f"execution.tsv header is not {' '.join(LEDGER)}, so neither the guard nor this page reads its rows")
     for m in r["manifests"] if not explore else []:
         t = when(m.get("time", ""))
         if frozen and t and t < frozen:
@@ -338,12 +406,79 @@ def violations(r):
         out.append("no partner metric, so doing less could satisfy the metric")
     return out
 
+def severity(r):
+    seen = {l["status"] for l in r["ripples"]}
+    return "ripple" if "RIPPLE" in seen else "handled" if "HANDLED" in seen else "warn" if r["violations"] else "quiet"
+
+def needs_you(r, base):
+    out = []
+    if r["outcome"] == "escalated" or (r["report"] and not r["report"]["verdict"]):
+        out.append("awaiting verdict")
+    if r["outcome"] == "report unmerged":
+        out.append(f"report waits for review on {r['report_refs'][0]}")
+    if r["outcome"] == "report not pulled" or r["card_frozen_on"] == base:
+        out.append(f"checkout behind {base}, run git pull")
+    if not r["id"].startswith("explore-") and not r["card_frozen_on"]:
+        out.append("uncommitted card")
+    rippled = [l["check"] for l in r["ripples"] if l["status"] == "RIPPLE"]
+    if {"guard-untouched", "watched-paths"} & set(rippled):
+        out.append("guard touched")
+    rest = sorted(set(rippled) - {"guard-untouched", "watched-paths"})
+    if rest:
+        out.append(f"ripple on {', '.join(rest)}, so stop spending")
+    return out
+
+EVENT_TYPE = {"frozen": "card frozen", "edit": "card edited", "hand": "execution row", "jobs": "job", "incidents": "incident", "report": "report"}
+
+def events(r):
+    """(lane, time, state, label) for everything the run left behind."""
+    hist = r["card_history"]
+    ev = [("card", when(hist[0]["time"]), "frozen", "card frozen")] if hist else []
+    ev += [("card", when(h["time"]), "edit", h["subject"]) for h in hist[1:]]
+    failed = set()
+    for l in r["ripples"]:
+        if l["check"] == "job-states" and l["status"] in ("RIPPLE", "HANDLED"):
+            failed |= {x.split(":")[0] for x in l["detail"].split()}
+    ev += [("jobs", when(m.get("time", "")), "fail" if m.get("job_id") in failed else "ok", m.get("job_id", "?")) for m in r["manifests"]]
+    ev += [("jobs", when(x["ts"]), "hand", f"execution.tsv {x['id']}: {x['field']} {x['value']}") for x in (r["execution"] or {}).get("rows", [])]
+    ev += [("incidents", when(i["time"]), "ok" if not unset(i["root_cause"]) else "fail", i["job"] or i["path"].split("/")[-1]) for i in r["incidents"]]
+    if r["report"]:
+        ev.append(("report", when(r["report"]["time"]), "ok", "report.md"))
+    return ev
+
+def waters(data):
+    launch = set(data["budget"].get("launch_hosts", "").replace(",", " ").split())
+    slurm, other = {}, {}
+    for r in data["runs"]:
+        for m in r["manifests"]:
+            jid, h = m.get("job_id", ""), m.get("host", "?")
+            (slurm if SLURM.fullmatch(jid) else other).setdefault(h, {}).setdefault(r["id"], "manifest")
+        for x in (r["execution"] or {}).get("rows", []) if not r["manifests"] else []:
+            if x["field"] == "host" and x["value"]:
+                other.setdefault(x["value"], {}).setdefault(r["id"], "ledger")
+    out = []
+    if slurm:
+        runs = sorted({x for v in slurm.values() for x in v})
+        out.append({"name": "Slurm cluster", "fence": "bank", "runs": runs, "hand": [],
+                    "desc": "Account " + data["budget"].get("account", "?") + ", preflight and a capped sub-account",
+                    "count": f"{n(len(slurm), 'node')}, {n(len(runs), 'run')}"})
+    for h, rs in sorted(other.items()):
+        hand = sorted(k for k, v in rs.items() if v == "ledger")
+        fenced = h in launch
+        desc = ("Listed in launch_hosts: launch gates and a GPU-hour count, no scheduler" if fenced
+                else "Not in launch_hosts: compute here passed no gate")
+        if hand:
+            desc += f". {', '.join(hand)} placed here by execution.tsv rows, recorded by hand, not by a scheduler, and not counted in the budget"
+        out.append({"name": h, "fence": "bump" if fenced else "none", "runs": sorted(rs), "hand": hand, "desc": desc,
+                    "count": n(len(rs), "run") if fenced else f"{n(len(rs), 'run')}: {', '.join(sorted(rs))}"})
+    return out
+
 # ---------------------------------------------------------------- rendering
 
 E = html.escape
 COLS = [("guard-untouched", "guard"), ("question-card-frozen", "card"), ("watched-paths", "watched"),
         ("job-states", "jobs"), ("walltime-headroom", "walltime"), ("retries", "retries"),
-        ("handled-failures", "handled"), ("budget", "budget"), ("quota", "quota"), ("domain", "domain")]
+        ("handled-failures", "handled"), ("budget", "budget"), ("quota", "quota"), ("domain", "domain"), ("other", "other")]
 WORD = {"PASS": "pass", "RIPPLE": "ripple", "HANDLED": "handled", "UNCHECKED": "unchecked"}
 LINKS = {"ok": ("background:var(--shoal);color:var(--passt)", "holds: committed, or resolves"),
          "local": ("background:var(--land);color:var(--handt)", "on disk here, not committed"),
@@ -361,49 +496,35 @@ def cell(r, key):
         bad = [l for l in checks if l["status"] == "RIPPLE"]
         tip = "; ".join(f"{l['check'][6:]}: {l['detail']}" for l in checks)
         return ("ripple" if bad else "pass"), f"{len(checks) - len(bad)}/{len(checks)}", tip
-    hits = [l for l in lines if l["check"] == key]
+    if key == "other":
+        known = {k for k, _ in COLS} | {"domain-checks"}
+        hits = [l for l in lines if l["check"] not in known and not l["check"].startswith("check:")]
+        if not hits:
+            return "empty", "", "no other checks reported"
+    else:
+        hits = [l for l in lines if l["check"] == key]
     if not hits:
         return "unchecked", "", "not reported by this guard version"
     rank = {"RIPPLE": 3, "HANDLED": 2, "UNCHECKED": 1, "PASS": 0}
     top = max(hits, key=lambda l: rank.get(l["status"], 0))
     label = WORD.get(top["status"], top["status"].lower())
     short = label
-    if top["status"] in ("RIPPLE", "HANDLED"):
+    if top["status"] in ("RIPPLE", "HANDLED") and key == "other":
+        short = top["check"]
+    elif top["status"] in ("RIPPLE", "HANDLED"):
         first = top["detail"].split()[0] if top["detail"] else ""
         if ":" in first:
             short = first.split(":", 1)[1].split("->")[0].replace("_", " ").lower()
         else:
             short = {"question-card-frozen": "edited", "guard-untouched": "touched", "watched-paths": "touched",
                      "budget": "over 80%", "quota": "over 80%"}.get(key, label)
-    return label, short, " / ".join(f"{l['status']} {l['detail']}".strip() for l in hits)
+    return label, short, " / ".join(f"{l['status']} {l['check'] + ' ' if key == 'other' else ''}{l['detail']}".strip() for l in hits)
 
 def n(k, word):
     return f"{k} {word}" if k == 1 else f"{k} {word}{'es' if word.endswith('ch') else 's'}"
 
 def chip(text, kind):
     return f'<span class="chip {kind}">{E(text)}</span>'
-
-def hosts(data):
-    launch = set(data["budget"].get("launch_hosts", "").replace(",", " ").split())
-    slurm, other = {}, {}
-    for r in data["runs"]:
-        for m in r["manifests"]:
-            jid, h = m.get("job_id", ""), m.get("host", "?")
-            if re.fullmatch(r"[0-9][0-9_]*", jid):
-                slurm.setdefault(h, []).append(r["id"])
-            else:
-                other.setdefault(h, []).append(r["id"])
-    out = []
-    if slurm:
-        runs = sorted({x for v in slurm.values() for x in v})
-        out.append(("Slurm cluster", "bank", "Account " + data["budget"].get("account", "?") + ", preflight and a capped sub-account",
-                    f"{n(len(slurm), 'node')}, {n(len(runs), 'run')}"))
-    for h, rs in sorted(other.items()):
-        if h in launch:
-            out.append((h, "bump", "Listed in launch_hosts: launch gates and a GPU-hour count, no scheduler", n(len(set(rs)), "run")))
-        else:
-            out.append((h, "none", "Not in launch_hosts: compute here passed no gate", f"{n(len(set(rs)), 'run')}: {', '.join(sorted(set(rs)))}"))
-    return out
 
 def budget_bar(data):
     b = data["budget"]
@@ -433,21 +554,9 @@ def budget_bar(data):
 <span><b>{res}</b> held for verification</span><span>ripples fire at <b>{int(cap * .8)}</b></span></p>'''
 
 def lifeline(r):
-    ev = []
-    hist = r["card_history"]
-    frozen = when(hist[0]["time"]) if hist else None
-    for h in hist[1:]:
-        ev.append(("card", when(h["time"]), "edit", h["subject"]))
-    failed = set()
-    for l in r["ripples"]:
-        if l["check"] == "job-states" and l["status"] in ("RIPPLE", "HANDLED"):
-            failed |= {x.split(":")[0] for x in l["detail"].split()}
-    for m in r["manifests"]:
-        ev.append(("jobs", when(m.get("time", "")), "fail" if m.get("job_id") in failed else "ok", m.get("job_id", "?")))
-    for i in r["incidents"]:
-        ev.append(("incidents", when(i["time"]), "ok" if not unset(i["root_cause"]) else "fail", i["job"]))
-    if r["report"]:
-        ev.append(("report", when(r["report"]["time"]), "ok", "report.md"))
+    ev = events(r)
+    frozen = next((t for _, t, state, _ in ev if state == "frozen"), None)
+    ev = [e for e in ev if e[2] != "frozen"]
     times = [t for _, t, _, _ in ev if t] + ([frozen] if frozen else [])
     if not times:
         return ""
@@ -474,7 +583,7 @@ def lifeline(r):
         cx = x(t)
         if lane == "jobs":
             jobs_x[label] = cx
-            s.append(f'<g class="ev {state}"><rect x="{cx - 4:.1f}" y="{y[lane] - 8}" width="8" height="16" rx="2"/><title>job {E(label)}</title></g>')
+            s.append(f'<g class="ev {state}"><rect x="{cx - 4:.1f}" y="{y[lane] - 8}" width="8" height="16" rx="2"/><title>{"" if state == "hand" else "job "}{E(label)}</title></g>')
         elif lane == "card":
             s.append(f'<g class="ev fail"><path d="M{cx:.1f} {y[lane] - 7}l6 7-6 7-6-7z"/><title>{E(label)}</title></g>')
         else:
@@ -523,6 +632,8 @@ def atlas_graph(runs):
     s.append("</svg>")
     return "".join(s)
 
+SAY_WHY = {"report unmerged", "report not pulled", "recorded by hand", "no scheduler record", "not run"}
+
 def run_block(r):
     c, rep = r["card"], r["report"]
     rows = []
@@ -540,7 +651,7 @@ def run_block(r):
         if not unset(c.get(k)):
             rel.append(f'{k.replace("_", " ")} <a href="#run-{E(c[k])}">{E(c[k])}</a>')
     return f'''<article class="run" id="run-{E(r["id"])}">
-<header><h3>{E(r["id"])}</h3>{chip(r["outcome"], r["outcome"].replace(" ", "-"))}{chip("uncommitted", "loose-chip") if r["uncommitted_files"] else ""}{"".join(f'<span class="rel">{x}</span>' for x in rel)}</header>
+<header><h3>{E(r["id"])}</h3>{chip(r["outcome"], r["outcome"].replace(" ", "-"))}{f'<span class="rel">{E(r["outcome_detail"])}</span>' if r["outcome"] in SAY_WHY else ""}{chip("uncommitted", "loose-chip") if r["uncommitted_files"] else ""}{"".join(f'<span class="rel">{x}</span>' for x in rel)}</header>
 <p class="question">{E(c.get("question", ""))}</p>
 <dl class="card">
 <div><dt>Hypothesis</dt><dd>{E(c.get("hypothesis", ""))}{f' <span class="verdict">Report says {E(rep["hypothesis"])}, verdict {E(rep["verdict"])}.</span>' if rep else ""}</dd></div>
@@ -556,8 +667,8 @@ def run_block(r):
 
 CSS = """
 :root{--paper:#F6F9F9;--shoal:#DAEAF0;--shoal2:#A8CCDB;--land:#EDDDB4;--ink:#15222A;--sound:#56666F;--rule:#C5D2D7;
---mag:#9C2878;--magt:#F4DCEA;--passt:#1D5870;--handt:#6A4C10;--serif:"Spectral",Georgia,"Times New Roman",serif;
---sans:"IBM Plex Sans Condensed","Arial Narrow","Roboto Condensed",sans-serif;box-sizing:border-box;
+--mag:#9C2878;--magt:#F4DCEA;--passt:#1D5870;--handt:#6A4C10;--serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+--sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;box-sizing:border-box;
 padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#0C161C;--shoal:#12303C;--shoal2:#1E4D60;--land:#3B3220;
 --ink:#D2DCE0;--sound:#8D9FA7;--rule:#283A43;--mag:#E07CC3;--magt:#3A1630;--passt:#9FD0E2;--handt:#E9CF8C}}
@@ -574,7 +685,7 @@ main{max-width:1080px;margin:0 auto;padding:0 20px 80px}
 display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:28px;align-items:end}
 .cartouche h1{font:italic 400 clamp(38px,6vw,64px)/1 var(--serif);margin:0;letter-spacing:-.01em}
 .cartouche h1 small{display:block;font:400 17px/1.4 var(--sans);font-style:normal;color:var(--sound);margin-bottom:10px;letter-spacing:.01em}
-.cartouche dl{margin:0;font-size:14px;display:grid;grid-template-columns:auto 1fr;gap:3px 14px}.cartouche dt{color:var(--sound)}.cartouche dd{margin:0}
+.cartouche dl{margin:0;font-size:14px;display:grid;grid-template-columns:auto 1fr;gap:3px 14px}.cartouche dt{color:var(--sound)}.cartouche dd{margin:0}.cartouche dd.alarm{color:var(--mag)}
 .readonly{grid-column:1/-1;border-top:.5px solid var(--rule);padding-top:12px;margin:0;font-size:14px;color:var(--sound)}
 h2{font:italic 400 30px/1.2 var(--serif);margin:56px 0 6px}h2+p.lede{margin:0 0 20px;color:var(--sound);max-width:68ch}
 h3{font:italic 500 24px/1.2 var(--serif);margin:0}h4{font:500 15px/1.3 var(--sans);margin:22px 0 6px}
@@ -602,24 +713,27 @@ td{padding:6px 8px;border-bottom:.5px solid var(--rule);vertical-align:top}
 .st .ripple{background:var(--magt);color:var(--mag);box-shadow:inset 0 0 0 1.5px var(--mag);font-weight:500}
 .st .unchecked{background:repeating-linear-gradient(135deg,transparent 0 4px,var(--rule) 4px 5px);color:var(--sound);font-style:italic}
 .key{display:inline-block;width:18px;height:12px;border:1px solid var(--ink);border-radius:2px;margin:0 -12px 0 6px;vertical-align:-1px}
-.k-sup{background:var(--shoal)}.k-neg{background:var(--land)}.k-open{background:var(--paper)}.k-dash{border:1px dashed var(--sound)}.k-pair{border:1.5px solid var(--mag)}
+.k-dot{border:1px dotted var(--ink)}.k-ref{border:1.5px dashed var(--handt)}.k-sup{background:var(--shoal)}.k-neg{background:var(--land)}.k-open{background:var(--paper)}.k-dash{border:1px dashed var(--sound)}.k-pair{border:1.5px solid var(--mag)}
 .legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;color:var(--sound);margin:12px 0 0}.legend .st{display:flex;align-items:center;gap:6px}.legend .st span{min-width:0;width:18px;height:14px;padding:0}
 .graphwrap{overflow-x:auto;border:1px solid var(--rule);background:var(--paper)}
 .graph rect{stroke-width:1}.qname{font:italic 500 16px var(--serif);fill:var(--ink)}.qsub{font:400 13px var(--sans);fill:var(--sound)}
 .qnode.supported rect{fill:var(--shoal);stroke:var(--ink)}.qnode.negative rect{fill:var(--land);stroke:var(--ink)}
 .qnode.open rect,.qnode.reported rect,.qnode.escalated rect{fill:var(--paper);stroke:var(--ink)}
 .qnode.superseded rect,.qnode.not-run rect{fill:none;stroke:var(--sound);stroke-dasharray:4 3}
+.qnode.recorded-by-hand rect{fill:var(--paper);stroke:var(--ink);stroke-dasharray:2 2}.qnode.no-scheduler-record rect{fill:none;stroke:var(--ink);stroke-dasharray:1 3}
+.qnode.report-unmerged rect,.qnode.report-not-pulled rect{fill:var(--paper);stroke:var(--handt);stroke-width:1.5;stroke-dasharray:6 3}
 .qnode.nopair rect{stroke:var(--mag);stroke-width:1.5}.edge{fill:none;stroke:var(--sound);stroke-width:1}.edge.spawn{stroke-dasharray:3 3}
 .run{border-top:1.5px solid var(--ink);padding:22px 0 10px;margin-top:30px}.run header{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 14px}
 .chip{font-size:13px;padding:1px 9px;border-radius:3px;border:1px solid var(--ink)}.chip.supported{background:var(--shoal)}.chip.negative{background:var(--land)}
-.chip.superseded,.chip.not-run{border-style:dashed;color:var(--sound)}.rel{font-size:14px;color:var(--sound)}
+.chip.superseded,.chip.not-run{border-style:dashed;color:var(--sound)}
+.chip.recorded-by-hand,.chip.no-scheduler-record{border-style:dotted}.chip.report-unmerged,.chip.report-not-pulled{border:1px dashed var(--handt);color:var(--handt)}.rel{font-size:14px;color:var(--sound)}
 .question{font:italic 400 20px/1.4 var(--serif);margin:10px 0 14px;max-width:62ch}
 .card{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px 28px;margin:0 0 8px;font-size:15px}
 .card dt{color:var(--sound);font-size:13px}.card dd{margin:0 0 6px}.verdict{color:var(--sound)}.pair dd.missing{color:var(--mag)}
 .life{width:100%;max-width:760px;min-width:560px;display:block;margin:6px 0}.lane,.axis,.freeze-label{font:400 12px var(--sans);fill:var(--sound)}.axis.end{text-anchor:end}
 .rail{stroke:var(--rule);stroke-width:1}.before{fill:var(--magt);opacity:.55}.freeze{stroke:var(--ink);stroke-width:1.5;stroke-dasharray:4 3}
 .card-line{stroke:var(--ink);stroke-width:3}.ev.ok rect,.ev.ok circle{fill:var(--shoal2);stroke:var(--ink)}.ev.fail rect,.ev.fail circle,.ev.fail path{fill:var(--magt);stroke:var(--mag);stroke-width:1.5}
-.tie{fill:none;stroke:var(--mag);stroke-width:1;stroke-dasharray:2 3}
+.ev.hand rect{fill:var(--paper);stroke:var(--ink);stroke-dasharray:2 2}.tie{fill:none;stroke:var(--mag);stroke-width:1;stroke-dasharray:2 3}
 .warn{margin:8px 0;padding:0;list-style:none;font-size:14px;color:var(--mag)}.warn li::before{content:"\\25B2  ";font-size:10px}
 .evidence td.num{white-space:nowrap}.trace{display:flex;flex-wrap:wrap;gap:4px}
 .link{font-size:12.5px;padding:2px 7px;border-radius:3px;white-space:nowrap}.link b{font-weight:500}
@@ -633,15 +747,16 @@ footer{margin-top:60px;font-size:13px;color:var(--sound);border-top:.5px solid v
 def render(data):
     runs = data["runs"]; v = data["version"]
     matrix = []
+    cols = [(key, lbl) for key, lbl in COLS if key != "other" or any(cell(r, key)[0] != "empty" for r in runs)]
     for r in runs:
-        tds = "".join(f'<td class="st" title="{E(t)}"><span class="{k}">{E(s)}</span></td>' for k, s, t in (cell(r, key) for key, _ in COLS))
+        tds = "".join(f'<td class="st" title="{E(t)}"><span class="{k}">{E(s)}</span></td>' for k, s, t in (cell(r, key) for key, _ in cols))
         tag = chip("explore", "explore") if r["outcome"] == "explore" else ""
         loose = f'<span class="loose">{len(r["uncommitted_files"])} uncommitted</span>' if r["uncommitted_files"] else ""
         matrix.append(f'<tr><td><a href="#run-{E(r["id"])}">{E(r["id"])}</a>{tag}{loose}</td>{tds}</tr>')
-    heads = "".join(f"<th>{lbl}</th>" for _, lbl in COLS)
-    waters = "".join(f'<div class="area {kind}"><span class="count">{E(cnt)}</span><h3>{E(name)}</h3>'
-                     f'<span class="kind">{ {"bank": "bank limit", "bump": "speed bump", "none": "no fence"}[kind]}</span><p>{E(desc)}</p></div>'
-                     for name, kind, desc, cnt in hosts(data)) or '<p class="note">No manifests yet, so no compute to place.</p>'
+    heads = "".join(f"<th>{lbl}</th>" for _, lbl in cols)
+    waters = "".join(f'<div class="area {w["fence"]}"><span class="count">{E(w["count"])}</span><h3>{E(w["name"])}</h3>'
+                     f'<span class="kind">{ {"bank": "bank limit", "bump": "speed bump", "none": "no fence"}[w["fence"]]}</span><p>{E(w["desc"])}</p></div>'
+                     for w in data["waters"]) or '<p class="note">No manifests yet, so no compute to place.</p>'
     drawer = "".join(
         f'<tr><td><code>{E(b["name"])}</code></td><td>{n(b["ahead"], "commit")}, {n(b["changed"], "file")}</td>'
         f'<td class="{"alarm" if b["drawer"] else ""}">{E(", ".join(b["drawer"])) or "untouched"}</td>'
@@ -652,6 +767,8 @@ def render(data):
         (", runs " + ", ".join(data["globs"]) if data["globs"] else "")
     read_at = f'HEAD {data["head"][:7]}' + (f' plus the working tree ({n(data["uncommitted"], "uncommitted file")})' if data["worktree"] else "")
     code = "; ".join(f"{k} at {v}" if v else f"{k} not checked out here" for k, v in data["code"].items()) or "none cited"
+    behind = (f'<dt>Behind</dt><dd class="alarm">{n(data["behind_base"], "commit")} behind {E(data["base"])}; run git pull</dd>'
+              if data["behind_base"] else "")
     link_key = "".join(f'<span class="link {k}">{E(k)}</span>{E(t)}' for k, (_, t) in LINKS.items())
     footer = (f"Served live from {E(socket.gethostname())}; re-surveyed at most every {max(1, round(live / 60))} min on reload."
               if live else "Regenerate after a wake to refresh.")
@@ -661,15 +778,13 @@ def render(data):
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 {f'<meta http-equiv="refresh" content="{live}">' if live else ""}
 <title>Chart of {E(data["title"])}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500&family=Spectral:ital,wght@1,400;1,500&display=swap" rel="stylesheet">
 <style>{CSS}{"".join(f".link.{k}{{{c}}}" for k, (c, _) in LINKS.items())}</style></head><body>
 <nav aria-label="Sections"><a href="#waters">Waters</a><a href="#ripples">Ripples</a><a href="#questions">Questions</a><a href="#runs">Runs</a><a href="#drawer">Drawer</a></nav>
 <main>
 <section class="cartouche"><div>
 <h1><small>{E(sub)}</small>{E(data["title"])}</h1>
 <dl><dt>Datum</dt><dd>{E(data["base"])} at {E(data["base_sha"][:7])}</dd>
-<dt>Runs read at</dt><dd>{E(read_at)}</dd>
+<dt>Runs read at</dt><dd>{E(read_at)}</dd>{behind}
 <dt>Code</dt><dd>{E(code)}</dd>
 <dt>Guard</dt><dd>schema {E(v.get("schema", "1"))}, release {E(v.get("release", "unknown"))}</dd>
 <dt>Soundings</dt><dd>{"core-hours, from sacct via ripples" if data["rippled"] else "none: ripples were not run"}</dd>
@@ -689,7 +804,8 @@ def render(data):
 <h2 id="questions">Questions</h2><p class="lede">Each card placed in the order it was frozen. A supersedes line keeps the row, a spawned line starts a new one. A clean negative is a finished result.</p>
 <div class="graphwrap">{atlas_graph(runs)}</div>
 <div class="legend"><span class="key k-sup"></span>supported<span class="key k-neg"></span>clean negative<span class="key k-open"></span>open or explore
-<span class="key k-dash"></span>superseded or not run<span class="key k-pair"></span>no partner metric</div>
+<span class="key k-dash"></span>superseded or not run<span class="key k-dot"></span>ran without a scheduler record, or no record at all
+<span class="key k-ref"></span>report only on another branch<span class="key k-pair"></span>no partner metric</div>
 
 <h2 id="runs">Runs</h2><p class="lede">Shaded time is before the card was committed. Compute there would be a violation. Each evidence row carries its receipts; hover one for why it has its state.</p>
 <div class="legend">{link_key}</div>

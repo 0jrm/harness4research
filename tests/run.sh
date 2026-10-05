@@ -999,14 +999,18 @@ for tag in $releases; do upgrade_from "$tag"; done
 echo "== atlas"
 mkdir -p "$tmp/atlas"; bash "$here/tests/atlas-fixture.sh" "$tmp/atlas" > "$tmp/atlas/env.sh"
 atlas_before=$(git -C "$tmp/atlas/casts-v4-training" status --porcelain)
-expect atlas-renders ok '7 runs, 1 branch' -- bash -c '. "$1"; "$2" atlas --out "$3/atlas.html" --json "$3/atlas.json"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-renders ok '12 runs, 2 branches' -- bash -c '. "$1"; "$2" atlas --out "$3/atlas.html" --json "$3/atlas.json"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-catches-early-compute ok 'started before the card was committed' -- cat "$tmp/atlas/atlas.html"
 expect atlas-broken-receipt ok 'link broken.*commit</b> deadbee' -- cat "$tmp/atlas/atlas.html"
 expect atlas-drawer-key-diff ok 'max_walltime_minutes 240 to 600' -- cat "$tmp/atlas/atlas.html"
 python3 -c 'import json, sys
 d = json.load(open(sys.argv[1]))
+for k in ("atlas_schema", "behind_base", "generated_at"): print(" ~ ".join(["S", k, str(d[k])]))
+for k, v in sorted(d["summary"].items()): print(" ~ ".join(["S", "summary." + k, str(v)]))
+for w in d["waters"]: print(" ~ ".join(["W", w["name"], w["fence"], ",".join(w["hand"])]))
 for r in d["runs"]:
-    print(" ~ ".join(["O", r["id"], r["outcome"]]))
+    print(" ~ ".join(["O", r["id"], r["outcome"], r["outcome_detail"], r["severity"]]))
+    for x in r["needs_you"]: print(" ~ ".join(["N", r["id"], x]))
     for v in r["violations"]: print(" ~ ".join(["V", r["id"], v]))
     for m in r["manifests"]: print(" ~ ".join(["M", r["id"], m["path"], str(m["committed"])]))
     for e in (r["report"] or {}).get("evidence", []):
@@ -1020,14 +1024,35 @@ expect atlas-commit-in-code-repo ok 'commit ~ casts-loader [0-9a-f]{7} ~ ok ~ re
 expect atlas-code-row ok '<dt>Code</dt><dd>casts-loader at /' -- cat "$tmp/atlas/atlas.html"
 expect atlas-cause-bullet ok 'rescore.md</b>: the scorer read the wrong month of casts., fix: pinned the month' -- cat "$tmp/atlas/atlas.html"
 expect atlas-cause-bullet-not-flagged ok - -- bash -c '! grep -q "rescore.md names no root cause" "$1"' _ "$tmp/atlas/atlas.tsv"
-expect atlas-verdict-prose ok '^O ~ lr-sweep ~ supported$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-verdict-prose ok '^O ~ lr-sweep ~ supported ~ ' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-explore-outcome ok '<h3>explore-07</h3><span class="chip explore">explore</span>' -- cat "$tmp/atlas/atlas.html"
 expect atlas-explore-no-violations ok - -- bash -c '! grep -q "^V ~ explore-07" "$1"' _ "$tmp/atlas/atlas.tsv"
 expect atlas-uncommitted-run ok '^V ~ q-batch ~ question card is not committed, so nothing froze it$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-uncommitted-manifest ok '^M ~ q-batch ~ runs/q-batch/manifest-4860.txt ~ False$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-uncommitted-note ok 'q-batch</a><span class="loose">2 uncommitted</span>.*' -- cat "$tmp/atlas/atlas.html"
-expect atlas-uncommitted-cartouche ok 'plus the working tree \(3 uncommitted files\)' -- cat "$tmp/atlas/atlas.html"
-expect atlas-head-only ok '\(6 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-uncommitted-cartouche ok 'plus the working tree \(4 uncommitted files\)' -- cat "$tmp/atlas/atlas.html"
+expect atlas-schema ok '^S ~ atlas_schema ~ 1$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-generated-at ok '^S ~ generated_at ~ [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-summary ok '^S ~ summary.needs_you ~ [1-9]' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-severity ok '^O ~ explore-07 ~ explore ~ .* ~ ripple$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-last-event ok '"last_event": \{' -- cat "$tmp/atlas/atlas.json"
+expect atlas-frozen-no-record ok '^O ~ skynet-train ~ no scheduler record ~ card frozen, but no manifest' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-not-run-is-rare ok - -- bash -c '! grep -q "^O ~ [^~]* ~ not run ~" "$1"' _ "$tmp/atlas/atlas.tsv"
+expect atlas-ledger-by-hand ok '^O ~ hand-run ~ recorded by hand ~ ' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-incident-by-hand ok '^O ~ incident-only ~ recorded by hand ~ ' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-ledger-host ok '^W ~ skynet ~ none ~ hand-run$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-ledger-host-card ok 'hand-run placed here by execution.tsv rows, recorded by hand, not by a scheduler' -- cat "$tmp/atlas/atlas.html"
+expect atlas-report-unmerged ok '^O ~ report-branch ~ report unmerged ~ report on origin/docs/report-branch-report, unmerged ~ ' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-report-unmerged-needs-you ok '^N ~ report-branch ~ report waits for review on origin/docs/report-branch-report$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-behind-base ok '^S ~ behind_base ~ 1$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-behind-header ok '<dt>Behind</dt><dd class="alarm">1 commit behind origin/main; run git pull</dd>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-card-on-base ok '^V ~ behind-card ~ card exists on origin/main; this checkout is 1 commit behind, run git pull$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-card-on-base-not-uncommitted ok - -- bash -c '! grep -q "^V ~ behind-card ~ question card is not committed" "$1"' _ "$tmp/atlas/atlas.tsv"
+expect atlas-report-not-pulled ok '^O ~ behind-card ~ report not pulled ~ report on origin/main;' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-ledger-bad-header ok '^V ~ behind-card ~ execution.tsv header is not id ts field value why evidence' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-other-column ok 'title="RIPPLE execution-within-envelope x1: host skynet is not in launch_hosts[^"]*"><span class="ripple">execution-within-envelope<' -- cat "$tmp/atlas/atlas.html"
+expect atlas-no-network ok - -- bash -c '! grep -Eiq "<link[^>]*https?://|src=\"?https?://" "$1"' _ "$tmp/atlas/atlas.html"
+expect atlas-head-only ok '\(10 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-no-ripples-says-so ok 'ripples not run, so no check reached a verdict' -- cat "$tmp/atlas/head.html"
 expect atlas-head-only-hides-disk-run ok - -- bash -c '! grep -q "run-q-batch" "$1"' _ "$tmp/atlas/head.html"
 expect atlas-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$tmp/atlas/casts-v4-training" "$atlas_before"

@@ -104,7 +104,7 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 | `guard version` | anywhere | this harness's release and schema; inside a project, which side is behind |
 | `guard archive <repo>` | your machine | tag every remote branch |
 | `guard doctor [repo]` | your machine, the agent's shell, the cluster | read-only checklist of the Quickstart: pass, FAIL, or cannot check from here, with a remedy for each; exit 1 when an item fails |
-| `guard atlas [repo] [--out f.html \| --serve PORT\|SOCKET] [--runs GLOB] [--title NAME] [--head-only]` | anywhere with the repo | read-only chart: hosts and fences, budget, ripples matrix, card map, per-run lifeline and receipts. Reads HEAD plus uncommitted run files; `--serve` re-surveys on reload at most every `--every` seconds; give it a socket path (contains `/`) instead of a port on a shared login node, since the socket is 0600 and `ssh -L 8765:/path/to/sock host` forwards it |
+| `guard atlas [repo] [--out f.html \| --serve PORT\|SOCKET] [--runs GLOB] [--title NAME] [--head-only]` | anywhere with the repo | read-only chart: hosts and fences, budget, ripples matrix, card map, per-run lifeline and receipts. Reads HEAD plus uncommitted run files; `--json` writes the data the page is drawn from ([docs/atlas-json.md](docs/atlas-json.md)); `--serve` re-surveys on reload at most every `--every` seconds; give it a socket path (contains `/`) instead of a port on a shared login node, since the socket is 0600 and `ssh -L 8765:/path/to/sock host` forwards it |
 | `guard/run preflight <run_dir> <job.sh> [sbatch options]` | cluster | submit or refuse |
 | `guard/run ripples <run_dir>` | cluster | warning signs |
 | `guard/run manifest <run_dir> "$0" "$@"` | inside a job | provenance record |
