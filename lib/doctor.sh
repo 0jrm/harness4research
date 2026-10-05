@@ -44,8 +44,9 @@ check_skills() {
 }
 
 check_version() {
-  local item
-  item="guard schema $p_schema (${p_release:+release $p_release}${p_release:-installed before release stamps}) against harness schema $h_schema ($(harness_release))"
+  local stamp="installed before release stamps" item
+  [ -z "$p_release" ] || stamp="release $p_release"
+  item="guard schema $p_schema ($stamp) against harness schema $h_schema ($(harness_release))"
   case $(skew) in
     current) result pass "$item: current" ;;
     project-older) result fail "$item: project older" "Propose the update with guard init $repo --update: ${step}updating-a-guarded-project" ;;
@@ -146,7 +147,7 @@ check_account() {
     "Run guard doctor on a cluster login node: ${enforce}6-cap-the-cluster-account"; return; fi
   if ! rows=$(sacctmgr -nP show assoc where account="$account" format=User,GrpTRESMins 2>&1); then
     result cannot "whether Slurm caps account $account: $(why "$rows")" "Ask your cluster admins how to read the cap: ${enforce}6-cap-the-cluster-account"; return; fi
-  cap=$(awk -F'|' '$2 ~ /(cpu|billing)=/ {print $2; exit}' <<<"$rows")
+  cap=$(awk -F'|' -v me="$USER" '($1 == "" || $1 == me) && $2 ~ /(cpu|billing)=/ {print $2; exit}' <<<"$rows")
   if [ -n "$cap" ]; then result pass "Slurm caps account $account at GrpTRESMins=$cap"
   elif [ -z "$rows" ]; then result fail "Slurm has no account $account" \
     "Ask your cluster admins for it with docs/cluster-subaccount-request.md: ${enforce}6-cap-the-cluster-account"

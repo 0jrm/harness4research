@@ -834,6 +834,7 @@ git -C "$D.wt" commit -q -am "chore(guard): set budget"; git -C "$D" update-ref 
 expect doctor-clean-card ok '^pass  guard/budget.card on origin/main has no placeholders$' -- doctor
 expect doctor-all-pass ok '^11 passed, 0 failed, 0 cannot check from here$' -- doctor
 expect doctor-version ok '^pass  guard schema [0-9]+ \(release .*\) against harness schema [0-9]+ .*: current$' -- doctor
+expect doctor-version-once ok - -- bash -c '! grep -E "\(release ([^ )]+)\1\)" <<<"$1"' _ "$(doctor)"
 expect doctor-workflow ok '^pass  .github/workflows/guard-fence.yml on origin/main defines guard-fence / fence$' -- doctor
 doctor > "$tmp/doctor-out"
 expect doctor-no-colour-in-pipe fail - -- grep -q $'\e' "$tmp/doctor-out"
@@ -859,6 +860,7 @@ expect doctor-no-token ok '^pass  no GitHub token in this shell' -- doctor MOCK_
 expect doctor-cap ok '^pass  Slurm caps account gom at GrpTRESMins=cpu=600000$' -- doctor
 expect doctor-user-cap ok '^pass  Slurm caps account gom at GrpTRESMins=cpu=600000$' -- doctor MOCK_SACCTMGR_ASSOC=$'|\ntester|cpu=600000'
 expect doctor-no-cap fail '^FAIL  Slurm sets no GrpTRESMins cap on account gom$' -- doctor MOCK_SACCTMGR_ASSOC=$'|\ntester|'
+expect doctor-other-user-cap fail '^FAIL  Slurm sets no GrpTRESMins cap on account gom$' -- doctor MOCK_SACCTMGR_ASSOC=$'|\nalice|cpu=100\ntester|'
 expect doctor-no-account fail '^FAIL  Slurm has no account gom$' -- doctor MOCK_SACCTMGR_ASSOC=
 expect doctor-no-sacctmgr ok '^cannot check from here  whether Slurm caps account gom: sacctmgr is not on this host$' -- doctor PATH="$(path_without sacctmgr)"
 expect doctor-skills-missing fail '^FAIL  skills in ~/.agents/skills do not link to this harness: present \(missing\)' -- doctor HOME="$tmp/home-bare"
