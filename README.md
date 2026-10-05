@@ -114,7 +114,7 @@ Then, on your laptop, forward a local port to that socket and open `http://127.0
 ssh -N -L 8765:/tmp/$USER-atlas.sock you@login-node
 ```
 
-The page re-surveys the project on reload, at most every `--every` seconds (default 300). Without `--serve`, `guard atlas` writes `atlas.html` once. These flags narrow or change what it reads:
+The page re-surveys the project on reload, at most every `--every` seconds (default 300). Without `--serve`, `guard atlas` writes the page once, to `--out` or else `$TMPDIR/atlas-<project>.html`, never into the project. These flags narrow or change what it reads:
 
 - `--runs GLOB` shows only runs whose id matches the glob, and you can repeat it: `--runs 'emu-*' --runs 'explore-emu-*'`.
 - `--title NAME` sets the page title, which defaults to the project name.

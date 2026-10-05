@@ -14,7 +14,7 @@ Ripples come from guard/run on the protected branch, as guard ripples runs it, s
 node use a socket: it is created 0600, so only you can reach it, and ssh -L 8765:/path/to/sock host
 forwards it. Python 3 standard library only.
 """
-import argparse, datetime as dt, fnmatch, glob, json, os, re, signal, socket, socketserver, stat, subprocess, sys, threading, time
+import argparse, datetime as dt, fnmatch, glob, json, os, re, signal, socket, socketserver, stat, subprocess, sys, tempfile, threading, time
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from atlas_render import render
@@ -570,7 +570,7 @@ def main():
     ap = argparse.ArgumentParser(prog="guard atlas", description=__doc__.split("\n\n")[1])
     ap.add_argument("repo", nargs="?", default=".")
     where = ap.add_mutually_exclusive_group()
-    where.add_argument("--out", default=None, help="HTML path, default atlas.html in the current directory")
+    where.add_argument("--out", default=None, help="HTML path, default atlas-<project>.html in the temp directory, never in the project")
     where.add_argument("--serve", metavar="PORT|SOCKET", help="serve the page live instead of writing it: on 127.0.0.1:PORT, or on a unix socket "
                        "at SOCKET (a value containing /), created 0600 so only you can reach it")
     ap.add_argument("--every", type=int, default=300, metavar="SECONDS", help="with --serve, re-survey at most this often (default 300)")
@@ -615,7 +615,7 @@ def main():
                     pass
         return
     data = survey()
-    out = a.out or os.path.join(os.getcwd(), "atlas.html")
+    out = a.out or os.path.join(tempfile.gettempdir(), f"atlas-{os.path.basename(top)}.html")
     with open(out, "w") as f:
         f.write(render(data))
     if a.json:
