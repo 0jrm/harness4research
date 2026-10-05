@@ -1064,6 +1064,9 @@ ids = {"emu-b00-053", "emu-b00-053-phys2", "emu-b00-054", "emu-b00-054b", "emu-b
 print("".join(f"{i}<{p} " for i in sorted(ids) for p in [atlas.name_parent(i, ids - {i})] if p))' "$here/lib"
 expect atlas-stray-incident ok '^V ~ explore-07 ~ incident.md is a write-up not where the guard looks; move it to incidents/' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-stray-incident-keeps-ripple ok '^N ~ explore-07 ~ ripple on job-states, so stop spending$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-release-stamp ok '<dt>Guard</dt><dd>schema [0-9]+, release ' -- cat "$tmp/atlas/atlas.html"
+expect atlas-no-release-stamp ok "<dt>Guard</dt><dd>schema 1, installed before release stamps; run guard init $tmp/atlas/casts-v4-training --update</dd>" -- python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import atlas
+d = json.load(open(sys.argv[2])); d["version"] = {"installer": "b017edd"}; print(atlas.render(d))' "$here/lib" "$tmp/atlas/atlas.json"
 expect atlas-no-network ok - -- bash -c '! grep -Eiq "<link[^>]*https?://|src=\"?https?://" "$1"' _ "$tmp/atlas/atlas.html"
 expect atlas-head-only ok '\(12 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-no-ripples-says-so ok 'ripples not run, so no check reached a verdict' -- cat "$tmp/atlas/head.html"
