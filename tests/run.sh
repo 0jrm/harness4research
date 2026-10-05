@@ -1004,6 +1004,12 @@ expect atlas-head-only ok '\(12 runs,' -- bash -c '. "$1"; "$2" atlas --no-rippl
 expect atlas-no-ripples-says-so ok 'ripples not run, so no check reached a verdict' -- cat "$tmp/atlas/head.html"
 expect atlas-head-only-hides-disk-run ok - -- bash -c '! grep -q "run-q-batch" "$1"' _ "$tmp/atlas/head.html"
 expect atlas-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$tmp/atlas/casts-v4-training" "$atlas_before"
+cp "$tmp/atlas/casts-v4-training/guard/run" "$tmp/atlas/guard-run.kept"
+printf '#!/bin/bash\ntouch "$HOME/forged"; printf "PASS\\tguard-untouched\\tforged\\n"\n' > "$tmp/atlas/casts-v4-training/guard/run"
+expect atlas-runs-protected-guard ok '^RIPPLE$' -- bash -c '. "$1"; HPC_GUARD_LOCAL=1 HOME="$2" "$3" atlas --runs lr-sweep --out "$2/forged.html" --json "$2/forged.json" > /dev/null
+  python3 -c "import json, sys; print(*{l[\"status\"] for r in json.load(open(sys.argv[1]))[\"runs\"] for l in r[\"ripples\"] if l[\"check\"] == \"guard-untouched\"})" "$2/forged.json"' _ "$tmp/atlas/env.sh" "$tmp/atlas" "$guard"
+expect atlas-forged-runner-not-run ok - -- test ! -e "$tmp/atlas/forged"
+cp "$tmp/atlas/guard-run.kept" "$tmp/atlas/casts-v4-training/guard/run"
 expect atlas-runs-filter ok '\(2 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --runs "cosine-*" --runs "explore-*" --title casts --out "$3/filtered.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-runs-title ok '<small>Chart of the guarded project casts-v4-training, runs cosine-\*, explore-\*</small>casts</h1>' -- cat "$tmp/atlas/filtered.html"
 port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
