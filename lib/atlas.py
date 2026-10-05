@@ -828,7 +828,7 @@ def render(data):
 <dl><dt>Datum</dt><dd>{E(data["base"])} at {E(data["base_sha"][:7])}</dd>
 <dt>Runs read at</dt><dd>{E(read_at)}</dd>{behind}
 <dt>Code</dt><dd>{E(code)}</dd>
-<dt>Guard</dt><dd>schema {E(v.get("schema", "1"))}, release {E(v.get("release", "unknown"))}</dd>
+<dt>Guard</dt><dd>schema {E(v.get("schema", "1"))}, {f'release {E(v["release"])}' if v.get("release") else f'installed before release stamps; run guard init {E(data["top"])} --update'}</dd>
 <dt>Soundings</dt><dd>{"core-hours, from sacct via ripples" if data["rippled"] else "none: ripples were not run"}</dd>
 <dt>Surveyed</dt><dd>{E(data["generated"])}</dd></dl>
 <p class="readonly">Read-only. {len(runs)} runs, {f"{open_runs} with a ripple, {unchecked} with no domain check that reached a verdict" if data["rippled"] else "ripples not run, so no check reached a verdict"}. Every action this page suggests is a command or a pull request.</p>
