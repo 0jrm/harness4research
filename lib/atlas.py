@@ -59,9 +59,9 @@ def stamp(epoch):
     return dt.datetime.fromtimestamp(float(epoch), dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def commits(top, path, ref="HEAD"):
-    out = git(top, "log", "--reverse", "--format=%H	%ct	%s", ref, "--", path) or ""
+    out = git(top, "log", "--reverse", "--format=%H\t%ct\t%s", ref, "--", path) or ""
     return [{"sha": sha, "time": stamp(ct), "subject": subject}
-            for sha, ct, subject in (l.split("	", 2) for l in out.splitlines() if l)]
+            for sha, ct, subject in (l.split("\t", 2) for l in out.splitlines() if l)]
 
 def section(md, title):
     m = re.search(rf"^## {re.escape(title)}[^\n]*\n(.*?)(?=^## |\Z)", md or "", re.M | re.S)
@@ -917,11 +917,19 @@ def serve(where, every, survey):
 
     return unix_server(where, Page) if isinstance(where, str) else ThreadingHTTPServer(("127.0.0.1", where), Page)
 
+def private(path):  # the default page sits in a shared temp dir, so only its owner may read it
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        os.fchmod(fd, 0o600)
+    except OSError as e:
+        sys.exit(f"guard atlas: cannot write {path}: {e.strerror}; pass --out")
+    return os.fdopen(fd, "w")
+
 def main():
     ap = argparse.ArgumentParser(prog="guard atlas", description=__doc__.split("\n\n")[1])
     ap.add_argument("repo", nargs="?", default=".")
     where = ap.add_mutually_exclusive_group()
-    where.add_argument("--out", default=None, help="HTML path, default atlas-<project>.html in the temp directory, never in the project")
+    where.add_argument("--out", default=None, help="HTML path, default atlas-<project>-<uid>.html in the temp directory, readable only by you")
     where.add_argument("--serve", metavar="PORT|SOCKET", help="serve the page live instead of writing it: on 127.0.0.1:PORT, or on a unix socket "
                        "at SOCKET (a value containing /), created 0600 so only you can reach it")
     ap.add_argument("--every", type=int, default=300, metavar="SECONDS", help="with --serve, re-survey at most this often (default 300)")
@@ -966,8 +974,8 @@ def main():
                     pass
         return
     data = survey()
-    out = a.out or os.path.join(tempfile.gettempdir(), f"atlas-{os.path.basename(top)}.html")
-    with open(out, "w") as f:
+    out = a.out or os.path.join(tempfile.gettempdir(), f"atlas-{os.path.basename(top)}-{os.getuid()}.html")
+    with open(out, "w") if a.out else private(out) as f:
         f.write(render(data))
     if a.json:
         with open(a.json, "w") as f:
