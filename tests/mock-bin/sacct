@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
+# Mock: MOCK_SACCT_EXIT makes every query fail with that code; MOCK_SACCT_CPUSECONDS set but empty lists no jobs.
+[ -z "${MOCK_SACCT_EXIT:-}" ] || { echo "sacct: error: Problem talking to the database: Connection refused" >&2; exit "$MOCK_SACCT_EXIT"; }
 if [[ "$*" == *JobID,JobName* ]]; then cat "${MOCK_SACCT_ROWS:-/dev/null}"
 elif [[ "$*" == *JobName,CPUTimeRAW* ]]; then cat "${MOCK_SACCT_RUNROWS:-/dev/null}"
 elif [[ "$*" == *JobName,State* ]]; then cat "${MOCK_SACCT_STATE:-/dev/null}"
-else printf '%s\n' ${MOCK_SACCT_CPUSECONDS:-36000 72000}; fi
+else for s in ${MOCK_SACCT_CPUSECONDS-36000 72000}; do echo "$s"; done; fi

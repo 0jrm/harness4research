@@ -203,6 +203,18 @@ expect ripples-no-sacct ok 'UNCHECKED.job-states.*UNCHECKED.walltime-headroom.*U
 expect ripples-unchecked-remedy ok '^UNCHECKED	budget	sacct not found on PATH on this host; run ripples on the cluster login node to check$' -- env PATH="$(path_without sacct)" guard/run ripples "$R"
 expect ripples-domain-remedy ok '^UNCHECKED	domain-checks	no executable runs/2026-09-29-demo/checks/\*; add a script there that exits non-zero when a result looks wrong$' -- guard/run ripples "$R"
 expect ripples-tty-unchecked ok '^UNCHECKED  budget {21}sacct not found on PATH on this host; run ripples' -- on_tty env NO_COLOR=1 PATH="$(path_without sacct)" guard/run ripples "$R"
+# Off the cluster sacct can exist yet list nothing and exit 0, and the quota path can be missing: no verdict, so no PASS.
+R4=runs/2026-10-05-no-jobs; mkdir -p "$R4"; cp runs/_template/question.card "$R4/question.card"; git add -A; git commit -q -m "run: a run with no jobs"
+nopass='^PASS	(job-states|walltime-headroom|retries|handled-failures|budget|quota)	'
+expect ripples-no-jobs ok '^UNCHECKED	job-states	sacct lists no job named 2026-10-05-no-jobs on account gom since 2026-09-01 from this host, so there is nothing to judge; if the run has submitted jobs, run ripples on the cluster login node$' -- guard/run ripples "$R4"
+expect ripples-no-jobs-no-pass ok - -- bash -c 'out=$(guard/run ripples "$1"); [ "$(grep -cE "^UNCHECKED	(job-states|walltime-headroom|retries|handled-failures)	sacct lists no job named" <<<"$out")" = 4 ]' _ "$R4"
+expect ripples-no-account-jobs ok '^UNCHECKED	budget	sacct lists no job on account gom since 2026-09-01 from this host, so spend is unknown here; run ripples on the cluster login node to check$' -- env MOCK_SACCT_CPUSECONDS= guard/run ripples "$R4"
+expect ripples-sacct-fails ok 'UNCHECKED	job-states	sacct failed on this host; run ripples on the cluster login node to check .*UNCHECKED	budget	sacct failed on this host' -- \
+  env MOCK_SACCT_EXIT=1 bash -c 'guard/run ripples "$1" 2>/dev/null | tr "\n" " "' _ "$R"
+sed -i "s|^quota_pct_cmd: .*|quota_pct_cmd: df --output=pcent $tmp/no-such-mount \| tail -1 \| tr -dc 0-9|" guard/budget.card; git commit -q -am "quota on a path this host lacks"
+expect ripples-quota-path-missing ok "^UNCHECKED	quota	quota_pct_cmd printed no number on this host \(df: .*No such file or directory\); run ripples where its path exists, or a human fixes quota_pct_cmd in guard/budget.card$" -- env HPC_GUARD_REF=HEAD guard/run ripples "$R"
+expect ripples-off-cluster-no-pass ok - -- bash -c 'out=$(HPC_GUARD_REF=HEAD MOCK_SACCT_CPUSECONDS= guard/run ripples "$1") && ! grep -E "$2" <<<"$out" && [ "$(grep -c ^UNCHECKED <<<"$out")" -ge 6 ]' _ "$R4" "$nopass"
+git reset -q --hard HEAD~2
 pre=$(git rev-parse HEAD); mkdir -p "$R/incidents"
 printf '100|2026-09-29-demo|TIMEOUT|14400|240\n101|2026-09-29-demo|COMPLETED|100|240\n102|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
 printf '# Incident 0\njob: 10\n' > "$R/incidents/0.md"; git add -A; git commit -q -m "run: incident 0"
@@ -1078,6 +1090,13 @@ expect atlas-release-stamp ok '<dt>Guard version</dt><dd>schema [0-9]+, release 
 expect atlas-no-release-stamp ok "<dt>Guard version</dt><dd>schema 1, installed before release stamps; run <code>guard init $tmp/atlas/casts-v4-training --update</code></dd>" -- python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import atlas
 d = json.load(open(sys.argv[2])); d["version"] = {"installer": "b017edd"}; print(atlas.render(d))' "$here/lib" "$tmp/atlas/atlas.json"
 expect atlas-verdict-stop ok '<p class="verdict-line">Stop spending on 4 runs: each has a ripple.</p>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-no-jobs-unchecked ok '^UNCHECKED$' -- python3 -c 'import json, sys
+r = next(r for r in json.load(open(sys.argv[1]))["runs"] if r["id"] == "hand-run")
+print(*{l["status"] for l in r["ripples"] if l["check"] in ("job-states", "walltime-headroom", "retries", "handled-failures")})' "$tmp/atlas/atlas.json"
+expect atlas-no-jobs-prose ok '</svg>jobs: unchecked</span> <span class="detail">sacct lists no job named hand-run on account gom since 2026-09-01' -- cat "$tmp/atlas/atlas.html"
+# The skynet reproduction: sacct on PATH that lists nothing. No run may show a job or budget pass.
+expect atlas-off-cluster ok 'Spend source</dt><dd>none: the budget ripple could not read sacct on this host</dd>' -- bash -c '. "$1"; MOCK_SACCT_ROWS=/dev/null MOCK_SACCT_CPUSECONDS= "$2" atlas --out "$3/off.html" >/dev/null && cat "$3/off.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-off-cluster-no-pass ok - -- bash -c '! grep -oE "aria-label=\"(job-states|walltime-headroom|retries|handled-failures|budget): pass\"" "$1"' _ "$tmp/atlas/off.html"
 expect atlas-needs-you-incident ok 'Write up job 4840 at <code class="cmd">runs/explore-07/incidents/YYYY-MM-DD-4840.md</code>, the only place the guard counts incidents' -- python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import atlas
 d = json.load(open(sys.argv[2]))
 for r in d["runs"]: r["stray_incidents"] = []

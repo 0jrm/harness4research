@@ -45,23 +45,31 @@ if [ -n "$launch" ] && launched --here; then
   sacct() { [ -z "$(type -P sacct)" ] || command sacct "$@"; [[ $* != *JobName* ]] || launched --sacct; }
 fi
 nosacct="sacct not found on PATH on this host; run ripples on the cluster login node to check"
-if command -v sacct >/dev/null; then
-  rows=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobID,JobName,State,ElapsedRaw,TimelimitRaw \
-    | awk -F'|' -v r="$run_id" '$2==r')
-  # A job is handled once a committed $run_dir/incidents/*.md has the line `job: <id>`.
-  declare -A incident=() acked=()
-  while IFS=: read -r _ path line; do id=${line#job:}; incident[${id// /}]=incidents/$(basename "$path")
-  done < <(git grep -E '^job: *[0-9A-Za-z][0-9A-Za-z_.-]* *$' HEAD -- "$run_dir/incidents/" 2>/dev/null)
-  # A committed execution.tsv restart or resume row citing a job handles it the same way.
-  [ -z "$launch" ] || while read -r id ref; do [ -n "${incident[$id]+x}" ] || incident[$id]=$ref; done < <(launched --handled "$run_dir")
-  sort_out() {  # sort_out <check> "<id>:<detail> ..." <next step>: HANDLED for entries with an incident, RIPPLE for the rest
-    local open="" done="" e id
-    for e in $2; do id=${e%%:*}
-      if [ -n "${incident[$id]+x}" ]; then done+="$e->${incident[$id]} "; acked[$id]=1; else open+="$e "; fi
-    done
-    [ -n "$done" ] && say HANDLED "$1" "$done"
-    if [ -n "$open" ]; then say RIPPLE "$1" "${open% }${3:+ ($3)}"; elif [ -z "$done" ]; then say PASS "$1" ""; fi
-  }
+# A job is handled once a committed $run_dir/incidents/*.md has the line `job: <id>`.
+declare -A incident=() acked=()
+while IFS=: read -r _ path line; do id=${line#job:}; incident[${id// /}]=incidents/$(basename "$path")
+done < <(git grep -E '^job: *[0-9A-Za-z][0-9A-Za-z_.-]* *$' HEAD -- "$run_dir/incidents/" 2>/dev/null)
+# A committed execution.tsv restart or resume row citing a job handles it the same way.
+[ -z "$launch" ] || while read -r id ref; do [ -n "${incident[$id]+x}" ] || incident[$id]=$ref; done < <(launched --handled "$run_dir")
+sort_out() {  # sort_out <check> "<id>:<detail> ..." <next step>: HANDLED for entries with an incident, RIPPLE for the rest
+  local open="" done="" e id
+  for e in $2; do id=${e%%:*}
+    if [ -n "${incident[$id]+x}" ]; then done+="$e->${incident[$id]} "; acked[$id]=1; else open+="$e "; fi
+  done
+  [ -n "$done" ] && say HANDLED "$1" "$done"
+  if [ -n "$open" ]; then say RIPPLE "$1" "${open% }${3:+ ($3)}"; elif [ -z "$done" ]; then say PASS "$1" ""; fi
+}
+
+# A host whose sacct answers for another cluster, or for none, lists no rows and exits 0, so no rows is no verdict.
+blind=""
+if ! command -v sacct >/dev/null; then blind=$nosacct
+elif ! rows=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobID,JobName,State,ElapsedRaw,TimelimitRaw); then
+  blind="sacct failed on this host; run ripples on the cluster login node to check"
+else
+  rows=$(awk -F'|' -v r="$run_id" '$2==r' <<<"$rows")
+  [ -n "$rows" ] || blind="sacct lists no job named $run_id on account $acct since $start from this host, so there is nothing to judge; if the run has submitted jobs, run ripples on the cluster login node"
+fi
+if [ -z "$blind" ]; then
   incident_step="diagnose, then commit $run_dir/incidents/<n>.md with a job: <id> line for each"
   sort_out job-states "$(awk -F'|' '$3 ~ /TIMEOUT|OUT_OF_ME|NODE_FAIL|FAILED|PREEMPTED/ {printf "%s:%s ", $1, $3}' <<<"$rows")" \
     "$incident_step; a resource stop of a launch continues with an execution.tsv restart or resume row instead"
@@ -75,20 +83,27 @@ if command -v sacct >/dev/null; then
   cap=$(get max_handled_failures); [[ $cap =~ ^[0-9]+$ ]] || cap=2
   if [ ${#acked[@]} -gt "$cap" ]; then say RIPPLE handled-failures "${#acked[@]} handled, over max_handled_failures=$cap; the next call is the human's"
   else say PASS handled-failures "${#acked[@]} of $cap"; fi
+else
+  for k in job-states walltime-headroom retries handled-failures; do say UNCHECKED "$k" "$blind"; done
+fi
 
-  if [ -z "$(type -P sacct)" ]; then say UNCHECKED budget "$nosacct"; else
-  spent=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW | awk '{s+=$1} END{printf "%d", s/3600}')
+if [ -z "$(type -P sacct)" ]; then say UNCHECKED budget "$nosacct"
+elif ! cpu=$(command sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW); then
+  say UNCHECKED budget "sacct failed on this host; run ripples on the cluster login node to check"
+elif [ -z "$cpu" ]; then
+  say UNCHECKED budget "sacct lists no job on account $acct since $start from this host, so spend is unknown here; run ripples on the cluster login node to check"
+else
+  spent=$(awk '{s+=$1} END{printf "%d", s/3600}' <<<"$cpu")
   if [[ $max_ch =~ ^[0-9]+$ ]] && [ $(( spent * 100 )) -gt $(( max_ch * 80 )) ]; then say RIPPLE budget "$spent of $max_ch core-h, over 80%; a human decides whether to raise max_core_hours"
   else say PASS budget "$spent of ${max_ch:-?} core-h"; fi
-  fi
-else
-  for k in job-states walltime-headroom retries handled-failures budget; do say UNCHECKED "$k" "$nosacct"; done
 fi
 
 qcmd=$(get quota_pct_cmd)
 if [ -n "$qcmd" ] && [[ $qcmd != *"<"* ]]; then
   pct=$(bash -c "$qcmd" 2>/dev/null | tr -dc '0-9' | head -c3)
-  if [ -z "$pct" ]; then say RIPPLE quota "quota_pct_cmd printed no number; a human fixes quota_pct_cmd in guard/budget.card"
+  if [ -z "$pct" ]; then  # most often its path is not mounted on this host, as with a cluster file system seen from a workstation
+    why=$(bash -c "$qcmd" 2>&1 >/dev/null | head -n1)
+    say UNCHECKED quota "quota_pct_cmd printed no number on this host${why:+ ($why)}; run ripples where its path exists, or a human fixes quota_pct_cmd in guard/budget.card"
   elif [ "$pct" -gt 80 ]; then say RIPPLE quota "${pct}%, over 80%; find what grew, since deleting or moving shared files is the human's call"; else say PASS quota "${pct}%"; fi
 else say UNCHECKED quota "a human sets quota_pct_cmd in guard/budget.card"; fi
 
