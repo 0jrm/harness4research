@@ -123,13 +123,20 @@ git commit -q -am "placeholder reserve"
 expect preflight-reserve-placeholder fail "^PREFLIGHT FAIL: budget card 'verification_reserve_core_hours' is still a placeholder" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 sed -i 's/^verification_reserve_core_hours: .*/verification_reserve_core_hours: 1500/; s/^cores_per_node: .*/cores_per_node: 128 cores/' guard/budget.card
 git commit -q -am "unit in cores_per_node"
-expect preflight-budget-not-integer fail "^PREFLIGHT FAIL: budget card 'cores_per_node' must be a whole number: 128 cores$" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+expect preflight-budget-not-integer fail "^PREFLIGHT FAIL: budget card 'cores_per_node' must be a whole number: 128 cores; a human fixes it in guard/budget.card on the protected branch$" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~2
+sed -i 's/^stop_date: .*/stop_date: 2000-01-01/' guard/budget.card; git commit -q -am "past stop date"
+expect preflight-past-stop fail '^PREFLIGHT FAIL: past stop_date 2000-01-01; a human extends stop_date in guard/budget.card on the protected branch$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+git reset -q --hard HEAD~1
 sed -i 's/max_core_hours: 10000/max_core_hours: 99999/' guard/budget.card; git commit -q -am "raise budget"
 expect preflight-card-edit fail 'guard/ differs' -- guard/run preflight "$R" job.sh
 printf '#!/usr/bin/env bash\necho SBATCH bypassed\n' > guard/bin/preflight.sh; git commit -q -am "neuter preflight"
 expect run-uses-protected-copy fail 'guard/ differs' -- guard/run preflight "$R" job.sh
-git reset -q --hard HEAD~2
+echo stray > guard/untracked
+expect preflight-guard-remedy fail '^PREFLIGHT FAIL: guard/ differs from origin/main: guard/bin/preflight.sh guard/budget.card \?\? guard/untracked; restore it with git restore --source=origin/main --staged --worktree -- guard, commit, and remove any untracked file under guard/$' -- guard/run preflight "$R" job.sh
+git restore --source=origin/main --staged --worktree -- guard; git commit -q -m "restore guard"; rm guard/untracked
+expect preflight-guard-remedy-works ok 'SBATCH ' -- guard/run preflight "$R" job.sh
+git reset -q --hard HEAD~3
 echo "metric: changed" >> "$R/question.card"; git commit -q -am "edit card"
 expect preflight-card-frozen fail 'edited after its first commit' -- guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
@@ -154,7 +161,7 @@ mkdir -p "$R/incidents"; printf '# Incident 0\njob: 100\n' > "$R/incidents/0.md"
 expect preflight-handled-ripple-passes ok 'SBATCH .*--job-name=2026-09-29-demo' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
 printf '#!/usr/bin/env bash\nexit 3\n' > guard/bin/ripples.sh; git commit -q -am "ripples errors"
-expect preflight-ripples-error-fails-closed fail '^PREFLIGHT FAIL: ripples could not run \(exit 3\)$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+expect preflight-ripples-error-fails-closed fail '^PREFLIGHT FAIL: ripples could not run \(exit 3\); run guard/run ripples runs/2026-09-29-demo to see why$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
 
 echo "== ripples"
@@ -507,7 +514,7 @@ same_refusal launch-gates-match-frozen "$R2" job.sh -- "$R2" --time=1 --gpus=non
 git reset -q --hard HEAD~1
 git switch -q -c launch-past; sed -i 's/^stop_date: .*/stop_date: 2000-01-01/' guard/budget.card; git commit -q -am "past"
 export HPC_GUARD_REF=HEAD
-expect launch-past-stop fail 'past stop_date 2000-01-01' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
+expect launch-past-stop fail '^LAUNCH FAIL: past stop_date 2000-01-01; a human extends stop_date in guard/budget.card on the protected branch$' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
 same_refusal launch-gates-match-stop-date "$R2" job.sh -- "$R2" --time=1 --gpus=none --mem=0.01 -- true
 git switch -q -c launch-floor launch/agent; sed -i 's/^host_min_available_gb: .*/host_min_available_gb: 999999/' guard/budget.card; git commit -q -am "floor"
 expect launch-host-memory fail 'MemAvailable .* leaves less than --mem=0.01G plus host_min_available_gb=999999' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
