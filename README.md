@@ -96,9 +96,9 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 
 ## Atlas
 
-`guard atlas` draws one read-only page of a guarded project: where compute ran and what fenced it, spend against the budget, every run's ripples, the question cards as a map, and for each run its card, lifeline, and evidence receipts. The page never shows a green for something it did not check.
+`guard atlas` draws one read-only page of a guarded project. It opens with whether anything is wrong, how much budget is left, and what needs you, each with a command to copy. Below that come where compute ran and what fenced it, every run's safety checks, the question cards in the order they froze, and for each run its card, timeline, and evidence receipts. The page never shows a pass for something it did not check, and it reads with JavaScript off and on paper.
 
-![The atlas of the test fixture: hosts and their fences, the budget bar, and the ripples matrix](docs/img/atlas.png)
+![The atlas of the test fixture: the verdict, the counts, the budget bar, and what needs you](docs/img/atlas.png)
 
 To serve the page live from a shared login node, give `--serve` a socket path. The socket is created 0600, so only you can reach it:
 
