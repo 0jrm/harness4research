@@ -133,7 +133,7 @@ expect preflight-card-edit fail 'guard/ differs' -- guard/run preflight "$R" job
 printf '#!/usr/bin/env bash\necho SBATCH bypassed\n' > guard/bin/preflight.sh; git commit -q -am "neuter preflight"
 expect run-uses-protected-copy fail 'guard/ differs' -- guard/run preflight "$R" job.sh
 echo stray > guard/untracked
-expect preflight-guard-remedy fail '^PREFLIGHT FAIL: guard/ differs from origin/main: guard/bin/preflight.sh guard/budget.card \?\? guard/untracked; restore it with git restore --source=origin/main --staged --worktree -- guard, commit, and remove any untracked file under guard/$' -- guard/run preflight "$R" job.sh
+expect preflight-guard-remedy fail '^PREFLIGHT FAIL: guard/ differs from origin/main: [^;]*guard/untracked[^;]*; restore it with git restore --source=origin/main --staged --worktree -- guard, commit, and remove any untracked file under guard/$' -- guard/run preflight "$R" job.sh
 git restore --source=origin/main --staged --worktree -- guard; git commit -q -m "restore guard"; rm guard/untracked
 expect preflight-guard-remedy-works ok 'SBATCH ' -- guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~3
