@@ -163,6 +163,6 @@ Next steps. Only you can do these.
        git -C $wt push -u origin $branch
        gh pr create -R "\$(git -C $wt remote get-url origin)" --head $branch --title "feat(guard): add agent guard" --body-file $wt/guard/README.md
   4. After merging, protect the default branch, give agents weaker credentials, and cap the
-     cluster account. The README's Quickstart, steps 4 to 6, gives each click and command:
-     https://github.com/0jrm/harness4research#quickstart
+     cluster account. guard doctor $repo checks each one, and this page gives each click and command:
+     https://github.com/0jrm/harness4research/blob/main/docs/enforceable.md
 NEXT

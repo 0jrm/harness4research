@@ -2,7 +2,19 @@
 
 Guardrails for AI agents that run computational science on shared clusters. One command adds them to a research repository, and they apply to Claude Code, Cursor, Codex, and any other agent, because they live in git, in GitHub's merge check, and in the cluster scheduler instead of in any one tool.
 
+An agent works inside a guarded repository the way it always does. Before it submits a job, `guard/run preflight` checks the job against a budget card and a committed question card. While jobs run, `guard/run ripples` reports warning signs, and any ripple stops new submissions. On GitHub, a fence check blocks a merge that edits the guard. [What a ripple is](#what-a-ripple-is) explains the warning signs.
+
 ## Quickstart
+
+```shell
+git clone --recurse-submodules https://github.com/0jrm/harness4research ~/harness4research && ~/harness4research/install.sh
+guard survey ~/path/to/your-repo        # read-only report of stale branches, docs, and duplicates
+guard init ~/path/to/your-repo          # proposes the guard on a new branch and worktree
+```
+
+`init` prints what to fill in and how to open the pull request. Steps 1 to 3 below give the details. After you merge, [make the guard enforceable](docs/enforceable.md). That page starts with `guard doctor`, which checks the setup and links the fix for each open item.
+
+## Set up a repository, step by step
 
 ### 1. Install
 
@@ -32,32 +44,18 @@ In the worktree:
 3. Add to `guard/watch.list` the files agents must not edit: verifiers, contract tests, thresholds. Use one git pathspec per line. List specific files, not all of `tests/`, or agents cannot add tests.
 4. Commit, then push and open the pull request with the two commands `init` printed. Merge it yourself.
 
-### 4. Protect the default branch
-
-The `guard-fence / fence` check exists only after the merge in step 3, and GitHub offers it in the ruleset form only after it has run once. Open any small pull request first, then:
-
-1. On GitHub, open the repository and go to **Settings → Rules → Rulesets → New ruleset → New branch ruleset**.
-2. Set **Enforcement status** to **Active**. Under **Target branches**, choose **Add target → Include default branch**.
-3. Select **Require a pull request before merging**.
-4. Select **Require status checks to pass**, choose **Add checks**, type `fence`, and pick `guard-fence / fence`.
-5. Under **Bypass list**, add **Repository admin** and nobody else. Save.
-
-### 5. Give agents weaker credentials
-
-If an agent runs with your `gh` login or SSH key, it can use your bypass. Give it its own token:
-
-1. On GitHub, go to **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.
-2. Under **Repository access**, choose **Only select repositories** and pick the guarded repositories.
-3. Under **Permissions**, set **Contents** and **Pull requests** to **Read and write**. Leave **Administration** at **No access**.
-4. Run agents with that token as `GH_TOKEN`, an HTTPS remote, and no `SSH_AUTH_SOCK`.
-
-To check it, open a pull request that edits `guard/budget.card`, so the fence fails, and run `GH_TOKEN=<agent token> gh pr merge <number> --admin --merge`. GitHub must refuse. Close the pull request afterwards.
-
-### 6. Cap the cluster account
-
-Ask your cluster admins for a Slurm sub-account with a hard core-hour cap, and put it in `guard/budget.card` as `account`. Preflight forces every job onto it, and the scheduler enforces the cap even for jobs submitted without preflight. Email template: [docs/cluster-subaccount-request.md](docs/cluster-subaccount-request.md). [docs/enforcement.md](docs/enforcement.md) explains why steps 4 to 6 matter.
+Next, [make the guard enforceable](docs/enforceable.md): protect the default branch, give agents weaker credentials, and cap the cluster account.
 
 From then on, agents submit jobs with `guard/run preflight`, check on them with `guard/run ripples`, and start each experiment with a committed question card. The skill tells them how.
+
+## What a ripple is
+
+A ripple is a warning sign about one run. `guard/run ripples <run_dir>` prints one line per check, each with a status:
+
+- `RIPPLE`: something is wrong, such as a failed job, a question card edited after it froze, a guard file changed on the branch, or spend above 80% of the budget. The command exits 1, and preflight refuses new submissions until the cause is handled.
+- `HANDLED`: a failure that an incident write-up in `runs/<id>/incidents/`, or a `restart` or `resume` row in `runs/<id>/execution.tsv`, explains.
+- `UNCHECKED`: the check could not see its input from this host, for example `sacct` off the cluster. An unchecked line is not a pass.
+- `PASS`: the check saw its input and found nothing.
 
 ## What `init` adds to a repository
 
@@ -105,6 +103,7 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 | `guard init <repo> --update [--force]` | your machine | propose the newer guard as a three-way merge that keeps your edits |
 | `guard version` | anywhere | this harness's release and schema; inside a project, which side is behind |
 | `guard archive <repo>` | your machine | tag every remote branch |
+| `guard doctor [repo]` | your machine, the agent's shell, the cluster | read-only checklist of the Quickstart: pass, FAIL, or cannot check from here, with a remedy for each; exit 1 when an item fails |
 | `guard atlas [repo] [--out f.html \| --serve PORT\|SOCKET] [--runs GLOB] [--title NAME] [--head-only]` | anywhere with the repo | read-only chart: hosts and fences, budget, ripples matrix, card map, per-run lifeline and receipts. Reads HEAD plus uncommitted run files; `--json` writes the data the page is drawn from ([docs/atlas-json.md](docs/atlas-json.md)); `--serve` re-surveys on reload at most every `--every` seconds; give it a socket path (contains `/`) instead of a port on a shared login node, since the socket is 0600 and `ssh -L 8765:/path/to/sock host` forwards it |
 | `guard/run preflight <run_dir> <job.sh> [sbatch options]` | cluster | submit or refuse |
 | `guard/run ripples <run_dir>` | cluster | warning signs |
@@ -132,6 +131,7 @@ Pushing a change to `.github/workflows/` needs a token with the `workflow` scope
 ## Documentation
 
 - [docs/why.md](docs/why.md): the problem, alternatives, costs, and limits
+- [docs/enforceable.md](docs/enforceable.md): steps 4 to 6, protecting the branch, weaker agent credentials, and a capped account, checked by `guard doctor`
 - [docs/enforcement.md](docs/enforcement.md): the four layers and the credential gap
 - [docs/prompts.md](docs/prompts.md): prompts for the cleanup and the first run
 - [docs/live-tests/runhub.md](docs/live-tests/runhub.md) and [docs/live-tests/gom-da-workspace.md](docs/live-tests/gom-da-workspace.md): step-by-step acceptance tests
