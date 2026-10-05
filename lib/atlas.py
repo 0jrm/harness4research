@@ -55,9 +55,13 @@ def when(s):
     except (ValueError, AttributeError):
         return None
 
+def stamp(epoch):
+    return dt.datetime.fromtimestamp(float(epoch), dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 def commits(top, path, ref="HEAD"):
-    out = git(top, "log", "--reverse", "--format=%H\t%cI\t%s", ref, "--", path) or ""
-    return [dict(zip(("sha", "time", "subject"), l.split("\t", 2))) for l in out.splitlines() if l]
+    out = git(top, "log", "--reverse", "--format=%H	%ct	%s", ref, "--", path) or ""
+    return [{"sha": sha, "time": stamp(ct), "subject": subject}
+            for sha, ct, subject in (l.split("	", 2) for l in out.splitlines() if l)]
 
 def section(md, title):
     m = re.search(rf"^## {re.escape(title)}[^\n]*\n(.*?)(?=^## |\Z)", md or "", re.M | re.S)
@@ -120,7 +124,7 @@ def find_code(top, names, given):
 
 def mtime(top, path):
     try:
-        return dt.datetime.fromtimestamp(os.path.getmtime(os.path.join(top, path)), dt.timezone.utc).isoformat()
+        return stamp(os.path.getmtime(os.path.join(top, path)))
     except OSError:
         return ""
 
@@ -245,9 +249,9 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
             else:
                 drawer.append(f)
         watched = (git(top, "diff", "--name-only", f"{base}...{ref}", "--", *watch) or "").split() if watch else []
-        last = (git(top, "log", "-1", "--format=%cI\t%s", ref) or "\t").strip().split("\t", 1)
+        last = (git(top, "log", "-1", "--format=%ct\t%s", ref) or "\t").strip().split("\t", 1)
         branches.append({"name": ref, "ahead": ahead, "changed": len(changed), "drawer": drawer,
-                         "watched": watched, "time": last[0], "subject": last[-1]})
+                         "watched": watched, "time": stamp(last[0]) if last[0] else "", "subject": last[-1]})
     origin = (git(top, "remote", "get-url", "origin") or top).strip().rstrip("/")
     project = re.sub(r"\.git$", "", re.split(r"[/:]", origin)[-1])
     now = dt.datetime.now(dt.timezone.utc)
