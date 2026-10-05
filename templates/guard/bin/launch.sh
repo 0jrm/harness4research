@@ -13,7 +13,7 @@
 #   --sacct                                    this project's launches as sacct rows JobID|JobName|State|ElapsedRaw|TimelimitRaw
 #   --handled <run_dir>                        "<job_id> execution.tsv:<row>" for every committed restart or resume row
 #   --checks <run_dir>                         check lines for ripples: STATUS<TAB>check<TAB>detail,
-#                                              or ENTRIES<TAB>check<TAB><id>:<detail> ... for ripples' sort_out
+#                                              or ENTRIES<TAB>check<TAB><id>:<detail> ...<TAB>next step for ripples' sort_out
 #
 # Invariants:
 #   - Every record file is written once, by one writer, through link(2), so a reader sees it whole or not at all.
@@ -41,7 +41,7 @@ usage() {
   echo "       guard/run launch --stop <job_id> [--reason=<text>] | --list [run_dir]" >&2; exit 64
 }
 fail() { echo "LAUNCH FAIL: $*" >&2; exit 2; }
-say() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
+say() { printf '%s\t%s\t%s' "$1" "$2" "$3"; [ $# -lt 4 ] || printf '\t%s' "$4"; printf '\n'; }
 now() { date -u +%FT%TZ; }
 epoch() { printf '%(%s)T' -1; }
 iso_epoch() { date -u -d "${1:-@0}" +%s 2>/dev/null || echo 0; }
@@ -59,14 +59,14 @@ gpu_n() { local IFS=,; if [ "${1:-none}" = none ] || [ -z "${1:-}" ]; then echo 
 declare -A cardv=()
 load_card() {
   local k v
-  card=$(git show "$base:guard/budget.card" 2>/dev/null) || fail "no guard/budget.card on $base"
+  card=$(git show "$base:guard/budget.card" 2>/dev/null) || fail "no guard/budget.card on $base; merge the guard pull request, or git fetch"
   while IFS=$'\t' read -r k v; do [ -n "${cardv[$k]+x}" ] || cardv[$k]=$v; done < <(awk -F': *' 'NF>1 { v=$0; sub(/^[^:]*: */, "", v); printf "%s\t%s\n", $1, v }' <<<"$card")
 }
 get() { echo "${cardv[$1]-}"; }
 need() {
   local v; v=$(get "$1")
-  [ -n "$v" ] || fail "budget card has no '$1'"
-  [[ $v != *"<"* ]] || fail "budget card '$1' is still a placeholder: $v"
+  [ -n "$v" ] || fail "budget card has no '$1'; a human adds it to guard/budget.card on the protected branch"
+  [[ $v != *"<"* ]] || fail "budget card '$1' is still a placeholder: $v; a human fills it in guard/budget.card on the protected branch"
   echo "$v"
 }
 card_or_default() { local v=${cardv[$1]-}; if [ -z "$v" ] || [[ $v == *"<"* ]]; then echo "$2"; else echo "$v"; fi; }
@@ -363,18 +363,18 @@ cmd_checks() {
   local rd=${1%/} rid bad summary; rid=$(basename "$rd")
   if ledger_rows "$rd" >/dev/null; then
     ledger_check "$rd"
-    if [ -n "$bad" ]; then say RIPPLE execution-within-envelope "${bad#; }"; else say PASS execution-within-envelope "$summary"; fi
+    if [ -n "$bad" ]; then say RIPPLE execution-within-envelope "${bad#; }; the ledger is append-only, so the next call is the human's"; else say PASS execution-within-envelope "$summary"; fi
   fi
   [ "$(launch_hosts)" != none ] || return 0
   local spent running nrun cap live=0 ent="" d id st el kb lim log m avail floor remote=0 hosts="" i sup
-  if [ -d "$sd" ] && ! timeout 10 ls "$sd" >/dev/null 2>&1; then say UNCHECKED gpu-hours "cannot read $sd"
+  if [ -d "$sd" ] && ! timeout 10 ls "$sd" >/dev/null 2>&1; then say UNCHECKED gpu-hours "cannot read $sd within 10 s; check that host_state_dir is mounted and readable"
   else
     gpu_seconds ""; cap=$(card_or_default max_gpu_hours 0)
-    if [ $(( spent * 100 )) -gt $(( cap * 3600 * 80 )) ]; then say RIPPLE gpu-hours "$(gpu_h "$spent") of $cap GPU-h ($(gpu_h "$running") in $nrun running)"
+    if [ $(( spent * 100 )) -gt $(( cap * 3600 * 80 )) ]; then say RIPPLE gpu-hours "$(gpu_h "$spent") of $cap GPU-h ($(gpu_h "$running") in $nrun running), over 80%; a human decides whether to raise max_gpu_hours"
     else say PASS gpu-hours "$(gpu_h "$spent") of $cap GPU-h ($(gpu_h "$running") in $nrun running)"; fi
   fi
   if ! on_launch_host; then
-    for m in host-supervision host-memory host-strays host-log-errors; do say UNCHECKED "$m" "$host is not in launch_hosts ($(launch_hosts))"; done; return 0
+    for m in host-supervision host-memory host-strays host-log-errors; do say UNCHECKED "$m" "$host is not in launch_hosts ($(launch_hosts)); run ripples on a launch host to check"; done; return 0
   fi
 
   local -a live_ids=() live_dirs=()
@@ -389,7 +389,7 @@ cmd_checks() {
     elif ! pid_is "$sup" "$r"; then rk "$d" start job_pid; ent="$ent $id:pid$r-has-no-supervisor"
     else rk "$d" start log_fd; [ "$r" = ok ] || ent="$ent $id:log_fd-${r// /_}"; fi
   done
-  if [ -n "$ent" ]; then say ENTRIES host-supervision "${ent# }"
+  if [ -n "$ent" ]; then say ENTRIES host-supervision "${ent# }" "stop each with guard/run launch --stop <id> --reason=<why>, or tell the human"
   elif [ $remote -gt 0 ]; then say UNCHECKED host-supervision "$remote launch(es) unended on$(tr ' ' '\n' <<<"$hosts" | sort -u | tr '\n' ' ' | sed 's/ $//'); run ripples there"
   else say PASS host-supervision "$live live, supervised"; fi
 
@@ -406,11 +406,11 @@ cmd_checks() {
     done
   done
   [ "$avail" -lt $(( 2 * floor )) ] && ent="$ent host:$(kb_gb "$avail")G-available-floor-$(kb_gb "$floor")G"
-  if [ -n "$ent" ]; then say ENTRIES host-memory "${ent# }"; else say PASS host-memory "$(kb_gb "$avail")G available; $live live, at most 80% of --mem"; fi
+  if [ -n "$ent" ]; then say ENTRIES host-memory "${ent# }" "a supervisor stops its job at --mem; a human clears leftover shm or frees host memory"; else say PASS host-memory "$(kb_gb "$avail")G available; $live live, at most 80% of --mem"; fi
 
   local s rc; s=$(strays); rc=$?
-  if [ -n "$s" ]; then say RIPPLE host-strays "$(tr '\n' ' ' <<<"$s" | sed 's/ $//')"
-  elif [ $rc -ne 0 ]; then say UNCHECKED host-strays "no memory strays; GPU strays unchecked, nvidia-smi not found or timed out"
+  if [ -n "$s" ]; then say RIPPLE host-strays "$(tr '\n' ' ' <<<"$s" | sed 's/ $//'); a human ends them or adds them to stray_ignore"
+  elif [ $rc -ne 0 ]; then say UNCHECKED host-strays "no memory strays; GPU strays unchecked, nvidia-smi not found or timed out; put nvidia-smi on PATH and rerun"
   else say PASS host-strays ""; fi
 
   ent=""
@@ -419,7 +419,7 @@ cmd_checks() {
     if m=$(timeout 10 tail -c 1048576 "$log" 2>/dev/null | grep -E -o -m1 "$LOG_ERRORS"); then ent="$ent ${live_ids[i]}:${m// /_}"
     elif [ ! -r "$log" ]; then ent="$ent ${live_ids[i]}:log-unreadable"; fi
   done
-  if [ -n "$ent" ]; then say ENTRIES host-log-errors "${ent# }"; else say PASS host-log-errors "$live running log(s) scanned"; fi
+  if [ -n "$ent" ]; then say ENTRIES host-log-errors "${ent# }" "read each log and diagnose, then commit $rd/incidents/<n>.md with a job: <id> line for each"; else say PASS host-log-errors "$live running log(s) scanned"; fi
 }
 
 # strays: this user's processes holding a GPU compute context or more than half of host_max_mem_gb of RssAnon, minus
@@ -681,26 +681,26 @@ gate_static() {
   local changed q stop max_wall
   on_launch_host || fail "$host is not in launch_hosts ($(launch_hosts)) on $base; compute here needs a human to opt in"
   changed=$( { git diff --name-only "$base"...HEAD -- guard; git status --porcelain --untracked-files=all -- guard; } | sort -u)
-  [ -z "$changed" ] || fail "guard/ differs from $base: $(echo $changed)"
+  [ -z "$changed" ] || fail "guard/ differs from $base: $(echo $changed); restore it with git restore --source=$base --staged --worktree -- guard, commit, and remove any untracked file under guard/"
   explore=0; [[ $run_id == explore-* ]] && explore=1
   qcard=""
   if [ $explore = 0 ]; then
     q="$run_dir/question.card"
-    git ls-files --error-unmatch "$q" >/dev/null 2>&1 || fail "$q is not committed"
-    git diff --quiet HEAD -- "$q" || fail "$q has uncommitted edits"
+    git ls-files --error-unmatch "$q" >/dev/null 2>&1 || fail "$q is not committed; commit it first"
+    git diff --quiet HEAD -- "$q" || fail "$q has uncommitted edits; revert them with git checkout HEAD -- $q, or start a new run id for a new design"
     [ "$(git log --format=%H -- "$q" | wc -l)" -le 1 ] || fail "$q was edited after its first commit; start a new run id instead"
     load_qcard "$run_dir"
   fi
   stop=$(need stop_date) || exit $?
-  [[ ! $(date +%F) > $stop ]] || fail "past stop_date $stop"
-  stop=$(qval deadline); [ -z "$stop" ] || [[ ! $(date +%F) > $stop ]] || fail "past deadline $stop in $run_dir/question.card"
+  [[ ! $(date +%F) > $stop ]] || fail "past stop_date $stop; a human extends stop_date in guard/budget.card on the protected branch"
+  stop=$(qval deadline); [ -z "$stop" ] || [[ ! $(date +%F) > $stop ]] || fail "past deadline $stop in $run_dir/question.card; a human decides whether a new run continues it"
   max_wall=$(( $(card_or_default host_max_walltime_minutes 720) * 60 ))
   if [ $explore = 1 ]; then
-    [ "$time_s" -le $(( $(card_or_default explore_max_walltime_minutes 60) * 60 )) ] || fail "--time=$(fmt_time "$time_s") exceeds explore_max_walltime_minutes=$(card_or_default explore_max_walltime_minutes 60)"
-    [ "$(gpu_n "$gpus")" -le "$(card_or_default explore_max_gpus 1)" ] || fail "--gpus=$gpus exceeds explore_max_gpus=$(card_or_default explore_max_gpus 1)"
+    [ "$time_s" -le $(( $(card_or_default explore_max_walltime_minutes 60) * 60 )) ] || fail "--time=$(fmt_time "$time_s") exceeds explore_max_walltime_minutes=$(card_or_default explore_max_walltime_minutes 60); ask for less, or use a run with a question card"
+    [ "$(gpu_n "$gpus")" -le "$(card_or_default explore_max_gpus 1)" ] || fail "--gpus=$gpus exceeds explore_max_gpus=$(card_or_default explore_max_gpus 1); ask for fewer, or use a run with a question card"
   fi
-  [ "$time_s" -le "$max_wall" ] || fail "--time=$(fmt_time "$time_s") exceeds host_max_walltime_minutes=$(card_or_default host_max_walltime_minutes 720)"
-  [ "$mem_kb" -le "$(gb_kb "$(card_or_default host_max_mem_gb 64)")" ] || fail "--mem=$mem_gb exceeds host_max_mem_gb=$(card_or_default host_max_mem_gb 64)"
+  [ "$time_s" -le "$max_wall" ] || fail "--time=$(fmt_time "$time_s") exceeds host_max_walltime_minutes=$(card_or_default host_max_walltime_minutes 720); ask for less, and checkpoint to resume"
+  [ "$mem_kb" -le "$(gb_kb "$(card_or_default host_max_mem_gb 64)")" ] || fail "--mem=$mem_gb exceeds host_max_mem_gb=$(card_or_default host_max_mem_gb 64); ask for less"
 }
 
 # gate_ripples: launch refuses when ripples for the run exits 1, as preflight does. Ripples calls this file only
@@ -708,12 +708,12 @@ gate_static() {
 gate_ripples() {
   local script out rc
   [ "${HPC_SPEND_RESERVE:-0}" != 1 ] || return 0
-  script=$(git show "$base:guard/bin/ripples.sh" 2>/dev/null) || fail "ripples could not run: no guard/bin/ripples.sh on $base"
+  script=$(git show "$base:guard/bin/ripples.sh" 2>/dev/null) || fail "ripples could not run: no guard/bin/ripples.sh on $base; a human runs guard init --update"
   out=$(bash -c "$script" guard/bin/ripples.sh "$run_dir" 2>&1); rc=$?
   case $rc in
     0) ;;
-    1) fail "ripples reports $(awk -F'\t' '$1=="RIPPLE" { printf "%s%s: %s", (n++ ? "; " : ""), $2, $3 }' <<<"$out"); fix the cause, record it, or set HPC_SPEND_RESERVE=1 for a diagnostic run" ;;
-    *) fail "ripples could not run (exit $rc): $(tail -n1 <<<"$out")" ;;
+    1) fail "ripples reports $(awk -F'\t' '$1=="RIPPLE" { printf "%s%s: %s", (n++ ? " | " : ""), $2, $3 }' <<<"$out"); fix the cause, record it, or set HPC_SPEND_RESERVE=1 for a diagnostic run" ;;
+    *) fail "ripples could not run (exit $rc): $(tail -n1 <<<"$out"); run guard/run ripples $run_dir to see why" ;;
   esac
 }
 
@@ -748,11 +748,11 @@ gate_host() {
   if [ "$cap" != 0 ]; then
     gpu_seconds "$run_id"
     [ $(( spent + remaining + n * time_s )) -le $(( cap * 3600 )) ] \
-      || fail "this run spent $(gpu_h "$spent") + running $(gpu_h "$remaining") + this job $(gpu_h $(( n * time_s ))) GPU-h exceeds budget_gpu_hours=$cap"
+      || fail "this run spent $(gpu_h "$spent") + running $(gpu_h "$remaining") + this job $(gpu_h $(( n * time_s ))) GPU-h exceeds budget_gpu_hours=$cap; a human decides whether a new run continues it"
   fi
   cap=$(card_or_default max_gpu_hours 0); gpu_seconds ""
   [ $(( spent + remaining + n * time_s )) -le $(( cap * 3600 )) ] \
-    || fail "spent $(gpu_h "$spent") + running $(gpu_h "$remaining") + this job $(gpu_h $(( n * time_s ))) GPU-h exceeds $cap GPU-h (max_gpu_hours)"
+    || fail "spent $(gpu_h "$spent") + running $(gpu_h "$remaining") + this job $(gpu_h $(( n * time_s ))) GPU-h exceeds $cap GPU-h (max_gpu_hours); ask for less, wait for running jobs, or a human raises max_gpu_hours"
 }
 # gate_restart: a carded run whose latest launch ended in a resource stop continues only through a committed
 # restart or resume row citing that job; after a science stop the human decides; after COMPLETED nothing is needed.
