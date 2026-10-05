@@ -854,6 +854,7 @@ expect doctor-no-token ok '^pass  no GitHub token in this shell' -- doctor MOCK_
 expect doctor-cap ok '^pass  Slurm caps account gom at GrpTRESMins=cpu=600000$' -- doctor
 expect doctor-user-cap ok '^pass  Slurm caps account gom at GrpTRESMins=cpu=600000$' -- doctor MOCK_SACCTMGR_ASSOC=$'|\ntester|cpu=600000'
 expect doctor-no-cap fail '^FAIL  Slurm sets no GrpTRESMins cap on account gom$' -- doctor MOCK_SACCTMGR_ASSOC=$'|\ntester|'
+expect doctor-other-user-cap fail '^FAIL  Slurm sets no GrpTRESMins cap on account gom$' -- doctor MOCK_SACCTMGR_ASSOC=$'|\nalice|cpu=100\ntester|'
 expect doctor-no-account fail '^FAIL  Slurm has no account gom$' -- doctor MOCK_SACCTMGR_ASSOC=
 expect doctor-no-sacctmgr ok '^cannot check from here  whether Slurm caps account gom: sacctmgr is not on this host$' -- doctor PATH="$(path_without sacctmgr)"
 expect doctor-skills-missing fail '^FAIL  skills in ~/.agents/skills do not link to this harness: present \(missing\)' -- doctor HOME="$tmp/home-bare"

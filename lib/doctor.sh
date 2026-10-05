@@ -146,7 +146,7 @@ check_account() {
     "Run guard doctor on a cluster login node: ${step}6-cap-the-cluster-account"; return; fi
   if ! rows=$(sacctmgr -nP show assoc where account="$account" format=User,GrpTRESMins 2>&1); then
     result cannot "whether Slurm caps account $account: $(why "$rows")" "Ask your cluster admins how to read the cap: ${step}6-cap-the-cluster-account"; return; fi
-  cap=$(awk -F'|' '$2 ~ /(cpu|billing)=/ {print $2; exit}' <<<"$rows")
+  cap=$(awk -F'|' -v me="$USER" '($1 == "" || $1 == me) && $2 ~ /(cpu|billing)=/ {print $2; exit}' <<<"$rows")
   if [ -n "$cap" ]; then result pass "Slurm caps account $account at GrpTRESMins=$cap"
   elif [ -z "$rows" ]; then result fail "Slurm has no account $account" \
     "Ask your cluster admins for it with docs/cluster-subaccount-request.md: ${step}6-cap-the-cluster-account"
