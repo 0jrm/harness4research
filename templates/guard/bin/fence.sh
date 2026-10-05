@@ -43,6 +43,40 @@ while read -r f; do
 done < <(git diff --name-only --diff-filter=A "$base...$head" -- 'runs/*/question.card')
 if [ -z "$unset_setting" ]; then say PASS setting-key ""; else say FAIL setting-key "added card has no setting:$unset_setting"; fi
 
+# name_parent <id> <ids>: the run id that <id> extends by name, as the atlas reads it. A prefix ending in -
+# wins (the longest), then a trailing letter steps back (054b to 054a, else 054), then a trailing number (054 to 053).
+name_parent() {
+  local id=$1 ids=" $2 " p best="" pre l n
+  for p in $2; do [[ $id == "$p"-* ]] && [ ${#p} -gt ${#best} ] && best=$p; done
+  [ -z "$best" ] || { echo "$best"; return; }
+  if [[ $id =~ ^(.*[0-9])([a-z])$ ]]; then
+    pre=${BASH_REMATCH[1]}; l=${BASH_REMATCH[2]}
+    while [ "$l" != a ]; do
+      l=$(tr b-z a-y <<<"$l")
+      [[ $ids == *" $pre$l "* ]] && { echo "$pre$l"; return; }
+    done
+    [[ $ids != *" $pre "* ]] || echo "$pre"
+  elif [[ $id =~ ^(.*[^0-9])?([0-9]+)$ ]]; then
+    pre=${BASH_REMATCH[1]}; n=${BASH_REMATCH[2]}
+    [ $((10#$n)) -gt 0 ] || return 0
+    p=$pre$(printf "%0${#n}d" $((10#$n - 1)))
+    [[ $ids != *" $p "* ]] || echo "$p"
+  fi
+}
+# An undeclared lineage only warns, because the atlas still infers the edge from the name.
+ids=$(git ls-tree -r --name-only "$head" -- runs | sed -n 's#^runs/\([^/]*\)/question\.card$#\1#p' | grep -v -e '^_template$' -e '^explore-' | tr '\n' ' ')
+undeclared=""
+while read -r f; do
+  [ -n "$f" ] || continue
+  id=${f#runs/}; id=${id%/question.card}
+  c=$(git show "$head:$f")
+  sup=$(first_val supersedes <<<"$c"); spawn=$(first_val spawned_from <<<"$c")
+  { [ -n "$sup" ] && [[ $sup != *"<"* ]]; } || { [ -n "$spawn" ] && [[ $spawn != *"<"* ]]; } && continue
+  p=$(name_parent "$id" "$ids")
+  [ -z "$p" ] || undeclared="$undeclared $id extends $p;"
+done < <(git diff --name-only --diff-filter=A "$base...$head" -- 'runs/*/question.card')
+[ -z "$undeclared" ] || say WARN card-lineage "set supersedes or spawned_from (or none) in the card:${undeclared%;}"
+
 unproven=""
 while read -r f; do
   [ -n "$f" ] || continue

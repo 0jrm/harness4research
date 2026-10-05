@@ -34,7 +34,7 @@ The question card holds the design and stays frozen. Its optional keys `budget_g
 
 ## Card lineage
 
-The question card's optional keys `supersedes` and `spawned_from` name the run id a card replaces or grew out of. The value `none` declares that the card has no parent; a `<...>` placeholder or a missing line leaves it unset. No script requires either key, so a card without them passes preflight, ripples and the fence as before. The atlas draws the question map from them.
+The question card's optional keys `supersedes` and `spawned_from` name the run id a card replaces or grew out of. The value `none` declares that the card has no parent; a `<...>` placeholder or a missing line leaves it unset. No script requires either key, so a card without them passes preflight, ripples and the fence as before. The atlas draws the question map from them. The fence rule `card-lineage` prints WARN, which does not fail the fence, when a card the pull request adds sets neither key and its id extends another carded run id by name. It judges added cards only, so an existing card never warns.
 
 ## Versions
 

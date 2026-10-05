@@ -620,7 +620,27 @@ sed -i '/^setting:/d' runs/ns/question.card
 git add -A; git commit -q -m x
 expect fence-card-no-setting fail 'FAIL.setting-key' -- guard/run fence origin/main HEAD
 
+lineage() { guard/run fence origin/main HEAD | grep card-lineage; }
+no_lineage() { ! lineage | grep -qE "$1"; }
 expect template-lineage-keys ok - -- bash -c 'grep -q "^supersedes: <" "$1" && grep -q "^spawned_from: <" "$1"' _ "$here/templates/runs/_template/question.card"
+git switch -q -c pr/lineage origin/main
+for r in lin-053 lin-054 lin-054b lin-053-phys2 explore-lin explore-lin-2; do mkdir -p runs/$r; cp runs/_template/question.card runs/$r/; done
+git add -A; git commit -q -m x
+expect fence-lineage-warns ok 'WARN.card-lineage.*lin-054 extends lin-053' -- guard/run fence origin/main HEAD
+expect fence-lineage-letter ok 'lin-054b extends lin-054(;|$)' -- lineage
+expect fence-lineage-suffix ok 'lin-053-phys2 extends lin-053(;|$)' -- lineage
+expect fence-lineage-root ok - -- no_lineage ' lin-053 extends|explore-'
+expect fence-lineage-passes ok - -- bash -c 'out=$(guard/run fence origin/main HEAD) && ! grep -q "^FAIL" <<<"$out"'
+git push -q origin pr/lineage:refs/heads/pr-lineage
+sed -i 's/^supersedes: .*/supersedes: none/' runs/lin-054/question.card
+sed -i 's/^spawned_from: .*/spawned_from: lin-054/' runs/lin-054b/question.card
+sed -i '/^supersedes:/d; /^spawned_from:/d' runs/lin-053-phys2/question.card
+git commit -q -am x
+expect fence-lineage-none ok - -- no_lineage 'lin-054 extends'
+expect fence-lineage-set ok - -- no_lineage 'lin-054b extends'
+expect fence-lineage-missing-keys ok 'lin-053-phys2 extends lin-053$' -- lineage
+git switch -q -c pr/after-lineage origin/pr-lineage; cp runs/_template/report.md runs/lin-054/; git add -A; git commit -q -m x
+expect fence-lineage-added-only ok - -- bash -c 'out=$(guard/run fence origin/pr-lineage HEAD) && grep -q "^PASS.setting-key" <<<"$out" && ! grep -q card-lineage <<<"$out"'
 
 git switch -q -c pr/hyp-na origin/main; mkdir -p runs/hn
 cp runs/_template/question.card runs/hn/; cp runs/_template/report.md runs/hn/
@@ -808,7 +828,7 @@ expect skill-states-schema ok - -- grep -q "describes guard schema $(cat "$here/
 expect contract-names-required ok - -- bash -c 'for k in $(grep "<" "$1/templates/guard/budget.card" | cut -d: -f1); do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
 expect contract-names-every-key ok - -- bash -c 'for k in $(cut -d: -f1 "$1/templates/guard/budget.card"); do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
 expect envelope-vocabulary-pinned ok - -- bash -c 'a=$(sed -n "s/^readonly ENVELOPE_FIELDS=//p" "$1/templates/guard/bin/launch.sh"); b=$(sed -n "s/^fields=//p" "$1/templates/guard/bin/fence.sh"); [ -n "$a" ] && [ "$a" = "$b" ]' _ "$here"
-expect contract-names-check-names ok - -- bash -c 'for k in gpu-hours host-supervision host-memory host-strays host-log-errors execution-within-envelope execution-ledger execution-history; do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
+expect contract-names-check-names ok - -- bash -c 'for k in gpu-hours host-supervision host-memory host-strays host-log-errors execution-within-envelope execution-ledger execution-history card-lineage; do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
 
 echo "== upgrade from each supported release"
 # old_project <tag> <dir>: a project guarded by the harness at <tag>, with the budget filled in and merged to main.
