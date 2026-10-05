@@ -3,7 +3,8 @@
 # A guard/VERSION without a schema line was written by schema 1.
 h_schema=$(cat "$here/SCHEMA")
 
-# project_version <repo>: sets p_base, p_guarded (0 or 1), p_from (installer commit, may be empty or unknown), p_schema.
+# project_version <repo>: sets p_base, p_guarded (0 or 1), p_from (installer commit, may be empty or unknown), p_schema,
+# p_release (empty for a guard installed before release stamps).
 project_version() {
   local v
   p_base=$(git -C "$1" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
@@ -11,6 +12,7 @@ project_version() {
   v=$(git -C "$1" show "$p_base:guard/VERSION" 2>/dev/null || true)
   p_from=$(awk -F': *' '$1=="installer" {print $2; exit}' <<<"$v")
   p_schema=$(awk -F': *' '$1=="schema" {print $2; exit}' <<<"$v"); p_schema=${p_schema:-1}
+  p_release=$(awk -F': *' '$1=="release" {print $2; exit}' <<<"$v")
 }
 
 # skew, after project_version: prints current, project-older, harness-older, or unknown-install.

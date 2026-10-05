@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Mock: show assoc prints MOCK_SACCTMGR_ASSOC, User|GrpTRESMins rows for the account asked about.
+[ -z "${MOCK_SACCTMGR_ASSOC:-}" ] || printf '%s\n' "$MOCK_SACCTMGR_ASSOC"
