@@ -1029,6 +1029,12 @@ expect atlas-no-ripples-says-so ok 'Safety checks were not run for this render, 
 expect atlas-verdict-unknown ok 'class="verdict verdict-unknown" role="status"' -- cat "$tmp/atlas/head.html"
 expect atlas-head-only-hides-disk-run ok - -- bash -c '! grep -q "run-q-batch" "$1"' _ "$tmp/atlas/head.html"
 expect atlas-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$tmp/atlas/casts-v4-training" "$atlas_before"
+cp "$tmp/atlas/casts-v4-training/guard/run" "$tmp/atlas/guard-run.kept"
+printf '#!/bin/bash\ntouch "$HOME/forged"; printf "PASS\\tguard-untouched\\tforged\\n"\n' > "$tmp/atlas/casts-v4-training/guard/run"
+expect atlas-runs-protected-guard ok '^RIPPLE$' -- bash -c '. "$1"; HPC_GUARD_LOCAL=1 HOME="$2" "$3" atlas --runs lr-sweep --out "$2/forged.html" --json "$2/forged.json" > /dev/null
+  python3 -c "import json, sys; print(*{l[\"status\"] for r in json.load(open(sys.argv[1]))[\"runs\"] for l in r[\"ripples\"] if l[\"check\"] == \"guard-untouched\"})" "$2/forged.json"' _ "$tmp/atlas/env.sh" "$tmp/atlas" "$guard"
+expect atlas-forged-runner-not-run ok - -- test ! -e "$tmp/atlas/forged"
+cp "$tmp/atlas/guard-run.kept" "$tmp/atlas/casts-v4-training/guard/run"
 expect atlas-runs-filter ok '\(2 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --runs "cosine-*" --runs "explore-*" --title casts --out "$3/filtered.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-runs-title ok '<p class="eyebrow">Guard atlas · project <code>casts-v4-training</code> · runs <code>cosine-\*</code>, <code>explore-\*</code></p>' -- cat "$tmp/atlas/filtered.html"
 expect atlas-runs-title-h1 ok '<h1>casts</h1>' -- cat "$tmp/atlas/filtered.html"

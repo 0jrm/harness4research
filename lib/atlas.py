@@ -9,7 +9,7 @@ the page from the data collect() returns, which --json writes out.
 
 Read-only. Guard inputs come from the protected branch through git show. Runs come from HEAD plus the
 working tree, so uncommitted run dirs and manifests show up; --head-only reads HEAD alone.
-Ripples come from the project's own guard/run, so the page shows exactly what the agent sees.
+Ripples come from guard/run on the protected branch, as guard ripples runs it, so a working-tree edit cannot forge them.
 --serve takes a port, bound to 127.0.0.1, or a socket path (anything containing "/"). On a shared login
 node use a socket: it is created 0600, so only you can reach it, and ssh -L 8765:/path/to/sock host
 forwards it. Python 3 standard library only.
@@ -100,9 +100,11 @@ def ledger(text):
     return header_ok, rows
 
 def ripples(top, base, run_dir):
-    env = dict(os.environ, HPC_GUARD_REF=base, GIT_OPTIONAL_LOCKS="0")
+    env = {k: v for k, v in os.environ.items() if k != "HPC_GUARD_LOCAL"}
+    env.update(HPC_GUARD_REF=base, GIT_OPTIONAL_LOCKS="0")
+    runner = git(top, "show", f"{base}:guard/run") or ""
     try:
-        p = subprocess.run(["bash", "guard/run", "ripples", run_dir], cwd=top, env=env,
+        p = subprocess.run(["bash", "-c", runner, "guard/run", "ripples", run_dir], cwd=top, env=env,
                            capture_output=True, text=True, timeout=180)
     except subprocess.TimeoutExpired:
         return [{"status": "UNCHECKED", "check": "ripples", "detail": "guard/run ripples timed out"}]
