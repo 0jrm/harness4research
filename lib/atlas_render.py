@@ -118,10 +118,10 @@ def entries(d):
     """The job:STATE entries of a job-states line, without the next step ripples puts after them in parentheses."""
     return (d or "").split(" (", 1)[0].split()
 
-def pretty(key, d):
+def pretty(key, d, status):
     if not d:
         return ""
-    if key == "job-states":
+    if key == "job-states" and status in ("RIPPLE", "HANDLED"):  # an UNCHECKED line says why in prose, not job entries
         out = []
         for x in entries(d):
             i = x.find(":")
@@ -146,7 +146,7 @@ def cell(r, key):
         return {"st": "none", "word": "not reported", "detail": "not reported by this guard version"}
     st, _ = worst(hits)
     return {"st": st, "word": WORDS.get(key, {}).get(st) or STW[st],
-            "detail": "; ".join(x for x in (pretty(key, h["detail"]) for h in hits if h["status"] != "PASS" or h["detail"]) if x)}
+            "detail": "; ".join(x for x in (pretty(key, h["detail"], h["status"]) for h in hits if h["status"] != "PASS" or h["detail"]) if x)}
 
 def domain_cell(r):
     checks = [l for l in r["ripples"] if l["check"].startswith("check:")]
@@ -349,7 +349,7 @@ def render(data):
 <div><dt>Runs read at</dt><dd>{read_at}</dd></div>
 <div><dt>Code repositories</dt><dd>{code}</dd></div>
 <div><dt>Guard version</dt><dd>schema {E(v.get("schema") or "1")}, {release}{", installed " + E(v["installed"]) if v.get("installed") else ""}</dd></div>
-<div><dt>Spend source</dt><dd>{"core-hours from sacct, through the budget ripple" if data["rippled"] else "none: ripples were not run"}</dd></div>
+<div><dt>Spend source</dt><dd>{"none: ripples were not run" if not data["rippled"] else "none: the budget ripple could not read sacct on this host" if spent is None else "core-hours from sacct, through the budget ripple"}</dd></div>
 <div><dt>Checkout</dt><dd><code>{E(data["top"])}</code></dd></div>
 </dl>
 <p class="note">Read-only. The page holds no state and writes nothing back; every action it suggests is a command to copy or a pull request. Earlier versions used a nautical vocabulary (Waters, Soundings, Datum, Drawer, Lifeline); <em>ripple</em> is kept because the guard prints it.</p>
