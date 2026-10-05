@@ -999,7 +999,7 @@ for tag in $releases; do upgrade_from "$tag"; done
 echo "== atlas"
 mkdir -p "$tmp/atlas"; bash "$here/tests/atlas-fixture.sh" "$tmp/atlas" > "$tmp/atlas/env.sh"
 atlas_before=$(git -C "$tmp/atlas/casts-v4-training" status --porcelain)
-expect atlas-renders ok '12 runs, 2 branches' -- bash -c '. "$1"; "$2" atlas --out "$3/atlas.html" --json "$3/atlas.json"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-renders ok '14 runs, 2 branches' -- bash -c '. "$1"; "$2" atlas --out "$3/atlas.html" --json "$3/atlas.json"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-catches-early-compute ok 'started before the card was committed' -- cat "$tmp/atlas/atlas.html"
 expect atlas-broken-receipt ok 'link broken.*commit</b> deadbee' -- cat "$tmp/atlas/atlas.html"
 expect atlas-drawer-key-diff ok 'max_walltime_minutes 240 to 600' -- cat "$tmp/atlas/atlas.html"
@@ -1007,6 +1007,7 @@ python3 -c 'import json, sys
 d = json.load(open(sys.argv[1]))
 for k in ("atlas_schema", "behind_base", "generated_at"): print(" ~ ".join(["S", k, str(d[k])]))
 for k, v in sorted(d["summary"].items()): print(" ~ ".join(["S", "summary." + k, str(v)]))
+for e in d["lineage"]: print(" ~ ".join(["E", e["from"], e["to"], e["kind"], str(e["lineage_inferred"])]))
 for w in d["waters"]: print(" ~ ".join(["W", w["name"], w["fence"], ",".join(w["hand"])]))
 for r in d["runs"]:
     print(" ~ ".join(["O", r["id"], r["outcome"], r["outcome_detail"], r["severity"]]))
@@ -1026,7 +1027,7 @@ expect atlas-cause-bullet ok 'rescore.md</b>: the scorer read the wrong month of
 expect atlas-cause-bullet-not-flagged ok - -- bash -c '! grep -q "rescore.md names no root cause" "$1"' _ "$tmp/atlas/atlas.tsv"
 expect atlas-verdict-prose ok '^O ~ lr-sweep ~ supported ~ ' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-explore-outcome ok '<h3>explore-07</h3><span class="chip explore">explore</span>' -- cat "$tmp/atlas/atlas.html"
-expect atlas-explore-no-violations ok - -- bash -c '! grep -q "^V ~ explore-07" "$1"' _ "$tmp/atlas/atlas.tsv"
+expect atlas-explore-no-card-violations ok - -- bash -c '! grep -Eq "^V ~ explore-07 ~ (question card|job .* started|card edited|no partner)" "$1"' _ "$tmp/atlas/atlas.tsv"
 expect atlas-uncommitted-run ok '^V ~ q-batch ~ question card is not committed, so nothing froze it$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-uncommitted-manifest ok '^M ~ q-batch ~ runs/q-batch/manifest-4860.txt ~ False$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-uncommitted-note ok 'q-batch</a><span class="loose">2 uncommitted</span>.*' -- cat "$tmp/atlas/atlas.html"
@@ -1051,8 +1052,20 @@ expect atlas-card-on-base-not-uncommitted ok - -- bash -c '! grep -q "^V ~ behin
 expect atlas-report-not-pulled ok '^O ~ behind-card ~ report not pulled ~ report on origin/main;' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-ledger-bad-header ok '^V ~ behind-card ~ execution.tsv header is not id ts field value why evidence' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-other-column ok 'title="RIPPLE execution-within-envelope x1: host skynet is not in launch_hosts[^"]*"><span class="ripple">execution-within-envelope<' -- cat "$tmp/atlas/atlas.html"
+expect atlas-lineage-inferred ok '^E ~ lr-sweep ~ lr-sweep-fine ~ inferred ~ True$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-lineage-declared ok '^E ~ q-warmup-v2 ~ cosine-v2 ~ supersedes ~ False$' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-lineage-declared-not-inferred ok - -- bash -c '! grep -q "^E ~ q-warmup ~ q-warmup-v2 ~ inferred" "$1"' _ "$tmp/atlas/atlas.tsv"
+expect atlas-lineage-dotted ok '<path class="edge inferred" [^>]*><title>lr-sweep to lr-sweep-fine: inferred from name</title></path><text class="edge-label"[^>]*>inferred from name</text>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-lineage-none-not-inferred ok - -- bash -c '! grep -q "^E ~ [^~]* ~ lr-sweep-2 ~" "$1"' _ "$tmp/atlas/atlas.tsv"
+expect atlas-lineage-none-no-link ok - -- bash -c '! grep -q "href=\"#run-none\"" "$1"' _ "$tmp/atlas/atlas.html"
+expect atlas-lineage-run-note ok 'follows <a href="#run-lr-sweep">lr-sweep</a>, inferred from name' -- cat "$tmp/atlas/atlas.html"
+expect atlas-lineage-names ok '^emu-b00-053-phys2<emu-b00-053 emu-b00-054<emu-b00-053 emu-b00-054b<emu-b00-054 emu-b00-e2b<emu-b00-e2 emu-b00-e2c<emu-b00-e2b $' -- python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import atlas
+ids = {"emu-b00-053", "emu-b00-053-phys2", "emu-b00-054", "emu-b00-054b", "emu-b00-e2", "emu-b00-e2b", "emu-b00-e2c", "emu-store-054", "f2-train-deploy-shift", "f2b-past-only-inputs", "p1-lookahead"}
+print("".join(f"{i}<{p} " for i in sorted(ids) for p in [atlas.name_parent(i, ids - {i})] if p))' "$here/lib"
+expect atlas-stray-incident ok '^V ~ explore-07 ~ incident.md is a write-up not where the guard looks; move it to incidents/' -- cat "$tmp/atlas/atlas.tsv"
+expect atlas-stray-incident-keeps-ripple ok '^N ~ explore-07 ~ ripple on job-states, so stop spending$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-no-network ok - -- bash -c '! grep -Eiq "<link[^>]*https?://|src=\"?https?://" "$1"' _ "$tmp/atlas/atlas.html"
-expect atlas-head-only ok '\(10 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
+expect atlas-head-only ok '\(12 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-no-ripples-says-so ok 'ripples not run, so no check reached a verdict' -- cat "$tmp/atlas/head.html"
 expect atlas-head-only-hides-disk-run ok - -- bash -c '! grep -q "run-q-batch" "$1"' _ "$tmp/atlas/head.html"
 expect atlas-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$tmp/atlas/casts-v4-training" "$atlas_before"

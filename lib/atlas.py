@@ -200,6 +200,7 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
                 fix = i.get("fix") if not unset(i.get("fix")) else bullet(text, ("fix",))
                 incidents.append({"path": f, "job": i.get("job", ""), "root_cause": cause, "fix": fix,
                                   "time": born(f, commits(top, f))})
+        stray = [f for f in paths if re.fullmatch(re.escape(d) + r"incident[^/]*\.md", f)]
         report_text = read(d + "report.md") if d + "report.md" in paths else None
         report = None
         if report_text:
@@ -216,7 +217,7 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
             hist, frozen_on = commits(top, card_path, base), base
         runs.append({"id": rid, "card": card, "card_blob": blob.strip(), "card_from": card_from,
                      "card_history": hist, "card_frozen_on": frozen_on if hist else None,
-                     "manifests": manifests, "incidents": incidents, "execution": execution, "report": report,
+                     "manifests": manifests, "incidents": incidents, "stray_incidents": stray, "execution": execution, "report": report,
                      "report_refs": report_refs, "ripples": [],
                      "committed_files": committed, "uncommitted_files": uncommitted,
                      "checks": sorted(f.split("/")[-1] for f in paths if "/checks/" in f)})
@@ -266,6 +267,7 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
                         "unchecked": sum(any(l["status"] == "UNCHECKED" for l in r["ripples"]) for r in runs),
                         "needs_you": sum(bool(r["needs_you"]) for r in runs)}}
     data["waters"] = waters(data)
+    data["lineage"] = lineage(runs)
     return data
 
 SLURM = re.compile(r"[0-9][0-9_]*")
@@ -378,7 +380,7 @@ def outcome(r, runs, base):
         return said("superseded", by)
     if r["manifests"]:
         return said("open")
-    if (r["execution"] and r["execution"]["rows"]) or r["incidents"]:
+    if (r["execution"] and r["execution"]["rows"]) or r["incidents"] or r["stray_incidents"]:
         return said("recorded by hand")
     return said("no scheduler record" if r["card_history"] else "not run")
 
@@ -391,6 +393,8 @@ def violations(r, base, behind):
                                                     else "this checkout does not have it, run git pull"))
     elif not explore and not frozen:
         out.append("question card is not committed, so nothing froze it")
+    for f in r["stray_incidents"]:
+        out.append(f"{f.split('/')[-1]} is a write-up not where the guard looks; move it to incidents/<date>-<job>.md")
     if r["execution"] and not r["execution"]["header_ok"]:
         out.append(f"execution.tsv header is not {' '.join(LEDGER)}, so neither the guard nor this page reads its rows")
     for m in r["manifests"] if not explore else []:
@@ -420,6 +424,8 @@ def needs_you(r, base):
         out.append(f"checkout behind {base}, run git pull")
     if not r["id"].startswith("explore-") and not r["card_frozen_on"]:
         out.append("uncommitted card")
+    if r["stray_incidents"]:
+        out.append("move the incident write-up to incidents/")
     rippled = [l["check"] for l in r["ripples"] if l["status"] == "RIPPLE"]
     if {"guard-untouched", "watched-paths"} & set(rippled):
         out.append("guard touched")
@@ -472,6 +478,37 @@ def waters(data):
         out.append({"name": h, "fence": "bump" if fenced else "none", "runs": sorted(rs), "hand": hand, "desc": desc,
                     "count": n(len(rs), "run") if fenced else f"{n(len(rs), 'run')}: {', '.join(sorted(rs))}"})
     return out
+
+LINEAGE = ("supersedes", "spawned_from")
+
+def name_parent(rid, ids):
+    """The id rid most plausibly grew out of, judged by name alone, or None."""
+    longer = [a for a in ids if rid.startswith(a + "-")]
+    if longer:
+        return max(longer, key=len)
+    m = re.fullmatch(r"(.*\d)([a-z])", rid)
+    if m:
+        stem, letter = m.groups()
+        prev = [stem + chr(c) for c in range(ord(letter) - 1, ord("a") - 1, -1)]
+        return next((p for p in prev + [stem] if p in ids), None)
+    m = re.fullmatch(r"(.*?)(\d+)", rid)
+    if m and int(m.group(2)):
+        prev = m.group(1) + str(int(m.group(2)) - 1).zfill(len(m.group(2)))
+        return prev if prev in ids else None
+    return None
+
+def lineage(runs):
+    cards = {r["id"]: r for r in runs if not r["id"].startswith("explore-")}
+    frozen = {k: r["card_history"][0]["time"] if r["card_history"] else "" for k, r in cards.items()}
+    edges = [{"from": r["card"][key], "to": k, "kind": key, "lineage_inferred": False}
+             for k, r in cards.items() for key in LINEAGE if r["card"].get(key) in cards]
+    for k, r in cards.items():
+        if any(not unset(r["card"].get(key)) for key in LINEAGE):
+            continue
+        p = name_parent(k, set(cards) - {k})
+        if p and not (frozen[p] and frozen[k] and when(frozen[k]) < when(frozen[p])):
+            edges.append({"from": p, "to": k, "kind": "inferred", "lineage_inferred": True})
+    return edges
 
 # ---------------------------------------------------------------- rendering
 
@@ -594,34 +631,41 @@ def lifeline(r):
     s.append(f'<text class="axis" x="110" y="166">{t0:%b %d}</text><text class="axis end" x="650" y="166">{t1:%b %d}</text></svg>')
     return "".join(s)
 
-def atlas_graph(runs):
+def atlas_graph(runs, edges):
     ordered = sorted(runs, key=lambda r: r["card_history"][0]["time"] if r["card_history"] else "")
     ordered = [r for r in ordered if not r["id"].startswith("explore-")]
-    lane, nxt, col = {}, 0, {}
-    for i, r in enumerate(ordered):
-        sup = r["card"].get("supersedes")
-        if sup in lane:
-            lane[r["id"]] = lane[sup]
-        else:
-            lane[r["id"]] = nxt; nxt += 1
-        col[r["id"]] = i
     if not ordered:
         return ""
+    parent = {}
+    for e in edges:
+        if e["kind"] != "spawned_from" and (e["to"] not in parent or e["kind"] == "supersedes"):
+            parent[e["to"]] = e["from"]
+    lane, tail, col = {}, [], {}
+    for i, r in enumerate(ordered):
+        p = parent.get(r["id"])
+        if p in lane and tail[lane[p]] == p:
+            lane[r["id"]] = lane[p]; tail[lane[p]] = r["id"]
+        else:
+            lane[r["id"]] = len(tail); tail.append(r["id"])
+        col[r["id"]] = i
     w, h, gx, gy = 160, 50, 204, 70
-    width = max(680, 30 + gx * len(ordered)); height = 40 + gy * max(1, nxt)
+    width = max(680, 30 + gx * len(ordered)); height = 40 + gy * max(1, len(tail))
     pos = {r["id"]: (20 + gx * col[r["id"]], 20 + gy * lane[r["id"]]) for r in ordered}
     s = [f'<svg class="graph" viewBox="0 0 {width} {height}" style="min-width:{width}px" role="img" aria-label="Question cards and how they relate">',
          '<defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5"/></marker></defs>']
-    for r in ordered:
-        for key, cls in (("supersedes", "sup"), ("spawned_from", "spawn")):
-            src = r["card"].get(key)
-            if src in pos:
-                (x1, y1), (x2, y2) = pos[src], pos[r["id"]]
-                if y1 == y2:
-                    d = f"M{x1 + w} {y1 + h / 2}L{x2 - 3} {y2 + h / 2}"
-                else:
-                    d = f"M{x1 + w / 2} {y1 + h}L{x1 + w / 2} {y2 + h / 2}L{x2 - 3} {y2 + h / 2}"
-                s.append(f'<path class="edge {cls}" d="{d}" marker-end="url(#ah)"><title>{key.replace("_", " ")}</title></path>')
+    for e in edges:
+        if e["from"] not in pos or e["to"] not in pos:
+            continue
+        (x1, y1), (x2, y2) = pos[e["from"]], pos[e["to"]]
+        if y1 == y2:
+            d, lx, ly = f"M{x1 + w} {y1 + h / 2}L{x2 - 3} {y2 + h / 2}", (x1 + w + x2) / 2, y1 - 5
+        else:
+            d, lx, ly = f"M{x1 + w / 2} {y1 + h}L{x1 + w / 2} {y2 + h / 2}L{x2 - 3} {y2 + h / 2}", (x1 + w / 2 + x2) / 2, y2 + h / 2 - 5
+        cls = {"supersedes": "sup", "spawned_from": "spawn", "inferred": "inferred"}[e["kind"]]
+        what = "inferred from name" if e["lineage_inferred"] else e["kind"].replace("_", " ")
+        s.append(f'<path class="edge {cls}" d="{d}" marker-end="url(#ah)"><title>{E(e["from"])} to {E(e["to"])}: {what}</title></path>')
+        if e["lineage_inferred"]:
+            s.append(f'<text class="edge-label" x="{lx:.0f}" y="{ly:.0f}">inferred from name</text>')
     for r in ordered:
         x0, y0 = pos[r["id"]]
         pm = "" if not unset(r["card"].get("partner_metric")) else " nopair"
@@ -634,7 +678,7 @@ def atlas_graph(runs):
 
 SAY_WHY = {"report unmerged", "report not pulled", "recorded by hand", "no scheduler record", "not run"}
 
-def run_block(r):
+def run_block(r, inferred_from=None):
     c, rep = r["card"], r["report"]
     rows = []
     for e in rep["evidence"] if rep else []:
@@ -648,8 +692,10 @@ def run_block(r):
     warn = "".join(f"<li>{E(v)}</li>" for v in r["violations"])
     rel = []
     for k in ("supersedes", "spawned_from"):
-        if not unset(c.get(k)):
+        if not unset(c.get(k)) and c[k] != "none":
             rel.append(f'{k.replace("_", " ")} <a href="#run-{E(c[k])}">{E(c[k])}</a>')
+    if inferred_from:
+        rel.append(f'follows <a href="#run-{E(inferred_from)}">{E(inferred_from)}</a>, inferred from name')
     return f'''<article class="run" id="run-{E(r["id"])}">
 <header><h3>{E(r["id"])}</h3>{chip(r["outcome"], r["outcome"].replace(" ", "-"))}{f'<span class="rel">{E(r["outcome_detail"])}</span>' if r["outcome"] in SAY_WHY else ""}{chip("uncommitted", "loose-chip") if r["uncommitted_files"] else ""}{"".join(f'<span class="rel">{x}</span>' for x in rel)}</header>
 <p class="question">{E(c.get("question", ""))}</p>
@@ -723,6 +769,7 @@ td{padding:6px 8px;border-bottom:.5px solid var(--rule);vertical-align:top}
 .qnode.recorded-by-hand rect{fill:var(--paper);stroke:var(--ink);stroke-dasharray:2 2}.qnode.no-scheduler-record rect{fill:none;stroke:var(--ink);stroke-dasharray:1 3}
 .qnode.report-unmerged rect,.qnode.report-not-pulled rect{fill:var(--paper);stroke:var(--handt);stroke-width:1.5;stroke-dasharray:6 3}
 .qnode.nopair rect{stroke:var(--mag);stroke-width:1.5}.edge{fill:none;stroke:var(--sound);stroke-width:1}.edge.spawn{stroke-dasharray:3 3}
+.edge.inferred{stroke-dasharray:1 3;stroke-width:1.5}.edge-label{font:400 11px var(--sans);fill:var(--sound);text-anchor:middle}
 .run{border-top:1.5px solid var(--ink);padding:22px 0 10px;margin-top:30px}.run header{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 14px}
 .chip{font-size:13px;padding:1px 9px;border-radius:3px;border:1px solid var(--ink)}.chip.supported{background:var(--shoal)}.chip.negative{background:var(--land)}
 .chip.superseded,.chip.not-run{border-style:dashed;color:var(--sound)}
@@ -769,6 +816,7 @@ def render(data):
     code = "; ".join(f"{k} at {v}" if v else f"{k} not checked out here" for k, v in data["code"].items()) or "none cited"
     behind = (f'<dt>Behind</dt><dd class="alarm">{n(data["behind_base"], "commit")} behind {E(data["base"])}; run git pull</dd>'
               if data["behind_base"] else "")
+    inferred = {e["to"]: e["from"] for e in data["lineage"] if e["lineage_inferred"]}
     link_key = "".join(f'<span class="link {k}">{E(k)}</span>{E(t)}' for k, (_, t) in LINKS.items())
     footer = (f"Served live from {E(socket.gethostname())}; re-surveyed at most every {max(1, round(live / 60))} min on reload."
               if live else "Regenerate after a wake to refresh.")
@@ -802,14 +850,15 @@ def render(data):
 <span class="st"><span class="ripple"></span>ripple, stop spending</span><span class="st"><span class="unchecked"></span>unchecked, nothing reached a verdict</span></div>
 
 <h2 id="questions">Questions</h2><p class="lede">Each card placed in the order it was frozen. A supersedes line keeps the row, a spawned line starts a new one. A clean negative is a finished result.</p>
-<div class="graphwrap">{atlas_graph(runs)}</div>
+<div class="graphwrap">{atlas_graph(runs, data["lineage"])}</div>
 <div class="legend"><span class="key k-sup"></span>supported<span class="key k-neg"></span>clean negative<span class="key k-open"></span>open or explore
 <span class="key k-dash"></span>superseded or not run<span class="key k-dot"></span>ran without a scheduler record, or no record at all
 <span class="key k-ref"></span>report only on another branch<span class="key k-pair"></span>no partner metric</div>
+<p class="note">Solid arrows come from a card's supersedes key, dashed ones from spawned_from. A dotted arrow labelled inferred from name links two cards whose ids look like a chain while neither card names the other; set the key in question.card to make it a fact.</p>
 
 <h2 id="runs">Runs</h2><p class="lede">Shaded time is before the card was committed. Compute there would be a violation. Each evidence row carries its receipts; hover one for why it has its state.</p>
 <div class="legend">{link_key}</div>
-{"".join(run_block(r) for r in runs)}
+{"".join(run_block(r, inferred.get(r["id"])) for r in runs)}
 
 <h2 id="drawer">Drawer</h2><p class="lede">Branches ahead of {E(data["base"])} and whether they touch guard files, the workflow, or watched paths. The fence blocks these from merging.</p>
 <div class="wide"><table class="drawer"><thead><tr><th>Branch</th><th>Ahead</th><th>Guard or workflow</th><th>Watched paths</th><th>Last commit</th></tr></thead>

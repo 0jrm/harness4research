@@ -19,6 +19,7 @@
 | `summary` | counts of `runs`, of runs with a `ripple`, a `handled` failure or an `unchecked` line, and of runs where `needs_you` is not empty |
 | `waters` | one entry per place compute ran: `name`, `fence` (`bank` Slurm with a capped account, `bump` a launch host, `none` no gate), `runs`, `hand` (runs placed only by `execution.tsv` rows), `desc` and `count` |
 | `budget`, `version`, `watch`, `code`, `globs` | the budget card, `guard/VERSION`, the watch list, the code repositories reports cite, and the `--runs` filters |
+| `lineage` | edges of the question map: `from`, `to`, `kind` (`supersedes`, `spawned_from` or `inferred`) and `lineage_inferred`. An inferred edge links a card that sets neither key to the id it looks like it grew out of: `<parent>-<suffix>`, a trailing letter such as `054b` after `054` or `e2c` after `e2b`, or a trailing number one higher. The page draws it dotted and labels it "inferred from name". A key set to `none` stops inference |
 | `branches` | remote branches ahead of `base`, with what they change under `guard/`, `.github/` and watched paths |
 | `runs` | one object per run, below |
 
@@ -36,7 +37,7 @@
 | `card_history`, `card_blob` | the card's commits, oldest first, and its blob hash |
 | `manifests` | scheduler records, one per job |
 | `execution` | the `execution.tsv` ledger: `path`, `committed`, `header_ok`, and `rows` with `id ts field value why evidence`. Null when the run has none |
-| `incidents` | incident write-ups under `incidents/` |
+| `incidents`, `stray_incidents` | incident write-ups under `incidents/`, and `incident*.md` files at the run root, where the guard does not count them |
 | `report`, `report_refs` | the report read here, with its evidence rows and their receipts; when there is none here, the refs that have one |
 | `ripples` | the run's `guard/run ripples` lines: `status`, `check`, `detail` |
 | `violations` | sentences for what breaks the card discipline |
@@ -52,6 +53,6 @@
 | `report not pulled` | no report here, but `base` has one, so this checkout is behind |
 | `superseded` | another card names this run in `supersedes` |
 | `open` | jobs with manifests, no report yet |
-| `recorded by hand` | no manifest, but `execution.tsv` rows or an incident show it ran |
+| `recorded by hand` | no manifest, but `execution.tsv` rows or an incident write-up show it ran |
 | `no scheduler record` | the card is frozen and nothing else is recorded. The run may have happened where no scheduler writes a manifest |
 | `not run` | the card is not committed and nothing shows a run |
