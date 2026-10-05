@@ -19,7 +19,7 @@ The gaps are below, ordered by what they cost in that session. Every item reache
 | 3 | Link question cards to what ran | after 1 |
 | 7 | Skills reach every session | small |
 | 4 | The execution envelope: design in the card, execution in `execution.tsv` | done, schema 3 |
-| 9 | One checklist per action | later |
+| 9 | One checklist per action | remedies on ripples and preflight lines done; the rest later |
 | 8 | Continuity across sessions | later, skill only |
 
 Each item below gives the smallest design that closes the gap, its effect on existing projects, and its risks. Every new budget key is optional with a default. Every new fence rule follows the ratchet in the contract.
