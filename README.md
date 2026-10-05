@@ -94,6 +94,32 @@ The walls are only as strong as the gap between your credentials and the agent's
 
 If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh --pstack skip` so each agent loads pstack once. The skill works without pstack, but uses its playbooks when present.
 
+## Atlas
+
+`guard atlas` draws one read-only page of a guarded project: where compute ran and what fenced it, spend against the budget, every run's ripples, the question cards as a map, and for each run its card, lifeline, and evidence receipts. The page never shows a green for something it did not check.
+
+![The atlas of the test fixture: hosts and their fences, the budget bar, and the ripples matrix](docs/img/atlas.png)
+
+To serve the page live from a shared login node, give `--serve` a socket path. The socket is created 0600, so only you can reach it:
+
+```shell
+guard atlas ~/path/to/your-repo --serve /tmp/$USER-atlas.sock
+```
+
+Then, on your laptop, forward a local port to that socket and open `http://127.0.0.1:8765/`:
+
+```shell
+ssh -N -L 8765:/tmp/$USER-atlas.sock you@login-node
+```
+
+The page re-surveys the project on reload, at most every `--every` seconds (default 300). Without `--serve`, `guard atlas` writes the page once, to `--out` or else `$TMPDIR/atlas-<project>-<uid>.html`, readable only by you, never into the project. These flags narrow or change what it reads:
+
+- `--runs GLOB` shows only runs whose id matches the glob, and you can repeat it: `--runs 'emu-*' --runs 'explore-emu-*'`.
+- `--title NAME` sets the page title, which defaults to the project name.
+- `--head-only` reads runs from HEAD alone and ignores uncommitted run files in the working tree.
+- `--no-ripples` skips `guard/run ripples`, for a machine without `sacct`. The page then says that no check reached a verdict.
+- `--json FILE` also writes the data the page is drawn from. [docs/atlas-json.md](docs/atlas-json.md) describes every field.
+
 ## Commands
 
 | Command | Where | What it does |
