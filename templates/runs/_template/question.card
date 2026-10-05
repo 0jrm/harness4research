@@ -6,6 +6,8 @@ metric: <exact definition, script path, commit>
 partner_metric: <a metric that punishes doing less: smoothing, averaging, predicting the prior>
 baseline: <run id or configuration of the control>
 baseline_tolerance: <number>
+supersedes: <run id this card replaces, or none>
+spawned_from: <run id this card grew out of, or none>
 budget_gpu_hours: <GPU-hours this question is worth; leave the placeholder to use default_run_gpu_hours>
 budget_core_hours: <core-hours this question is worth; leave the placeholder to use default_run_core_hours>
 deadline: <YYYY-MM-DD after which no job for this run starts; leave the placeholder for stop_date alone>
