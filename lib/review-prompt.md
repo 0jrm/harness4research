@@ -33,7 +33,7 @@ If a fix needs more than a few lines, or you cannot tell what the user meant, le
 
 ## Verdict
 
-- `approve` means the diff does what the request asks, the tests pass, and nothing is left to fix.
+- `approve` means the diff does what the request asks, any test you ran passed, and nothing is left to fix.
 - `changes` means the diff misses part of the request, or has a defect too large to fix here. Name what is missing.
 - `escalate` means a human must decide. The request is ambiguous, the plan contradicts it, the fix is large, or the work touches something only a human changes, such as a guard file, a frozen question card, a credential, or a limit.
 
