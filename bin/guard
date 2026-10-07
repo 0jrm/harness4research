@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# usage: guard <survey|init|archive|doctor|preflight|ripples|manifest|fence|code|launch|atlas|version> [args...]
+# usage: guard <survey|init|archive|doctor|preflight|ripples|manifest|fence|code|launch|atlas|needs-you|hooks|version> [args...]
 set -euo pipefail
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 cmd=${1:-help}; shift || true
 case $cmd in
   survey|init|archive|doctor) exec bash "$here/lib/$cmd.sh" "$@" ;;
   atlas) exec python3 "$here/lib/atlas.py" "$@" ;;
+  needs-you) exec python3 "$here/lib/needs_you.py" "$@" ;;
+  hooks) exec python3 "$here/lib/hooks.py" "$@" ;;
   preflight|ripples|manifest|fence|code|launch)
     # Run the enclosing project's protected guard/run, never this harness's templates.
     base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
@@ -40,6 +42,10 @@ Project setup, run from your machine:
   archive <repo>      tag every remote branch before any cleanup
   doctor [repo]       read-only checklist of the Quickstart setup: ruleset, credentials, capped account, skills
   atlas [repo]        read-only HTML chart of runs, ripples, cards, receipts and the drawer; --serve PORT|SOCKET serves it live
+
+In any git repository, guarded or not:
+  needs-you           list what only you can do, check, or approve; add, show, ack, done, dismiss manage the queue
+  hooks install claude [--user|--project]  remind you and Claude Code of open needs-you items on every prompt
 
 Inside a guarded project, guard <command> runs the project's guard/run from the protected branch:
   preflight, ripples, manifest, fence, code
