@@ -1284,6 +1284,9 @@ expect hooks-refuse-bad-json fail 'is not valid JSON' -- env HOME="$tmp/bad-home
 expect hooks-bad-json-untouched ok '^\{"hooks": $' -- cat "$tmp/bad-home/.claude/settings.json"
 echo '{"hooks": {"SessionStart": [{"hooks": null}]}}' > "$tmp/bad-home/.claude/settings.json"
 expect hooks-refuse-bad-shape fail 'does not have the shape Claude Code reads for hooks' -- env HOME="$tmp/bad-home" "$guard" hooks install claude
+mkdir -p "$tmp/locked-home/.claude"; chmod 555 "$tmp/locked-home/.claude"
+expect hooks-unwritable fail "^guard hooks: cannot write $tmp/locked-home/.claude/settings.json: Permission denied$" -- env HOME="$tmp/locked-home" "$guard" hooks install claude
+chmod 755 "$tmp/locked-home/.claude"
 expect hooks-unknown-agent fail 'invalid choice' -- "$guard" hooks install codex
 
 echo; echo "$pass passed, $fail failed"

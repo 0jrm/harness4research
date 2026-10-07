@@ -82,7 +82,10 @@ def main():
     if not added:
         print(f"{path} already runs {COMMAND} on {' and '.join(EVENTS)}; nothing changed")
         return
-    write(path, text)
+    try:
+        write(path, text)
+    except OSError as e:
+        sys.exit(f"guard hooks: cannot write {path}: {e.strerror}")
     print(f"{path}: added {' and '.join(added)} hooks that run {COMMAND}")
     if not shutil.which("guard"):
         print("The hooks call guard by name, and guard is not on this PATH. Run install.sh, or add its bin directory to PATH.", file=sys.stderr)
