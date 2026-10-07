@@ -29,6 +29,9 @@ The agent that wrote a change does not review it and does not merge it by hand. 
    ## Request (verbatim)
    <the user's request>
 
+   ## Scope
+   <only when this pull request covers part of the request: which part, and which pull request or branch takes the rest>
+
    ## Plan
    <what you changed, file by file, and why>
 

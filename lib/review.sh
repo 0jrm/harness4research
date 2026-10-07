@@ -48,8 +48,10 @@ git -C "$top" fetch -q origin || refuse "cannot fetch origin."
 [ "$(git -C "$top" rev-parse -q --verify "origin/$head_ref" || true)" = "$head_sha" ] \
   || refuse "origin/$head_ref is not at the pull request's head ${head_sha:0:7} after a fetch. Push the branch, then rerun."
 
-work=$(mktemp -d); wt=$work/pr-$pr
-trap 'git -C "$top" worktree remove --force "$wt" 2>/dev/null || true; rm -rf "$work"' EXIT
+wt=$state/review-worktrees/pr-$pr
+git -C "$top" worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"
+mkdir -p "$(dirname "$wt")"
+trap 'git -C "$top" worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"' EXIT
 git -C "$top" worktree add -q --detach "$wt" "$head_sha"
 mkdir "$wt/.guard-review"; echo '*' > "$wt/.guard-review/.gitignore"
 mkdir -p "$state/reviews"
