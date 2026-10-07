@@ -980,6 +980,88 @@ expect config-bad-policy fail 'merge_policy is autonomous or semi-manual' -- "$g
 expect config-unknown-key fail "unknown key 'colour'" -- "$guard" config get colour
 expect config-private ok '^600$' -- stat -c %a "$XDG_CONFIG_HOME/guard/config"
 
+echo "== review"
+RV=$tmp/rv
+git init -q --bare -b main "$RV.git"; git clone -q "$RV.git" "$RV" 2>/dev/null; cd "$RV" || exit 1
+git checkout -q -b main; printf 'def add(a, b):\n    return a - b\n' > calc.py; git add -A; git commit -q -m init
+git push -q -u origin main; git remote set-head origin -a >/dev/null
+git switch -q -c feat/add; echo '# adds two numbers' >> calc.py; git commit -q -am "feat: add"; git push -q -u origin feat/add
+cat > "$tmp/fake-reviewer" <<'FAKE'
+#!/usr/bin/env bash
+echo "call ${GH_TOKEN:-no-token} $*" >> "$FAKE_DIR/calls"
+cp .guard-review/prompt.md "$FAKE_DIR/prompt.md"
+git push -q origin HEAD:refs/heads/sneaky 2>/dev/null && echo pushed >> "$FAKE_DIR/calls"
+case $FAKE_REVIEW in
+  fix-once) if grep -q 'a - b' calc.py; then sed -i 's/a - b/a + b/' calc.py; git commit -qam "fix: add adds"; fi
+    echo "VERDICT: approve - adds as asked" ;;
+  fix-always) date +%s%N >> calc.py; git commit -qam "fix: more"; echo "VERDICT: approve - fixed again" ;;
+  dirty) echo junk >> calc.py; echo "VERDICT: approve - fine" ;;
+  none) echo "It looks fine to me." ;;
+  crash) exit 3 ;;
+  *) printf 'Report.\nVERDICT: %s - reason for %s  \n\n' "$FAKE_REVIEW" "$FAKE_REVIEW" ;;
+esac
+FAKE
+chmod +x "$tmp/fake-reviewer"; mkdir -p "$tmp/fake" "$tmp/fakebin"; ln -s "$tmp/fake-reviewer" "$tmp/fakebin/codex"
+pr_json() {  # pr_json [jq filter]: pull request 5 for feat/add at origin's head with one passing check, edited by the filter
+  jq -nc --arg sha "$(git rev-parse origin/feat/add)" '{state: "OPEN", isDraft: false, headRefName: "feat/add", headRefOid: $sha,
+    baseRefName: "main", isCrossRepository: false,
+    statusCheckRollup: [{__typename: "CheckRun", name: "fence", status: "COMPLETED", conclusion: "SUCCESS"}]} | '"${1:-.}"
+}
+review() {  # review <FAKE_REVIEW> [env...]: guard review 5 with the fake reviewer, fresh call and gh logs
+  rm -f "$tmp/fake/calls" "$tmp/gh.log" "$tmp/guard.log"
+  env FAKE_REVIEW="$1" FAKE_DIR="$tmp/fake" MOCK_GH_LOG="$tmp/gh.log" MOCK_GUARD_LOG="$tmp/guard.log" MOCK_GH_PR="$(pr_json)" \
+    GH_TOKEN=github_pat_agent "${@:2}" "$guard" review 5
+}
+reviews=$RV/.git/guard/reviews.tsv brief=$RV/.git/guard/briefs/feat-add.md
+"$guard" config set reviewer_cmd_proprietary "$tmp/fake-reviewer" >/dev/null
+expect review-no-brief fail "no brief for feat/add. Write $brief with the user's request" -- review approve
+mkdir -p "$(dirname "$brief")"; printf '## Request (verbatim)\n\n## Plan\nChange add.\n' > "$brief"
+expect review-empty-request fail "the '## Request \(verbatim\)' section of .* is empty" -- review approve
+printf '## Request (verbatim)\nMake add actually add, plz\n\n## Plan\nI fixed the docstring.\n\n## Test command\npython3 -c "import calc"\n' > "$brief"
+mkdir -p "$tmp/xdg-local/guard"; echo "reviewer: local" > "$tmp/xdg-local/guard/config"
+expect review-local-refuses fail "reviewer is local and no local command is set. Set one: guard config set reviewer_cmd_local 'codex exec --oss -m <model>'$" -- review approve XDG_CONFIG_HOME="$tmp/xdg-local"
+expect review-not-open fail 'pull request #5 is merged' -- review approve MOCK_GH_PR="$(pr_json '.state = "MERGED"')"
+expect review-approve ok '^VERDICT: approve - reason for approve$' -- review approve
+expect review-one-round ok '^1$' -- grep -c '^call' "$tmp/fake/calls"
+expect review-recorded ok "	5	$(git rev-parse origin/feat/add)	approve	$tmp/fake-reviewer	reason for approve$" -- tail -n 1 "$reviews"
+expect review-tsv-header ok '^ts	pr	head	verdict	reviewer	reason$' -- head -n 1 "$reviews"
+expect review-prompt-request ok '^Make add actually add, plz$' -- cat "$tmp/fake/prompt.md"
+expect review-prompt-diff ok '^\+# adds two numbers$' -- cat "$tmp/fake/prompt.md"
+expect review-prompt-rules ok '^VERDICT: <approve\|changes\|escalate> - <one-line reason>$' -- cat "$tmp/fake/prompt.md"
+expect review-no-token ok '^call no-token Read .guard-review/prompt.md' -- cat "$tmp/fake/calls"
+expect review-reviewer-cannot-push ok '^$' -- git ls-remote origin sneaky
+expect review-comment ok '^pr comment 5 --body guard review: approve at [0-9a-f]{7}\. reason for approve$' -- cat "$tmp/gh.log"
+expect review-comment-no-brief fail - -- grep -q 'plz' "$tmp/gh.log"
+expect review-approve-queues-nothing fail - -- test -e "$tmp/guard.log"
+expect review-worktree-removed ok '^1$' -- bash -c 'git worktree list | wc -l'
+old_head=$(git rev-parse origin/feat/add)
+expect review-fix-approves ok '^VERDICT: approve - adds as asked$' -- review fix-once
+expect review-fix-two-rounds ok '^2$' -- grep -c '^call' "$tmp/fake/calls"
+expect review-fix-pushed ok 'return a \+ b' -- git show origin/feat/add:calc.py
+expect review-fix-one-commit ok '^fix: add adds$' -- git log --format=%s -1 origin/feat/add
+expect review-fix-recorded-at-new-head ok "	5	$(git rev-parse origin/feat/add)	approve	" -- tail -n 1 "$reviews"
+expect review-fix-not-old-head fail - -- bash -c 'tail -n 1 "$1" | grep -q "$2"' _ "$reviews" "$old_head"
+expect review-still-fixing fail '^VERDICT: changes - the reviewer was still committing fixes after 2 rounds$' -- review fix-always
+expect review-still-fixing-queues ok '^check$' -- sed -n 4p "$tmp/guard.log"
+git push -q -f origin "$old_head:refs/heads/feat/add"; git fetch -q origin
+expect review-changes fail '^VERDICT: changes - reason for changes$' -- review changes
+expect review-changes-queue ok "^needs-you add --kind check --title Review of PR #5 asks for changes --why reason for changes --path $RV/.git/guard/reviews/5-[0-9a-f]{12}-r1.txt --path $brief --source guard review  needs-you show n1  $" -- \
+  bash -c 'tr "\n" " " < "$1"' _ "$tmp/guard.log"
+expect review-changes-block fail '^🩺 n1 · stub$' -- review changes
+expect review-changes-recorded ok '	changes	.*	reason for changes$' -- tail -n 1 "$reviews"
+expect review-escalate fail '^VERDICT: escalate - reason for escalate$' -- review escalate
+expect review-escalate-queue ok '^approve$' -- sed -n 4p "$tmp/guard.log"
+expect review-no-verdict fail "^VERDICT: escalate - the reviewer's last line is not a VERDICT line$" -- review none
+expect review-crash fail '^VERDICT: escalate - the reviewer command exited 3$' -- review crash
+expect review-dirty-discarded ok 'uncommitted edits, and they are discarded' -- review dirty
+expect review-dirty-not-pushed ok "^$old_head	" -- git ls-remote origin refs/heads/feat/add
+expect review-strict-verdict fail 'not a VERDICT line' -- review 'approve?'
+"$guard" config set reviewer_cmd_proprietary "" >/dev/null
+review approve PATH="$tmp/fakebin:$(path_without claude)" >/dev/null 2>&1
+expect review-default-reviewer ok '^call no-token exec --sandbox danger-full-access Read ' -- cat "$tmp/fake/calls"
+expect review-moved-head fail "origin/feat/add is not at the pull request's head" -- review approve MOCK_GH_PR="$(pr_json '.headRefOid = "0000000"')"
+"$guard" config set reviewer_cmd_proprietary "$tmp/fake-reviewer" >/dev/null
+
 echo "== upgrade from each supported release"
 # old_project <tag> <dir>: a project guarded by the harness at <tag>, with the budget filled in and merged to main.
 old_project() {

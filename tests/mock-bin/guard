@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stub for guard needs-you, which lands on another branch: appends its arguments to MOCK_GUARD_LOG, one per line and
+# Stub for guard needs-you: appends its arguments to MOCK_GUARD_LOG, one per line and
 # a blank line after each call. add prints the next id, n1, n2, ...; show prints a one-line block.
 [ "${1:-}" = needs-you ] || { echo "mock guard: unsupported $*" >&2; exit 1; }
 log=${MOCK_GUARD_LOG:-/dev/null}
