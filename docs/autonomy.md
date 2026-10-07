@@ -51,11 +51,11 @@ The brief stays on your machine. It lives in the repository's git directory, whi
 
 ## What `guard review` checks
 
-`guard review <pr>` checks out the pull request's head in a fresh worktree under `.git/guard/review-worktrees/`. It runs the reviewer with [lib/review-prompt.md](../lib/review-prompt.md), the brief, and the diff. The reviewer runs the test command, and may commit small fixes such as a typo or a missing import. It cannot push: `guard review` starts it without `GH_TOKEN`, `GITHUB_TOKEN`, or `SSH_AUTH_SOCK`, and with a push URL that fails. `guard review` pushes the reviewer's commits itself.
+`guard review <pr>` checks out the pull request's head in a fresh worktree under `.git/guard/review-worktrees/`. It runs the reviewer with [lib/review-prompt.md](../lib/review-prompt.md), the brief, and the diff. The reviewer leaves the full test suite to CI, which `guard merge` requires to pass. It runs one targeted test only when the diff raises a doubt that the test settles, and it may commit small fixes such as a typo or a missing import. The default Claude reviewer starts without MCP servers, plugins, hooks, or the skills list, so each of its turns carries a few thousand tokens of setup instead of tens of thousands. It cannot push: `guard review` starts it without `GH_TOKEN`, `GITHUB_TOKEN`, or `SSH_AUTH_SOCK`, and with a push URL that fails. `guard review` pushes the reviewer's commits itself.
 
 A round that adds commits is followed by another round, up to `review_rounds` (default 2). The verdict is approve only for a round that added no commits. The reviewer ends with one of three verdicts:
 
-- `approve`: the diff does what the request asks and the tests pass. Exit 0.
+- `approve`: the diff does what the request asks, and any test the reviewer ran passed. Exit 0.
 - `changes`: part of the request is missing, or a defect is too large to fix in review. Exit 1, and a `check` item joins the queue.
 - `escalate`: a person must decide, for example because the request is ambiguous or the change touches a guard file, a frozen question card, a credential, or a limit. Exit 1, and an `approve` item joins the queue.
 

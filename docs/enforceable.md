@@ -32,7 +32,7 @@ FAIL  the GitHub login in this shell administers lab/proj, so an agent here can 
       Run agents with a token that has no Administration permission: https://github.com/0jrm/harness4research/blob/main/docs/enforceable.md#5-give-agents-weaker-credentials
 cannot check from here  whether Slurm caps account gom-agents: sacctmgr is not on this host
       Run guard doctor on a cluster login node: https://github.com/0jrm/harness4research/blob/main/docs/enforceable.md#6-cap-the-cluster-account
-pass  reviewer is proprietary: claude -p --permission-mode acceptEdits --allowedTools=Bash, and claude is on PATH
+pass  reviewer is proprietary: claude -p --permission-mode acceptEdits --strict-mcp-config --setting-sources project --disable-slash-commands --tools=Bash,Read,Edit,Grep,Glob --allowedTools=Bash, and claude is on PATH
 pass  merge_policy is autonomous in guard/budget.card on origin/main, so guard merge also needs the ruleset and non-admin login items above to pass
 FAIL  Claude Code does not show open needs-you items: neither ~/.claude/settings.json nor /home/you/proj/.claude/settings.json runs guard needs-you --remind on SessionStart and UserPromptSubmit
       Run guard hooks install claude

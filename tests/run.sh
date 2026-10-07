@@ -979,7 +979,7 @@ xdg() {  # xdg <name> <config line>...: prints a fresh XDG_CONFIG_HOME whose gua
   mkdir -p "$tmp/xdg-$1/guard"; printf '%s\n' "${@:2}" > "$tmp/xdg-$1/guard/config"; echo "$tmp/xdg-$1"
 }
 mkdir -p "$tmp/claude-bin"; ln -s "$tmp/doctor-reviewer" "$tmp/claude-bin/claude"
-expect doctor-reviewer-default ok '^pass  reviewer is proprietary: claude -p --permission-mode acceptEdits --allowedTools=Bash, and claude is on PATH$' -- \
+expect doctor-reviewer-default ok '^pass  reviewer is proprietary: claude -p --permission-mode acceptEdits --strict-mcp-config --setting-sources project --disable-slash-commands --tools=Bash,Read,Edit,Grep,Glob --allowedTools=Bash, and claude is on PATH$' -- \
   doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-bin:$PATH"
 expect doctor-reviewer-missing fail '^FAIL  reviewer is proprietary, and none of claude or cursor-agent is on PATH$' -- doctor XDG_CONFIG_HOME="$(xdg empty)"
 expect doctor-reviewer-missing-hint fail "^      Install Claude Code or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'$" -- \
@@ -998,7 +998,7 @@ expect doctor-claude-signed-in ok '^pass  reviewer is proprietary: claude, then 
   doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-auth:$tmp/cursor-bin:$PATH" MOCK_CLAUDE_LOGGED_IN=true
 expect doctor-claude-signed-out-falls-back ok '^pass  reviewer is proprietary: claude, then cursor-agent, and claude is on PATH; claude is not signed in, so reviews fall back to cursor-agent; run claude auth login$' -- \
   doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-auth:$tmp/cursor-bin:$PATH" MOCK_CLAUDE_LOGGED_IN=false
-expect doctor-claude-signed-out-alone fail '^FAIL  reviewer is proprietary: claude -p --permission-mode acceptEdits --allowedTools=Bash, and claude is not signed in$' -- \
+expect doctor-claude-signed-out-alone fail '^FAIL  reviewer is proprietary: claude -p --permission-mode acceptEdits --strict-mcp-config --setting-sources project --disable-slash-commands --tools=Bash,Read,Edit,Grep,Glob --allowedTools=Bash, and claude is not signed in$' -- \
   doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-auth:$PATH" MOCK_CLAUDE_LOGGED_IN=false
 expect doctor-claude-signed-out-remedy fail '^      Run claude auth login$' -- \
   doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-auth:$PATH" MOCK_CLAUDE_LOGGED_IN=false
@@ -1171,7 +1171,7 @@ printf '%s\n' "\$@" > "\$FAKE_DIR/argv"
 exec "$tmp/fake-reviewer" "\$@"
 FAKE
 chmod +x "$tmp/fakeclaude/claude"; review approve PATH="$tmp/fakeclaude:$PATH" >/dev/null 2>&1
-expect review-default-claude-argv ok '^-p\|--permission-mode\|acceptEdits\|--allowedTools=Bash\|Read \.guard-review/prompt\.md and follow it\. End your reply with the VERDICT line it describes\.$' -- \
+expect review-default-claude-argv ok '^-p\|--permission-mode\|acceptEdits\|--strict-mcp-config\|--setting-sources\|project\|--disable-slash-commands\|--tools=Bash,Read,Edit,Grep,Glob\|--allowedTools=Bash\|Read \.guard-review/prompt\.md and follow it\. End your reply with the VERDICT line it describes\.$' -- \
   paste -sd'|' "$tmp/fake/argv"
 mkdir -p "$tmp/badclaude"; cat > "$tmp/badclaude/claude" <<'FAKE'
 #!/usr/bin/env bash
@@ -1189,7 +1189,7 @@ expect review-fallback-all-fail fail '^VERDICT: escalate - the reviewer command 
   review crash PATH="$tmp/badclaude:$tmp/fakebin:$PATH"
 expect review-fallback-all-fail-recorded ok '	escalate	cursor-agent	the reviewer command exited 3' -- tail -n 1 "$reviews"
 review approve PATH="$tmp/fakeclaude:$tmp/fakebin:$PATH" >/dev/null 2>&1
-expect review-claude-alone ok '^call no-token -p --permission-mode acceptEdits --allowedTools=Bash Read ' -- cat "$tmp/fake/calls"
+expect review-claude-alone ok '^call no-token -p --permission-mode acceptEdits --strict-mcp-config --setting-sources project --disable-slash-commands --tools=Bash,Read,Edit,Grep,Glob --allowedTools=Bash Read ' -- cat "$tmp/fake/calls"
 expect review-claude-alone-once ok '^1$' -- grep -c '^call' "$tmp/fake/calls"
 expect review-claude-alone-recorded ok '	approve	claude	reason for approve$' -- tail -n 1 "$reviews"
 "$guard" config set reviewer_cmd_proprietary "$tmp/fake-reviewer" >/dev/null
