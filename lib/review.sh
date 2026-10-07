@@ -17,8 +17,7 @@ pr=$1
 refuse() { echo "guard review: $1" >&2; exit 2; }
 
 resolve_reviewer || refuse "$reviewer_problem. $reviewer_fix"
-rounds=$(config_get review_rounds)
-[[ $rounds =~ ^[1-9][0-9]*$ ]] || refuse "review_rounds is '$rounds' in $config_file. Set it: guard config set review_rounds 2"
+rounds=$(config_whole review_rounds) || refuse "$rounds"
 
 info=$(gh pr view "$pr" --json state,headRefName,headRefOid,baseRefName,isCrossRepository \
   --jq '[.state, .headRefName, .headRefOid, .baseRefName, (.isCrossRepository | tostring)] | @tsv' 2>&1) \
@@ -27,10 +26,8 @@ IFS=$'\t' read -r pr_state head_ref head_sha base_ref cross <<<"$info"
 [ "$pr_state" = OPEN ] || refuse "pull request #$pr is ${pr_state,,}, so there is nothing to review."
 [ "$cross" = false ] || refuse "pull request #$pr comes from a fork. guard review pushes fixes to origin, so it reviews branches of origin only."
 
+problem=$(brief_problem "$head_ref"); [ -z "$problem" ] || refuse "$problem"
 brief=$(brief_path "$head_ref")
-[ -f "$brief" ] || refuse "no brief for $head_ref. Write $brief with the user's request copied word for word under '## Request (verbatim)', then the plan under '## Plan'. The review-and-merge skill gives the format."
-request=$(awk '/^## / { on = ($0 == "## Request (verbatim)"); next } on' "$brief")
-[[ $request =~ [^[:space:]] ]] || refuse "the '## Request (verbatim)' section of $brief is empty. Copy the user's request into it word for word."
 
 git -C "$top" fetch -q origin || refuse "cannot fetch origin."
 [ "$(git -C "$top" rev-parse -q --verify "origin/$head_ref" || true)" = "$head_sha" ] \
@@ -45,13 +42,6 @@ mkdir "$wt/.guard-review"; echo '*' > "$wt/.guard-review/.gitignore"
 mkdir -p "$state/reviews"
 ask="Read .guard-review/prompt.md and follow it. End your reply with the VERDICT line it describes."
 
-# Pushes to origin or anywhere on GitHub fail inside the reviewer; pushes the project's own tests make to local
-# repositories still work.
-no_push=(GIT_CONFIG_COUNT=4)
-for prefix in "$(git -C "$top" remote get-url origin)" https://github.com/ git@github.com: ssh://git@github.com/; do
-  n=$(( (${#no_push[@]} - 1) / 2 ))
-  no_push+=("GIT_CONFIG_KEY_$n=url.guard-review-never-pushes:.pushInsteadOf" "GIT_CONFIG_VALUE_$n=$prefix")
-done
 for ((round = 1; round <= rounds; round++)); do
   before=$(git -C "$wt" rev-parse HEAD)
   {
@@ -62,25 +52,14 @@ for ((round = 1; round <= rounds; round++)); do
     printf '\n## Diff\n\n```diff\n'; git -C "$wt" diff "origin/$base_ref...HEAD"; printf '```\n'
   } > "$wt/.guard-review/prompt.md"
   log=$state/reviews/$pr-${before:0:12}-r$round.txt
-  for ((i = 0; i < ${#reviewer_cmds[@]}; i++)); do
-    candidate=${reviewer_cmds[i]}
-    echo "guard review: pull request #$pr, round $round of $rounds at ${before:0:7}: $candidate" >&2
-    rc=0
-    (cd "$wt" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK "${no_push[@]}" \
-      bash -c "$candidate \"\$@\"" reviewer "$ask") < /dev/null > "$log" 2> "$log.err" || rc=$?
-    err=$(cat "$log.err" "$log" | grep -v '^[[:space:]]*$' | tail -n 1 | tr -d '\r' || true)
-    [ $rc -ne 0 ] && [ $((i + 1)) -lt ${#reviewer_cmds[@]} ] || break
-    echo "guard review: ${candidate%% *} failed (${err:-exit $rc}); trying ${reviewer_cmds[i + 1]%% *}" >&2
-    git -C "$wt" reset -q --hard "$before"; git -C "$wt" clean -qfdx -e .guard-review
-  done
-  last=$(grep -v -e '^[[:space:]]*$' -e '^[[:space:]]*```[[:space:]]*$' "$log" | tail -n 1 | tr -d '\r' || true)
-  last=${last%"${last##*[![:space:]]}"}
+  run_reviewer "$wt" "$log" "$ask" "pull request #$pr, round $round of $rounds at ${before:0:7}"
+  last=$(reply_lines "$log" | tail -n 1)
   if [ $rc -ne 0 ]; then
     verdict=escalate reason="the reviewer command exited $rc${err:+: ${err:0:160}}"
   elif [[ $last =~ ^VERDICT:\ (approve|changes|escalate)\ -\ (.*[^[:space:]].*)$ ]]; then
     verdict=${BASH_REMATCH[1]} reason=${BASH_REMATCH[2]}
   else verdict=escalate reason="the reviewer's last line is not a VERDICT line"; fi
-  reason=$(sed -e 's/;;*/;/g' -e 's/^[; ]*//' -e 's/[; ]*$//' <<<"${reason//$'\t'/ }")
+  reason=$(one_line "$reason")
   git -C "$wt" status --porcelain | grep -q . && echo "note: the reviewer left uncommitted edits, and they are discarded." >&2
   after=$(git -C "$wt" rev-parse HEAD)
   [ "$after" = "$before" ] && break
@@ -92,17 +71,9 @@ for ((round = 1; round <= rounds; round++)); do
 done
 
 head=$(git -C "$wt" rev-parse HEAD)
-[ -s "$state/reviews.tsv" ] || printf 'ts\tpr\thead\tverdict\treviewer\treason\n' > "$state/reviews.tsv"
-printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$pr" "$head" "$verdict" "${candidate%% *}" "$reason" >> "$state/reviews.tsv"
-gh pr comment "$pr" --body "guard review: $verdict at ${head:0:7}. $reason" >/dev/null \
-  || echo "note: could not comment on pull request #$pr." >&2
+record_verdict "$pr" "$head" "$verdict" "${candidate%% *}" "$reason"
 echo "VERDICT: $verdict - $reason"
 echo "The reviewer's report: $log"
-case $verdict in
-  approve) exit 0 ;;
-  changes) queue --kind check --title "Review of PR #$pr asks for changes" --why "$reason" \
-    --path "$log" --path "$brief" --source "guard review" ;;
-  escalate) queue --kind approve --title "Review of PR #$pr needs your decision" --why "$reason" \
-    --path "$log" --path "$brief" --source "guard review" ;;
-esac
+[ "$verdict" = approve ] && exit 0
+queue_verdict "$pr" "$verdict" "$reason" "$log" "$brief"
 exit 1
