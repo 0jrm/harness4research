@@ -175,7 +175,7 @@ Pushing a change to `.github/workflows/` needs a token with the `workflow` scope
 
 ## Requirements
 
-bash 4 or later and git 2.30 or later on your machine and the cluster. Slurm on the cluster. GitHub for the fence, and `gh` for the printed PR commands. `tests/run.sh` needs python3 with PyYAML.
+bash 4 or later and git 2.30 or later on your machine and the cluster. Slurm on the cluster. GitHub for the fence, and `gh` for the printed PR commands. `tests/run.sh` needs python3 with PyYAML, and jq.
 
 ## Test
 

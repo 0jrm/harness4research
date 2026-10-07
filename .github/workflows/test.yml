@@ -16,8 +16,8 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-      - name: Install shellcheck and PyYAML
-        run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck python3-yaml
+      - name: Install shellcheck, PyYAML and jq
+        run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck python3-yaml jq
       - name: Lint
         run: shellcheck -S warning bin/guard install.sh lib/*.sh templates/guard/run templates/guard/bin/*.sh tests/run.sh tests/atlas-fixture.sh tests/mock-bin/* examples/quickstart/run.sh examples/quickstart/job.sh examples/quickstart/checks/*
       - name: Compile Python
