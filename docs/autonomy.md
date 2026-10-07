@@ -132,6 +132,8 @@ Agents paste blocks from `guard needs-you show <id>` and never write one by hand
 - Claude Code, after `guard hooks install claude`, at session start and on every prompt.
 - Every other agent, at session start, because of a line in `AGENTS.md`.
 
+`guard atlas` shows the same queue under Needs you: open items first, with their commands to copy and their files, then acked items. [atlas.md](atlas.md) says how to serve the page.
+
 ## What agents never do
 
 Some of these are walls that hold even against an agent that ignores its instructions. The rest are rules that an honest agent follows and a reviewer checks.
