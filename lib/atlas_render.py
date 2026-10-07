@@ -95,6 +95,17 @@ def wrap(head, body, tail):
 def cmd(c):
     return f'<code class="cmd">{E(c)}</code>'
 
+def queued(q):
+    state = ' <em class="q-state">acked, not done</em>' if q["state"] == "acked" else ""
+    files = "".join(f"<li><code>{E(p)}</code></li>" for p in q["paths"])
+    return (f'<span class="id">{E(q["id"])}</span> <span class="o">{E(q["kind"])}</span> <strong>{E(q["title"])}</strong>{state}'
+            + (f'<p>Why: {E(q["why"])}</p>' if q["why"] else "")
+            + wrap("<p>Run, in order:</p><ol>", "".join(f"<li>{cmd(c)}</li>" for c in q["commands"]), "</ol>")
+            + (f'<p>Expect: {E(q["expect"])}</p>' if q["expect"] else "")
+            + (f'<p>Undo: {E(q["undo"])}</p>' if q["undo"] else "")
+            + wrap("<p>Files:</p><ul>", files, "</ul>")
+            + f'<p>Done: {cmd("guard needs-you done " + q["id"])}</p>' + (f'<p>Queued by {E(q["source"])}.</p>' if q["source"] else ""))
+
 def idlink(i):
     return f'<a class="id" href="#run-{E(i)}">{E(i)}</a>'
 
@@ -177,7 +188,7 @@ SAY_WHY = {"report unmerged", "report not pulled", "recorded by hand", "no sched
 GROUPS = [("stop", "Stop: a ripple fired"), ("rule", "A rule was broken"), ("look", "Worth a look"),
           ("await", "Awaiting a report"), ("quiet", "Nothing flagged")]
 GI = {g: i for i, (g, _) in enumerate(GROUPS)}
-SEVI = {"stop": "ripple", "rule": "rule", "branch": "branch", "await": "await", "file": "file"}
+SEVI = {"stop": "ripple", "rule": "rule", "branch": "branch", "await": "await", "file": "file", "you": "await", "acked": "await"}
 STATEW = {"ok": "holds", "local": "local", "unknown": "unknown", "broken": "broken"}
 
 def render(data):
@@ -275,7 +286,7 @@ def render(data):
     if data["rippled"] and not any_domain:
         v_sub += " No run has a domain check, so nothing here tests the science itself."
 
-    todo = []
+    todo = [("you", queued(q)) for q in data["queue"] if q["state"] == "open"]
     for r in ripple_runs:
         for k, c in F[r["id"]]["ripples"]:
             if k == "job-states":
@@ -317,6 +328,7 @@ def render(data):
     if data["worktree"] and data["uncommitted"]:
         todo.append(("file", f'<span class="id">{n(data["uncommitted"], "uncommitted file")} in the working tree</span><p>Receipts that point at them grade '
                              f'<em>local</em>, not <em>ok</em>, until they are committed. {cmd("git status --short runs/")}</p>'))
+    todo += [("acked", queued(q)) for q in data["queue"] if q["state"] == "acked"]
     todo_html = wrap('<ol class="todo">', "".join(f'<li class="todo-{s}">{icon(SEVI[s])}<div>{h}</div></li>' for s, h in todo), "</ol>") \
         or '<p class="note">Nothing is waiting on you.</p>'
 

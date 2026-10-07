@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # usage: tests/atlas-fixture.sh <dir>
 # Builds a guarded demo project at <dir>/casts-v4-training with an origin, twelve committed runs, two runs only on disk,
-# an agent branch, a report only on an unmerged branch, a checkout one commit behind origin/main, fake Slurm rows
-# and a sibling code repo <dir>/casts-loader that a report cites by name.
+# an agent branch, a report only on an unmerged branch, a checkout one commit behind origin/main, fake Slurm rows,
+# a sibling code repo <dir>/casts-loader that a report cites by name, and a needs-you queue with one open and one acked item.
 # Prints the env lines a caller exports before running ripples or guard atlas against it. ATLAS_FIXTURE_STAMP, when set,
 # replaces the harness commit and release in guard/VERSION, so that with a fixed TZ every commit id is the same on any machine.
 set -euo pipefail
@@ -180,6 +180,15 @@ mkdir -p runs/behind-card; printf 'ts\twhat\twhy\tevidence\n' > runs/behind-card
 card q-batch "Does a batch of 256 casts train as well as 512?" "batch 256 matches RMSE within 0.5%" "validation RMSE of T and S, scripts/score.py" "fraction of casts the model leaves at climatology"
 manifest q-batch 4860 2026-09-24T09:00:00Z hpc-g004
 echo 'cast,score' > runs/cosine-v2/scores.csv
+
+ny() { "$here/bin/guard" needs-you "$@" > /dev/null; }
+ny add --kind run --title "Merge PR #7, agent/fp32-check (autonomous merge refused)" --source "guard merge" \
+   --why "the branch raises max_walltime_minutes in guard/budget.card, which only a person may change" \
+   --run "cd $proj" --run "git diff origin/main...origin/agent/fp32-check -- guard/budget.card" --run "gh pr merge 7 --squash" \
+   --expect "Squashed and merged pull request #7" --undo "git revert the merge commit on a new branch" --path "$proj/guard/budget.card"
+ny add --kind check --title "Read the cosine-v2 report before the thesis figure" --source claude \
+   --why "one evidence row cites commit deadbee, which resolves nowhere" --path "$proj/runs/cosine-v2/report.md" --path "$proj/runs/cosine-v2/manifest-4812.txt"
+ny ack n2
 
 cat > "$root/sacct.rows" <<'S'
 4790|q-warmup|COMPLETED|5400|240

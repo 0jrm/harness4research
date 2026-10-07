@@ -1215,8 +1215,9 @@ releases=$(git -C "$here" tag -l 'v*' --contains "$oldest" --merged HEAD 2>/dev/
 if [ -z "$releases" ]; then fail=$((fail+1)); echo "FAIL compat-releases (no tags from $oldest; fetch them with git fetch --tags)"; fi
 for tag in $releases; do upgrade_from "$tag"; done
 echo "== atlas"
-mkdir -p "$tmp/atlas"; bash "$here/tests/atlas-fixture.sh" "$tmp/atlas" > "$tmp/atlas/env.sh"
-atlas_before=$(git -C "$tmp/atlas/casts-v4-training" status --porcelain)
+fx=$(mktemp -d "$here/.atlas-fixture.XXXXXX"); trap 'rm -rf "$tmp" "$fx"' EXIT
+mkdir -p "$tmp/atlas"; bash "$here/tests/atlas-fixture.sh" "$fx" > "$tmp/atlas/env.sh"
+atlas_before=$(git -C "$fx/casts-v4-training" status --porcelain)
 expect atlas-renders ok '14 runs, 2 branches' -- bash -c '. "$1"; "$2" atlas --out "$3/atlas.html" --json "$3/atlas.json"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-catches-early-compute ok 'started before the card was committed' -- cat "$tmp/atlas/atlas.html"
 expect atlas-broken-receipt ok '<li class="rc-broken"><span class="b b-broken">.*</span><span class="rc-kind">commit</span> <code>deadbee</code>' -- cat "$tmp/atlas/atlas.html"
@@ -1227,6 +1228,7 @@ for k in ("atlas_schema", "behind_base", "generated_at"): print(" ~ ".join(["S",
 for k, v in sorted(d["summary"].items()): print(" ~ ".join(["S", "summary." + k, str(v)]))
 for e in d["lineage"]: print(" ~ ".join(["E", e["from"], e["to"], e["kind"], str(e["lineage_inferred"])]))
 for w in d["waters"]: print(" ~ ".join(["W", w["name"], w["fence"], ",".join(w["hand"])]))
+for q in d["queue"]: print(" ~ ".join(["Q", q["id"], q["state"], q["kind"], *q["paths"]]))
 for r in d["runs"]:
     print(" ~ ".join(["O", r["id"], r["outcome"], r["outcome_detail"], r["severity"]]))
     for x in r["needs_you"]: print(" ~ ".join(["N", r["id"], x]))
@@ -1283,7 +1285,7 @@ print("".join(f"{i}<{p} " for i in sorted(ids) for p in [atlas.name_parent(i, id
 expect atlas-stray-incident ok '^V ~ explore-07 ~ incident.md is a write-up not where the guard looks; move it to incidents/' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-stray-incident-keeps-ripple ok '^N ~ explore-07 ~ ripple on job-states, so stop spending$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-release-stamp ok '<dt>Guard version</dt><dd>schema [0-9]+, release ' -- cat "$tmp/atlas/atlas.html"
-expect atlas-no-release-stamp ok "<dt>Guard version</dt><dd>schema 1, installed before release stamps; run <code>guard init $tmp/atlas/casts-v4-training --update</code></dd>" -- python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import atlas
+expect atlas-no-release-stamp ok "<dt>Guard version</dt><dd>schema 1, installed before release stamps; run <code>guard init $fx/casts-v4-training --update</code></dd>" -- python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import atlas
 d = json.load(open(sys.argv[2])); d["version"] = {"installer": "b017edd"}; print(atlas.render(d))' "$here/lib" "$tmp/atlas/atlas.json"
 expect atlas-verdict-stop ok '<p class="verdict-line">Stop spending on 4 runs: each has a ripple.</p>' -- cat "$tmp/atlas/atlas.html"
 expect atlas-no-jobs-unchecked ok '^UNCHECKED$' -- python3 -c 'import json, sys
@@ -1314,23 +1316,30 @@ expect atlas-no-tooltips ok '^abbr$' -- python3 -c 'import re, sys; print(" ".jo
 expect atlas-every-run-opens ok '^14$' -- grep -c '<details class="run" id="run-' <(sed 's/<details class="run"/\n&/g' "$tmp/atlas/atlas.html")
 expect atlas-needs-you-stray ok 'A write-up exists at <code>runs/explore-07/incident.md</code>, but the guard does not count it there. Move it: <code class="cmd">git mv runs/explore-07/incident.md runs/explore-07/incidents/YYYY-MM-DD-4840.md</code>' -- cat "$tmp/atlas/atlas.html"
 expect atlas-needs-you-unmerged ok 'href="#run-report-branch">report-branch</a> <span class="b b-handled">.*report unmerged</span><p>Its report is only on <code>origin/docs/report-branch-report</code>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-queue-json ok "^Q ~ n1 ~ open ~ run ~ $fx/casts-v4-training/guard/budget.card Q ~ n2 ~ acked ~ check ~ $fx/casts-v4-training/runs/cosine-v2/report.md ~ " -- bash -c 'grep "^Q ~" "$1" | tr "\n" " "' _ "$tmp/atlas/atlas.tsv"
+expect atlas-queue-open-first ok '<ol class="todo"><li class="todo-you"><svg class="i" aria-hidden="true"><use href="#i-await"/></svg><div><span class="id">n1</span> <span class="o">run</span> <strong>Merge PR #7, agent/fp32-check \(autonomous merge refused\)</strong>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-queue-open-command ok '<p>Run, in order:</p><ol><li><code class="cmd">cd [^<]*/casts-v4-training</code></li><li><code class="cmd">git diff [^<]*</code></li><li><code class="cmd">gh pr merge 7 --squash</code></li></ol>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-queue-acked-last ok '<li class="todo-acked">.*<strong>Read the cosine-v2 report before the thesis figure</strong> <em class="q-state">acked, not done</em>.*</li></ol></section>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-queue-empty ok - -- python3 -c 'import json, re, sys; sys.path.insert(0, sys.argv[1]); import atlas
+d = json.load(open(sys.argv[2])); d["queue"] = []
+sys.exit(1 if re.search(r"class=\"todo-(you|acked)\"|needs-you done", atlas.render(d)) else 0)' "$here/lib" "$tmp/atlas/atlas.json"
 expect atlas-timeline-ledger ok '<span>execution.tsv x1: host skynet, recorded by hand</span>' -- cat "$tmp/atlas/atlas.html"
-expect atlas-golden ok - -- bash -c 'diff <("$1/tests/atlas-golden.sh" "$2") "$1/tests/golden/atlas-fixture.html"' _ "$here" "$tmp/golden"
+expect atlas-golden ok - -- bash -c 'diff <("$1/tests/atlas-golden.sh") "$1/tests/golden/atlas-fixture.html"' _ "$here"
 expect atlas-no-network ok - -- bash -c '! grep -Eiq "<link[^>]*https?://|src=\"?https?://" "$1"' _ "$tmp/atlas/atlas.html"
 expect atlas-head-only ok '\(12 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --head-only --out "$3/head.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-no-ripples-says-so ok 'Safety checks were not run for this render, so this page cannot say whether anything is wrong.' -- cat "$tmp/atlas/head.html"
 expect atlas-verdict-unknown ok 'class="verdict verdict-unknown" role="status"' -- cat "$tmp/atlas/head.html"
 expect atlas-head-only-hides-disk-run ok - -- bash -c '! grep -q "run-q-batch" "$1"' _ "$tmp/atlas/head.html"
-expect atlas-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$tmp/atlas/casts-v4-training" "$atlas_before"
-cp "$tmp/atlas/casts-v4-training/guard/run" "$tmp/atlas/guard-run.kept"
-printf '#!/bin/bash\ntouch "$HOME/forged"; printf "PASS\\tguard-untouched\\tforged\\n"\n' > "$tmp/atlas/casts-v4-training/guard/run"
+expect atlas-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$fx/casts-v4-training" "$atlas_before"
+cp "$fx/casts-v4-training/guard/run" "$tmp/atlas/guard-run.kept"
+printf '#!/bin/bash\ntouch "$HOME/forged"; printf "PASS\\tguard-untouched\\tforged\\n"\n' > "$fx/casts-v4-training/guard/run"
 expect atlas-runs-protected-guard ok '^RIPPLE$' -- bash -c '. "$1"; HPC_GUARD_LOCAL=1 HOME="$2" "$3" atlas --runs lr-sweep --out "$2/forged.html" --json "$2/forged.json" > /dev/null
   python3 -c "import json, sys; print(*{l[\"status\"] for r in json.load(open(sys.argv[1]))[\"runs\"] for l in r[\"ripples\"] if l[\"check\"] == \"guard-untouched\"})" "$2/forged.json"' _ "$tmp/atlas/env.sh" "$tmp/atlas" "$guard"
 expect atlas-forged-runner-not-run ok - -- test ! -e "$tmp/atlas/forged"
-cp "$tmp/atlas/guard-run.kept" "$tmp/atlas/casts-v4-training/guard/run"
+cp "$tmp/atlas/guard-run.kept" "$fx/casts-v4-training/guard/run"
 expect atlas-default-out ok "atlas: $tmp/atlas/tmpdir/atlas-casts-v4-training-$(id -u).html" -- bash -c '. "$1"; mkdir -p "$2/tmpdir"; TMPDIR="$2/tmpdir" "$3" atlas --no-ripples' _ "$tmp/atlas/env.sh" "$tmp/atlas" "$guard"
 expect atlas-default-out-private ok '^600$' -- stat -c %a "$tmp/atlas/tmpdir/atlas-casts-v4-training-$(id -u).html"
-expect atlas-default-out-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$tmp/atlas/casts-v4-training" "$atlas_before"
+expect atlas-default-out-read-only ok '^same$' -- bash -c '[ "$(git -C "$1" status --porcelain)" = "$2" ] && echo same' _ "$fx/casts-v4-training" "$atlas_before"
 expect atlas-runs-filter ok '\(2 runs,' -- bash -c '. "$1"; "$2" atlas --no-ripples --runs "cosine-*" --runs "explore-*" --title casts --out "$3/filtered.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-runs-title ok '<p class="eyebrow">Guard atlas · project <code>casts-v4-training</code> · runs <code>cosine-\*</code>, <code>explore-\*</code></p>' -- cat "$tmp/atlas/filtered.html"
 expect atlas-runs-title-h1 ok '<h1>casts</h1>' -- cat "$tmp/atlas/filtered.html"
@@ -1345,11 +1354,15 @@ expect atlas-serve-footer ok 'Served live from .*; re-surveyed at most every 1 m
 expect atlas-serve-json ok '"id": "q-batch"' -- curl -s "http://127.0.0.1:$port/atlas.json"
 kill "$serve_pid" 2>/dev/null; wait "$serve_pid" 2>/dev/null
 sock="$tmp/atlas/atlas.sock"
-( . "$tmp/atlas/env.sh"; exec "$guard" atlas --serve "$sock" --every 60 --no-ripples ) > "$tmp/atlas/sock.log" 2>&1 &
+( . "$tmp/atlas/env.sh"; exec "$guard" atlas --serve "$sock" --every 0 --no-ripples ) > "$tmp/atlas/sock.log" 2>&1 &
 sock_pid=$!
 for _ in $(seq 50); do [ -S "$sock" ] && curl -s -o /dev/null --unix-socket "$sock" http://atlas/atlas.json && break; sleep 0.2; done
 expect atlas-sock-line ok "^atlas: serving unix:$sock from " -- cat "$tmp/atlas/sock.log"
 expect atlas-sock-page ok 'id="run-cosine-v2"' -- curl -s --unix-socket "$sock" http://atlas/
+queue_ids() { curl -s --unix-socket "$1" http://atlas/atlas.json | python3 -c 'import json, sys; print(*[q["id"] for q in json.load(sys.stdin)["queue"]])'; }
+expect atlas-sock-queue ok '^n1 n2$' -- queue_ids "$sock"
+(cd "$fx/casts-v4-training" && "$guard" needs-you done n1 > /dev/null)
+expect atlas-sock-requeue ok '^n2$' -- queue_ids "$sock"
 expect atlas-sock-mode ok '^600$' -- stat -c %a "$sock"
 kill -TERM "$sock_pid" 2>/dev/null; wait "$sock_pid" 2>/dev/null
 expect atlas-sock-removed ok '^gone$' -- bash -c '[ ! -e "$1" ] && echo gone' _ "$sock"
