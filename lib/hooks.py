@@ -21,6 +21,11 @@ def settings_path(project):
         sys.exit(f"guard hooks: --project needs a git repository, and {os.getcwd()} is not in one")
     return os.path.join(p.stdout.strip(), ".claude", "settings.json")
 
+def well_formed(groups):
+    return isinstance(groups, list) and all(
+        isinstance(g, dict) and isinstance(g.get("hooks", []), list) and all(isinstance(h, dict) for h in g.get("hooks", []))
+        for g in groups)
+
 def load(path):
     try:
         with open(path) as f:
@@ -32,8 +37,7 @@ def load(path):
     except ValueError as e:
         sys.exit(f"guard hooks: {path} is not valid JSON ({e}); fix it by hand, then rerun")
     hooks = settings.get("hooks", {}) if isinstance(settings, dict) else None
-    if not isinstance(hooks, dict) or not all(isinstance(hooks.get(e, []), list) and all(isinstance(g, dict) for g in hooks.get(e, []))
-                                              for e in EVENTS):
+    if not isinstance(hooks, dict) or not all(well_formed(hooks.get(e, [])) for e in EVENTS):
         sys.exit(f"guard hooks: {path} does not have the shape Claude Code reads for hooks; fix it by hand, then rerun")
     return settings
 
@@ -42,7 +46,7 @@ def add_missing_reminders(settings):
     added = []
     for event in EVENTS:
         groups = hooks.setdefault(event, [])
-        if any("needs-you --remind" in str(h.get("command", "")) for g in groups for h in g.get("hooks", []) if isinstance(h, dict)):
+        if any("needs-you --remind" in str(h.get("command", "")) for g in groups for h in g.get("hooks", [])):
             continue
         groups.append({"hooks": [{"type": "command", "command": COMMAND}]})
         added.append(event)

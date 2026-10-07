@@ -1282,6 +1282,8 @@ expect hooks-install-project-shape ok '^1 1 None None ' -- reminder_counts_and_k
 mkdir -p "$tmp/bad-home/.claude"; echo '{"hooks": ' > "$tmp/bad-home/.claude/settings.json"
 expect hooks-refuse-bad-json fail 'is not valid JSON' -- env HOME="$tmp/bad-home" "$guard" hooks install claude
 expect hooks-bad-json-untouched ok '^\{"hooks": $' -- cat "$tmp/bad-home/.claude/settings.json"
+echo '{"hooks": {"SessionStart": [{"hooks": null}]}}' > "$tmp/bad-home/.claude/settings.json"
+expect hooks-refuse-bad-shape fail 'does not have the shape Claude Code reads for hooks' -- env HOME="$tmp/bad-home" "$guard" hooks install claude
 expect hooks-unknown-agent fail 'invalid choice' -- "$guard" hooks install codex
 
 echo; echo "$pass passed, $fail failed"
