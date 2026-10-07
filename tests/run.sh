@@ -15,7 +15,7 @@ trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 guard=$here/bin/guard
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-export PATH="$here/tests/mock-bin:$PATH" USER=tester GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+export PATH="$here/tests/mock-bin:$PATH" XDG_CONFIG_HOME=$tmp/xdg USER=tester GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 pass=0; fail=0
 expect() {  # expect <name> <want: ok|fail> <grep pattern or -> -- command...
   local name=$1 want=$2 pat=$3; shift 4
@@ -963,6 +963,22 @@ doctor >/dev/null; doctor MOCK_GH_TOKEN= SSH_AUTH_SOCK=/x >/dev/null; doctor PAT
 expect doctor-writes-nothing ok '^$' -- find "$D" "$D.wt" "$tmp/home" -newer "$tmp/doctor-before"
 expect doctor-status-unchanged ok '^$' -- bash -c 'git -C "$1" status --porcelain | diff - "$2"' _ "$D" "$tmp/doctor-status"
 cd "$tmp/wt" || exit 1
+
+echo "== config"
+expect config-defaults ok '^reviewer: proprietary$' -- "$guard" config
+expect config-default-rounds ok '^2$' -- "$guard" config get review_rounds
+expect config-unset ok '^reviewer_cmd_local: <unset>$' -- "$guard" config list
+expect config-set ok '^reviewer: local$' -- "$guard" config set reviewer local
+expect config-get ok '^local$' -- "$guard" config get reviewer
+expect config-set-command ok '^reviewer_cmd_local: codex exec --oss -m "qwen3: 32b"$' -- "$guard" config set reviewer_cmd_local 'codex exec --oss -m "qwen3: 32b"'
+expect config-set-replaces ok '^reviewer: proprietary$' -- "$guard" config set reviewer proprietary
+expect config-one-line-per-key ok '^1$' -- grep -c '^reviewer:' "$XDG_CONFIG_HOME/guard/config"
+expect config-clear ok '^$' -- bash -c '"$1" config set reviewer_cmd_local "" >/dev/null && "$1" config get reviewer_cmd_local' _ "$guard"
+expect config-bad-value fail "^guard config: reviewer is proprietary or local, not 'cloud'$" -- "$guard" config set reviewer cloud
+expect config-bad-rounds fail 'review_rounds is a whole number' -- "$guard" config set review_rounds 0
+expect config-bad-policy fail 'merge_policy is autonomous or semi-manual' -- "$guard" config set merge_policy yolo
+expect config-unknown-key fail "unknown key 'colour'" -- "$guard" config get colour
+expect config-private ok '^600$' -- stat -c %a "$XDG_CONFIG_HOME/guard/config"
 
 echo "== upgrade from each supported release"
 # old_project <tag> <dir>: a project guarded by the harness at <tag>, with the budget filled in and merged to main.

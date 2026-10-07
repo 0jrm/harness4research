@@ -4,7 +4,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 cmd=${1:-help}; shift || true
 case $cmd in
-  survey|init|archive|doctor) exec bash "$here/lib/$cmd.sh" "$@" ;;
+  survey|init|archive|doctor|config) exec bash "$here/lib/$cmd.sh" "$@" ;;
   atlas) exec python3 "$here/lib/atlas.py" "$@" ;;
   needs-you) exec python3 "$here/lib/needs_you.py" "$@" ;;
   hooks) exec python3 "$here/lib/hooks.py" "$@" ;;
