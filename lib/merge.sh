@@ -56,11 +56,11 @@ esac; fi
 need="a pull request"; [ $guarded = 0 ] || need="a pull request and guard-fence / fence"
 if [ -z "$slug" ]; then fail "cannot tell whether $base_ref has an active ruleset requiring $need: origin is not a github.com remote" \
   "Run guard merge in a clone whose origin is on github.com."
-elif ! missing=$(ruleset_missing "$slug" "$base_ref" $guarded); then
-  fail "cannot tell whether $base_ref has an active ruleset requiring $need: $(why "$missing")" \
+elif ! absent=$(ruleset_missing "$slug" "$base_ref" $guarded); then
+  fail "cannot tell whether $base_ref has an active ruleset requiring $need: $(why "$absent")" \
     "Open Settings, Rules, Rulesets on GitHub: ${enforce}4-protect-the-default-branch"
-elif [ -z "$missing" ]; then pass "$base_ref has an active ruleset requiring $need"
-else fail "$base_ref has no active rule requiring $missing" "Add a branch ruleset for $base_ref: ${enforce}4-protect-the-default-branch"; fi
+elif [ -z "$absent" ]; then pass "$base_ref has an active ruleset requiring $need"
+else fail "$base_ref has no active rule requiring $absent" "Add a branch ruleset for $base_ref: ${enforce}4-protect-the-default-branch"; fi
 
 if [ "$pr_state" != OPEN ]; then fail "pull request #$pr is ${pr_state,,}" "Reopen it if it should merge."
 elif [ "$draft" = true ]; then fail "pull request #$pr is a draft" "Mark it ready with gh pr ready $pr once the work is done."

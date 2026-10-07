@@ -1019,7 +1019,7 @@ expect doctor-needs-you-none ok '^pass  no open needs-you items$' -- doctor
 for t in one two three; do (cd "$D" && "$guard" needs-you add --kind check --title "$t" >/dev/null); done
 (cd "$D" && "$guard" needs-you ack n1 >/dev/null)
 expect doctor-needs-you-open ok '^pass  2 open needs-you items; guard needs-you lists them$' -- doctor
-(cd "$D" && "$guard" needs-you done n2 >/dev/null)
+(cd "$D" && "$guard" needs-you "done" n2 >/dev/null)
 expect doctor-needs-you-one ok '^pass  1 open needs-you item; guard needs-you lists it$' -- doctor
 rm "$D/.git/guard/needs-you.tsv"
 cd "$tmp/wt" || exit 1
@@ -1421,7 +1421,7 @@ expect atlas-sock-line ok "^atlas: serving unix:$sock from " -- cat "$tmp/atlas/
 expect atlas-sock-page ok 'id="run-cosine-v2"' -- curl -s --unix-socket "$sock" http://atlas/
 queue_ids() { curl -s --unix-socket "$1" http://atlas/atlas.json | python3 -c 'import json, sys; print(*[q["id"] for q in json.load(sys.stdin)["queue"]])'; }
 expect atlas-sock-queue ok '^n1 n2$' -- queue_ids "$sock"
-(cd "$fx/casts-v4-training" && "$guard" needs-you done n1 > /dev/null)
+(cd "$fx/casts-v4-training" && "$guard" needs-you "done" n1 > /dev/null)
 expect atlas-sock-requeue ok '^n2$' -- queue_ids "$sock"
 expect atlas-sock-mode ok '^600$' -- stat -c %a "$sock"
 kill -TERM "$sock_pid" 2>/dev/null; wait "$sock_pid" 2>/dev/null
