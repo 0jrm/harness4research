@@ -71,7 +71,7 @@ In the worktree:
 
 1. Read `guard/SURVEY.md`. It lists what an agent could mistake for current truth.
 2. Replace every `<placeholder>` in `guard/budget.card` with your cluster values. Preflight refuses to submit while any placeholder is left. If the repository submits no jobs, leave them.
-3. Add to `guard/watch.list` the files agents must not edit: verifiers, contract tests, thresholds, and `FACTS.md`. Use one git pathspec per line. List specific files, not all of `tests/`, or agents cannot add tests.
+3. Add to `guard/watch.list` the files agents must not edit: verifiers, contract tests, thresholds. Use one git pathspec per line. List specific files, not all of `tests/`, or agents cannot add tests.
 4. Commit, then push and open the pull request with the two commands `init` printed. Merge it yourself. A change to `guard/` is always a person's merge.
 
 ### 4. Make it enforceable, and pick how agents merge
@@ -161,7 +161,7 @@ A ripple is a warning sign about one run. `guard/run ripples <run_dir>` prints o
 
 ```text
 AGENTS.md                         short list of landmines every agent reads (CLAUDE.md points to it)
-FACTS.md                          verified facts only, each with evidence; you merge every line
+FACTS.md                          verified facts only, each with evidence that guard review checks
 guard/budget.card                 computing budget, per-job limits, and merge_policy
 guard/watch.list                  verifier, test, and threshold paths agents may not edit
 guard/run                         runs the protected branch's copy of each script

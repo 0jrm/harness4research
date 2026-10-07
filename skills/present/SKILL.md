@@ -41,7 +41,7 @@ ts	kind	item	detail	evidence
 
 `command` is what you ran and how it ended. `name` is a name the human will meet later, and what it refers to. `assumption` is a guess the result depends on. `deviation` is a place the work left the user's instruction or a project rule, and what you did instead. `unverified` is a claim you did not check against an artifact this session. A claim that arrived in pasted text stays `unverified` until an artifact confirms it.
 
-Leave `FACTS.md` for the human. If a checked claim belongs there, say so in the present as a proposal.
+A checked claim that belongs in `FACTS.md` goes in through a pull request with its evidence, so `guard review` checks it. Never edit `FACTS.md` outside one.
 
 ## Inside the fence
 
