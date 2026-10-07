@@ -873,6 +873,7 @@ expect update-filled-setting ok '^setting: <dataset, geometry, code, and pinned 
 expect update-adds-envelope-keys ok '^deadline: <' -- grep '^deadline:' "$tmp/wt7/runs/_template/question.card"
 expect update-adds-run-defaults ok '^default_run_gpu_hours: 0$' -- grep '^default_run_gpu_hours:' "$tmp/wt7/guard/budget.card"
 expect update-adds-launch ok '^launch_hosts: none$' -- grep '^launch_hosts:' "$tmp/wt7/guard/budget.card"
+expect update-adds-merge-policy ok '^merge_policy: autonomous$' -- grep '^merge_policy:' "$tmp/wt7/guard/budget.card"
 expect update-adds-launch-script ok 'cmd_supervise' -- cat "$tmp/wt7/guard/bin/launch.sh"
 expect update-filled-note ok '^custom_note: leave this$' -- grep '^custom_note:' "$tmp/wt7/runs/_template/question.card"
 expect update-filled-hypothesis ok '^hypothesis: n/a$' -- sed -n 4p "$tmp/wt7/runs/_template/report.md"
@@ -995,6 +996,7 @@ upgrade_from() {
   expect "$c-workflow-edit-kept" ok 'runs-on: self-hosted' -- cat "$p.up/.github/workflows/guard-fence.yml"
   expect "$c-no-conflicts" fail - -- grep -rlE '^(<{7}|>{7}) ' "$p.up/guard" "$p.up/.github"
   expect "$c-schema" ok "^schema: $(cat "$here/SCHEMA")$" -- cat "$p.up/guard/VERSION"
+  expect "$c-merge-policy" ok '^merge_policy: autonomous$' -- cat "$p.up/guard/budget.card"
   expect "$c-lineage-keys" ok '^spawned_from: <' -- grep -A1 '^supersedes: <' "$p.up/runs/_template/question.card"
   git -C "$p.up" push -q origin guard/update:main; git fetch -q origin; git switch -q -c agent origin/main
   mkdir -p runs/r; cp runs/_template/question.card runs/r/
