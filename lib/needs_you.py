@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """usage: guard needs-you [--remind [--format text|claude-hook]]
        guard needs-you add --kind approve|run|check --title T [--why W] [--path P]... [--run CMD]...
-                           [--expect E] [--undo U] [--source S]
+                           [--expect E] [--undo U] [--source S] [--update]
+       guard needs-you find --kind approve|run|check --title T
        guard needs-you show <id>
        guard needs-you ack|done|dismiss <id> [--note N]
 
@@ -9,7 +10,9 @@ A queue of what only a human can do, check, or approve. With no arguments it pri
 as a 🩺 block. add prints the new id, and refuses (exit 2) a path that is relative, missing, or somewhere that
 gets cleaned: /tmp, /var/tmp, $TMPDIR, or a directory named scratchpad. --remind prints nothing when no item
 is open or outside a git repository, so it can run on every prompt. Adding an item with the kind and title of an
-open one prints that item's id and queues nothing.
+open one prints that item's id and queues nothing. With --update, an open or acked item of that kind and title takes
+the new content under the same id and opens again; when the content is the same, nothing changes. find prints the id
+of the open or acked item with that kind and title, and exits 1 when there is none.
 """
 import argparse, datetime as dt, fcntl, json, os, subprocess, sys
 from collections import namedtuple
@@ -167,14 +170,19 @@ def add(queue, a):
                   undo=cell("undo", a.undo, part=True), note="", source=cell("source", a.source),
                   paths=[checked_path(p) for p in a.path], commands=[cell("run", c, part=True) for c in a.run])
     def new(items):
-        same = next((it for it in items if it.state == "open" and it.kind == a.kind and it.title == a.title), None)
+        same = find(items, a.kind, a.title, ("open", "acked") if a.update else ("open",))
         if same:
             print(same.id)
-            return None
+            fresh = same._replace(ts=now(), state="open", **fields)
+            unchanged = fresh._replace(ts=same.ts, state=same.state, note=same.note) == same
+            return fresh if a.update and not unchanged else None
         n = max((int(it.id[1:]) for it in items if it.id[1:].isdigit()), default=0) + 1
         print(f"n{n}")
         return Item(id=f"n{n}", ts=now(), state="open", kind=a.kind, **fields)
     transact(queue, new)
+
+def find(items, kind, title, states=("open", "acked")):
+    return next((it for it in reversed(items) if it.state in states and it.kind == kind and it.title == title), None)
 
 def move(queue, verb, ident, note):
     state, from_states = MOVES[verb]
@@ -212,6 +220,10 @@ def main():
     p.add_argument("--expect", default="")
     p.add_argument("--undo", default="")
     p.add_argument("--source", default="")
+    p.add_argument("--update", action="store_true", help="give an open or acked item of the same kind and title this content")
+    p = sub.add_parser("find", help="print the id of the open or acked item with this kind and title")
+    p.add_argument("--kind", required=True, choices=KINDS)
+    p.add_argument("--title", required=True)
     sub.add_parser("show", help="print one item's block").add_argument("id")
     for verb in MOVES:
         p = sub.add_parser(verb, help=f"mark an item {MOVES[verb].sets}")
@@ -231,6 +243,11 @@ def main():
             raise Refused(f"{os.getcwd()} is not a git repository")
         if a.cmd == "add":
             add(queue, a)
+        elif a.cmd == "find":
+            it = find(read(queue), a.kind, a.title)
+            if not it:
+                sys.exit(1)
+            print(it.id)
         elif a.cmd == "show":
             it = next((it for it in read(queue) if it.id == a.id), None)
             if not it:

@@ -1598,6 +1598,25 @@ expect ny-add-same-writes-nothing ok "^$rows\$" -- bash -c 'wc -l < "$1"' _ "$ny
 expect ny-add-same-title-other-kind ok '^n12$' -- in_dir "$ny" "$guard" needs-you add --kind approve --title 'Read the report'
 expect ny-add-same-as-closed ok '^n13$' -- in_dir "$ny" "$guard" needs-you add --kind run --title 'Merge PR #41 (autonomous merge refused)' --run 'gh pr merge 41 --squash'
 
+expect ny-update-new ok '^n14$' -- in_dir "$ny" "$guard" needs-you add --kind approve --title Digest --why 'one card' --run 'gh pr merge 1 --squash' --update
+rows=$(wc -l < "$ny/.git/guard/needs-you.tsv")
+expect ny-update-same-content ok '^n14$' -- in_dir "$ny" "$guard" needs-you add --kind approve --title Digest --why 'one card' --run 'gh pr merge 1 --squash' --update
+expect ny-update-same-writes-nothing ok "^$rows\$" -- bash -c 'wc -l < "$1"' _ "$ny/.git/guard/needs-you.tsv"
+expect ny-update-refreshes ok '^n14$' -- in_dir "$ny" "$guard" needs-you add --kind approve --title Digest --why 'two cards' --run 'gh pr merge 1 --squash' --run 'gh pr merge 2 --squash' --update
+expect ny-update-content ok '^Why: two cards$' -- in_dir "$ny" "$guard" needs-you show n14
+expect ny-update-commands ok '^  gh pr merge 2 --squash$' -- in_dir "$ny" "$guard" needs-you show n14
+expect ny-update-one-open ok '^1$' -- bash -c '(cd "$1" && "$2" needs-you) | grep -c "· Digest$"' _ "$ny" "$guard"
+expect ny-without-update-keeps ok '^n14$' -- in_dir "$ny" "$guard" needs-you add --kind approve --title Digest --why 'three cards'
+expect ny-without-update-unchanged ok '^Why: two cards$' -- in_dir "$ny" "$guard" needs-you show n14
+in_dir "$ny" "$guard" needs-you ack n14 >/dev/null
+expect ny-update-acked-same-stays-acked ok '^n14	[^	]*	acked	' -- bash -c 'cd "$1" && "$2" needs-you add --kind approve --title Digest --why "two cards" --run "gh pr merge 1 --squash" --run "gh pr merge 2 --squash" --update >/dev/null && tail -1 .git/guard/needs-you.tsv' _ "$ny" "$guard"
+expect ny-update-acked-new-reopens ok '^n14	[^	]*	open	approve	Digest	why: three cards' -- bash -c 'cd "$1" && "$2" needs-you add --kind approve --title Digest --why "three cards" --update >/dev/null && tail -1 .git/guard/needs-you.tsv' _ "$ny" "$guard"
+expect ny-find ok '^n14$' -- in_dir "$ny" "$guard" needs-you find --kind approve --title Digest
+expect ny-find-other-kind fail '^$' -- in_dir "$ny" "$guard" needs-you find --kind check --title Digest
+in_dir "$ny" "$guard" needs-you "done" n14 >/dev/null
+expect ny-find-skips-done fail '^$' -- in_dir "$ny" "$guard" needs-you find --kind approve --title Digest
+expect ny-update-after-done-new ok '^n15$' -- in_dir "$ny" "$guard" needs-you add --kind approve --title Digest --why 'four cards' --update
+
 echo "== hooks install"
 home=$tmp/hooks-home; mkdir -p "$home/.claude" "$home/dotfiles"
 cat > "$home/dotfiles/settings.json" <<'JSON'
