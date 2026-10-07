@@ -912,23 +912,25 @@ git -C "$D" update-ref refs/remotes/origin/main guard/init
 git -C "$D" remote set-url origin https://github.com/lab/proj.git
 mkdir -p "$tmp/home/.agents/skills" "$tmp/home-bare"
 for s in "$here"/skills/*/; do ln -s "${s%/}" "$tmp/home/.agents/skills/"; done
-setup=(MOCK_GH_TOKEN=github_pat_agent MOCK_GH_ADMIN=false MOCK_GH_RULES=$'pull_request\ncheck fence'
+printf '#!/bin/sh\n' > "$tmp/doctor-reviewer"; chmod +x "$tmp/doctor-reviewer"
+mkdir -p "$tmp/xdg-doctor/guard"; echo "reviewer_cmd_proprietary: $tmp/doctor-reviewer -p" > "$tmp/xdg-doctor/guard/config"
+setup=(XDG_CONFIG_HOME="$tmp/xdg-doctor" MOCK_GH_TOKEN=github_pat_agent MOCK_GH_ADMIN=false MOCK_GH_RULES=$'pull_request\ncheck fence'
   "MOCK_GH_RUNS=success 2026-10-01T12:00:00Z https://github.com/lab/proj/actions/runs/1" MOCK_SACCTMGR_ASSOC='|cpu=600000')
-doctor() { env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK HOME="$tmp/home" "${setup[@]}" "$@" "$guard" doctor "$D"; }
+doctor() { env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK -u GUARD_CONFIG HOME="$tmp/home" "${setup[@]}" "$@" "$guard" doctor "$D"; }
 expect doctor-placeholders fail '^FAIL  guard/budget.card on origin/main still has placeholders: account start_date stop_date' -- doctor
 expect doctor-placeholder-account fail '^FAIL  guard/budget.card on origin/main sets no account$' -- doctor
 expect doctor-remedy-links-readme fail '^      Replace each <placeholder> .*: https://github.com/0jrm/harness4research#3-fill-in-the-guard-and-merge-it$' -- doctor
 git -C "$tmp/proj" show "$good:guard/budget.card" > "$D.wt/guard/budget.card"
 git -C "$D.wt" commit -q -am "chore(guard): set budget"; git -C "$D" update-ref refs/remotes/origin/main guard/init
 expect doctor-clean-card ok '^pass  guard/budget.card on origin/main has no placeholders$' -- doctor
-expect doctor-all-pass ok '^11 passed, 0 failed, 0 cannot check from here$' -- doctor
+expect doctor-all-pass ok '^14 passed, 0 failed, 0 cannot check from here$' -- doctor
 expect doctor-version ok '^pass  guard schema [0-9]+ \(release .*\) against harness schema [0-9]+ .*: current$' -- doctor
 expect doctor-version-once ok - -- bash -c '! grep -E "\(release ([^ )]+)\1\)" <<<"$1"' _ "$(doctor)"
 expect doctor-workflow ok '^pass  .github/workflows/guard-fence.yml on origin/main defines guard-fence / fence$' -- doctor
 doctor > "$tmp/doctor-out"
 expect doctor-no-colour-in-pipe fail - -- grep -q $'\e' "$tmp/doctor-out"
 expect doctor-no-gh ok '^cannot check from here  whether guard-fence / fence has run on GitHub: gh is not on PATH$' -- doctor PATH="$(path_without gh)"
-expect doctor-cannot-is-not-pass ok '^9 passed, 0 failed, 2 cannot check from here$' -- doctor PATH="$(path_without gh)"
+expect doctor-cannot-is-not-pass ok '^12 passed, 0 failed, 2 cannot check from here$' -- doctor PATH="$(path_without gh)"
 expect doctor-gh-logged-out ok '^cannot check from here  whether main has an active ruleset requiring guard-fence / fence: gh is not logged in$' -- doctor MOCK_GH_TOKEN=
 expect doctor-not-github ok '^cannot check from here  .*: origin is not a github.com remote$' -- \
   doctor GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0="$D.git"
@@ -963,6 +965,61 @@ git -C "$D" status --porcelain > "$tmp/doctor-status"; touch "$tmp/doctor-before
 doctor >/dev/null; doctor MOCK_GH_TOKEN= SSH_AUTH_SOCK=/x >/dev/null; doctor PATH="$(path_without gh)" >/dev/null
 expect doctor-writes-nothing ok '^$' -- find "$D" "$D.wt" "$tmp/home" -newer "$tmp/doctor-before"
 expect doctor-status-unchanged ok '^$' -- bash -c 'git -C "$1" status --porcelain | diff - "$2"' _ "$D" "$tmp/doctor-status"
+expect doctor-reviewer ok "^pass  reviewer is proprietary: $tmp/doctor-reviewer -p, and $tmp/doctor-reviewer is an executable file$" -- doctor
+xdg() {  # xdg <name> <config line>...: prints a fresh XDG_CONFIG_HOME whose guard config holds the lines
+  mkdir -p "$tmp/xdg-$1/guard"; printf '%s\n' "${@:2}" > "$tmp/xdg-$1/guard/config"; echo "$tmp/xdg-$1"
+}
+no_reviewers=$(PATH=$(path_without claude); PATH=$(path_without codex); path_without cursor-agent)
+mkdir -p "$tmp/claude-bin"; ln -s "$tmp/doctor-reviewer" "$tmp/claude-bin/claude"
+expect doctor-reviewer-default ok '^pass  reviewer is proprietary: claude -p --permission-mode acceptEdits --allowedTools=Bash, and claude is on PATH$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-bin:$no_reviewers"
+expect doctor-reviewer-missing fail '^FAIL  reviewer is proprietary, and none of claude, codex or cursor-agent is on PATH$' -- doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$no_reviewers"
+expect doctor-reviewer-missing-hint fail "^      Install Claude Code, Codex or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'$" -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$no_reviewers"
+expect doctor-reviewer-not-on-path fail '^FAIL  reviewer is proprietary: no-such-reviewer -p, and no-such-reviewer is not on PATH$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg gone 'reviewer_cmd_proprietary: no-such-reviewer -p')"
+expect doctor-local-no-command fail "^      Set one: guard config set reviewer_cmd_local 'codex exec --oss -m <model> --sandbox danger-full-access'$" -- \
+  doctor XDG_CONFIG_HOME="$(xdg local 'reviewer: local')"
+expect doctor-local-no-command-line fail '^FAIL  reviewer is local and no local command is set$' -- doctor XDG_CONFIG_HOME="$(xdg local 'reviewer: local')"
+mkdir -p "$tmp/home/bin"; ln -s "$tmp/doctor-reviewer" "$tmp/home/bin/local-reviewer"
+expect doctor-local-tilde ok "^pass  reviewer is local: ~/bin/local-reviewer --oss, and $tmp/home/bin/local-reviewer is an executable file$" -- \
+  doctor XDG_CONFIG_HOME="$(xdg local-cmd 'reviewer: local' 'reviewer_cmd_local: ~/bin/local-reviewer --oss')"
+expect doctor-policy-card ok '^pass  merge_policy is autonomous in guard/budget.card on origin/main, so guard merge also needs the ruleset and non-admin login items above to pass$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg semi 'merge_policy: semi-manual')"
+git -C "$D.wt" switch -q -c doctor-semi guard/init; sed -i '/^merge_policy:/d' "$D.wt/guard/budget.card"; echo "merge_policy: semi-manual" >> "$D.wt/guard/budget.card"
+git -C "$D.wt" commit -q -am "semi-manual"; git -C "$D" update-ref refs/remotes/origin/main doctor-semi
+expect doctor-policy-card-semi ok '^pass  merge_policy is semi-manual in guard/budget.card on origin/main, so guard merge queues every merge for a human$' -- doctor
+git -C "$D" update-ref refs/remotes/origin/main guard/init; git -C "$D.wt" switch -q guard/init
+expect doctor-policy-config fail "^pass  merge_policy is semi-manual in $tmp/xdg-semi/guard/config, so guard merge queues every merge for a human$" -- \
+  env HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/xdg-semi" "$guard" doctor "$tmp/agents"
+expect doctor-policy-config-autonomous fail "^pass  merge_policy is autonomous in $tmp/xdg/guard/config, so guard merge also needs the non-admin login item above and a ruleset requiring a pull request$" -- \
+  env HOME="$tmp/home" "$guard" doctor "$tmp/agents"
+git -C "$D.wt" switch -q -c doctor-no-card guard/init; git -C "$D.wt" rm -q guard/budget.card
+git -C "$D.wt" commit -q -m "no card"; git -C "$D" update-ref refs/remotes/origin/main doctor-no-card
+expect doctor-no-card fail '^FAIL  origin/main has no guard/budget.card$' -- doctor
+expect doctor-no-card-finishes fail '^[0-9]+ passed, [0-9]+ failed, ' -- doctor
+git -C "$D" update-ref refs/remotes/origin/main guard/init; git -C "$D.wt" switch -q guard/init
+expect doctor-hook-skipped-without-claude ok - -- bash -c '! grep -q "Claude Code" "$1"' _ "$tmp/doctor-out"
+mkdir -p "$tmp/hook-home/.agents/skills" "$tmp/hook-home/.claude/skills"
+for s in "$here"/skills/*/; do ln -s "${s%/}" "$tmp/hook-home/.agents/skills/"; ln -s "${s%/}" "$tmp/hook-home/.claude/skills/"; done
+expect doctor-hook-missing fail "^FAIL  Claude Code does not show open needs-you items: neither ~/.claude/settings.json nor $D/.claude/settings.json runs guard needs-you --remind on SessionStart and UserPromptSubmit$" -- doctor HOME="$tmp/hook-home"
+expect doctor-hook-missing-remedy fail '^      Run guard hooks install claude$' -- doctor HOME="$tmp/hook-home"
+echo '{"permissions": {"allow": ["Bash(guard needs-you --remind*)"]}}' > "$tmp/hook-home/.claude/settings.json"
+expect doctor-hook-not-in-hooks fail '^FAIL  Claude Code does not show open needs-you items' -- doctor HOME="$tmp/hook-home"
+echo '{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "guard needs-you --remind --format claude-hook"}]}]}}' > "$tmp/hook-home/.claude/settings.json"
+expect doctor-hook-one-event fail '^FAIL  Claude Code does not show open needs-you items' -- doctor HOME="$tmp/hook-home"
+rm "$tmp/hook-home/.claude/settings.json"
+(cd "$D" && HOME="$tmp/hook-home" "$guard" hooks install claude --project >/dev/null 2>&1)
+expect doctor-hook-project ok "^pass  Claude Code shows open needs-you items: $D/.claude/settings.json runs guard needs-you --remind on SessionStart and UserPromptSubmit$" -- doctor HOME="$tmp/hook-home"
+rm -r "$D/.claude"; HOME="$tmp/hook-home" "$guard" hooks install claude >/dev/null 2>&1
+expect doctor-hook-user ok '^pass  Claude Code shows open needs-you items: ~/.claude/settings.json runs guard needs-you --remind on SessionStart and UserPromptSubmit$' -- doctor HOME="$tmp/hook-home"
+expect doctor-needs-you-none ok '^pass  no open needs-you items$' -- doctor
+for t in one two three; do (cd "$D" && "$guard" needs-you add --kind check --title "$t" >/dev/null); done
+(cd "$D" && "$guard" needs-you ack n1 >/dev/null)
+expect doctor-needs-you-open ok '^pass  2 open needs-you items; guard needs-you lists them$' -- doctor
+(cd "$D" && "$guard" needs-you done n2 >/dev/null)
+expect doctor-needs-you-one ok '^pass  1 open needs-you item; guard needs-you lists it$' -- doctor
+rm "$D/.git/guard/needs-you.tsv"
 cd "$tmp/wt" || exit 1
 
 echo "== config"
