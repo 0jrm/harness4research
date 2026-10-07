@@ -80,7 +80,7 @@ Items 2 and 3 are why autonomous merge needs [the enforceable setup](enforceable
 
 `reviewer` in your user config picks the model that reviews.
 
-- `proprietary` is the default. `guard review` runs `reviewer_cmd_proprietary` if you set it. Otherwise it runs the first of `claude`, `codex`, and `cursor-agent` on your PATH.
+- `proprietary` is the default. `guard review` runs `reviewer_cmd_proprietary` if you set it. Otherwise it runs `claude`. When `claude` is not on your PATH or exits with an error, such as when it is not signed in, it runs `cursor-agent`.
 - `local` runs `reviewer_cmd_local`, a command you name that runs a local model. `guard review` refuses until you set it.
 
 For example, to review with a local model through Codex and Ollama:

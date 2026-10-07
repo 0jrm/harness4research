@@ -37,6 +37,8 @@ path_without() {  # path_without <cmd>: prints a PATH like this one on which <cm
   done
   echo "$out"
 }
+path_without_agent_clis() { PATH=$(path_without claude); PATH=$(path_without codex); path_without cursor-agent; }
+PATH=$(path_without_agent_clis)
 on_tty() {  # on_tty <command...>: runs it with stdout on a pseudo-terminal, TERM=xterm and no NO_COLOR; prints its output, keeps its exit code
   python3 -c '
 import os, signal, subprocess, sys
@@ -949,6 +951,11 @@ expect doctor-ssh fail '^FAIL  SSH_AUTH_SOCK is set in this shell' -- doctor SSH
 expect doctor-classic-token fail '^FAIL  the GitHub token in this shell is a classic or OAuth token with scopes repo, workflow,' -- \
   doctor MOCK_GH_TOKEN=gho_x MOCK_GH_SCOPES='repo, workflow'
 expect doctor-admin fail '^FAIL  the GitHub login in this shell administers lab/proj' -- doctor MOCK_GH_ADMIN=true
+expect doctor-admin-protected fail '^FAIL  the GitHub login in this shell administers lab/proj' -- doctor MOCK_GH_ADMIN=true MOCK_GH_PROTECTION='{}'
+expect doctor-admin-fine-grained ok '^pass  the GitHub login in this shell does not administer lab/proj$' -- \
+  doctor MOCK_GH_ADMIN=true MOCK_GH_PROTECTION='!Resource not accessible by personal access token'
+expect doctor-admin-forbidden-otherwise fail '^FAIL  the GitHub login in this shell administers lab/proj' -- \
+  doctor MOCK_GH_ADMIN=true MOCK_GH_PROTECTION='!API rate limit exceeded (HTTP 403)'
 expect doctor-no-token ok '^pass  no GitHub token in this shell' -- doctor MOCK_GH_TOKEN=
 expect doctor-cap ok '^pass  Slurm caps account gom at GrpTRESMins=cpu=600000$' -- doctor
 expect doctor-user-cap ok '^pass  Slurm caps account gom at GrpTRESMins=cpu=600000$' -- doctor MOCK_SACCTMGR_ASSOC=$'|\ntester|cpu=600000'
@@ -971,13 +978,30 @@ expect doctor-reviewer ok "^pass  reviewer is proprietary: $tmp/doctor-reviewer 
 xdg() {  # xdg <name> <config line>...: prints a fresh XDG_CONFIG_HOME whose guard config holds the lines
   mkdir -p "$tmp/xdg-$1/guard"; printf '%s\n' "${@:2}" > "$tmp/xdg-$1/guard/config"; echo "$tmp/xdg-$1"
 }
-no_reviewers=$(PATH=$(path_without claude); PATH=$(path_without codex); path_without cursor-agent)
 mkdir -p "$tmp/claude-bin"; ln -s "$tmp/doctor-reviewer" "$tmp/claude-bin/claude"
 expect doctor-reviewer-default ok '^pass  reviewer is proprietary: claude -p --permission-mode acceptEdits --allowedTools=Bash, and claude is on PATH$' -- \
-  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-bin:$no_reviewers"
-expect doctor-reviewer-missing fail '^FAIL  reviewer is proprietary, and none of claude, codex or cursor-agent is on PATH$' -- doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$no_reviewers"
-expect doctor-reviewer-missing-hint fail "^      Install Claude Code, Codex or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'$" -- \
-  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$no_reviewers"
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-bin:$PATH"
+expect doctor-reviewer-missing fail '^FAIL  reviewer is proprietary, and none of claude or cursor-agent is on PATH$' -- doctor XDG_CONFIG_HOME="$(xdg empty)"
+expect doctor-reviewer-missing-hint fail "^      Install Claude Code or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'$" -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)"
+mkdir -p "$tmp/cursor-bin" "$tmp/claude-auth"; ln -s "$tmp/doctor-reviewer" "$tmp/cursor-bin/cursor-agent"
+cat > "$tmp/claude-auth/claude" <<'FAKE'
+#!/bin/sh
+[ "$*" = "auth status" ] && printf '{\n  "loggedIn": %s,\n  "authMethod": "none"\n}\n' "$MOCK_CLAUDE_LOGGED_IN"
+FAKE
+chmod +x "$tmp/claude-auth/claude"
+expect doctor-reviewer-chain ok '^pass  reviewer is proprietary: claude, then cursor-agent, and claude is on PATH$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-bin:$tmp/cursor-bin:$PATH"
+expect doctor-reviewer-cursor-only ok '^pass  reviewer is proprietary: cursor-agent -p --force --trust, and cursor-agent is on PATH$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/cursor-bin:$PATH"
+expect doctor-claude-signed-in ok '^pass  reviewer is proprietary: claude, then cursor-agent, and claude is on PATH$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-auth:$tmp/cursor-bin:$PATH" MOCK_CLAUDE_LOGGED_IN=true
+expect doctor-claude-signed-out-falls-back ok '^pass  reviewer is proprietary: claude, then cursor-agent, and claude is on PATH; claude is not signed in, so reviews fall back to cursor-agent; run claude auth login$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-auth:$tmp/cursor-bin:$PATH" MOCK_CLAUDE_LOGGED_IN=false
+expect doctor-claude-signed-out-alone fail '^FAIL  reviewer is proprietary: claude -p --permission-mode acceptEdits --allowedTools=Bash, and claude is not signed in$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-auth:$PATH" MOCK_CLAUDE_LOGGED_IN=false
+expect doctor-claude-signed-out-remedy fail '^      Run claude auth login$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-auth:$PATH" MOCK_CLAUDE_LOGGED_IN=false
 expect doctor-reviewer-not-on-path fail '^FAIL  reviewer is proprietary: no-such-reviewer -p, and no-such-reviewer is not on PATH$' -- \
   doctor XDG_CONFIG_HOME="$(xdg gone 'reviewer_cmd_proprietary: no-such-reviewer -p')"
 expect doctor-local-no-command fail "^      Set one: guard config set reviewer_cmd_local 'codex exec --oss -m <model> --sandbox danger-full-access'$" -- \
@@ -987,7 +1011,7 @@ mkdir -p "$tmp/home/bin"; ln -s "$tmp/doctor-reviewer" "$tmp/home/bin/local-revi
 expect doctor-local-tilde ok "^pass  reviewer is local: ~/bin/local-reviewer --oss, and $tmp/home/bin/local-reviewer is an executable file$" -- \
   doctor XDG_CONFIG_HOME="$(xdg local-cmd 'reviewer: local' 'reviewer_cmd_local: ~/bin/local-reviewer --oss')"
 expect doctor-policy-card ok '^pass  merge_policy is autonomous in guard/budget.card on origin/main, so guard merge also needs the ruleset and non-admin login items above to pass$' -- \
-  doctor XDG_CONFIG_HOME="$(xdg semi 'merge_policy: semi-manual')"
+  doctor XDG_CONFIG_HOME="$(xdg semi 'merge_policy: semi-manual' "reviewer_cmd_proprietary: $tmp/doctor-reviewer -p")"
 git -C "$D.wt" switch -q -c doctor-semi guard/init; sed -i '/^merge_policy:/d' "$D.wt/guard/budget.card"; echo "merge_policy: semi-manual" >> "$D.wt/guard/budget.card"
 git -C "$D.wt" commit -q -am "semi-manual"; git -C "$D" update-ref refs/remotes/origin/main doctor-semi
 expect doctor-policy-card-semi ok '^pass  merge_policy is semi-manual in guard/budget.card on origin/main, so guard merge queues every merge for a human$' -- doctor
@@ -1054,6 +1078,8 @@ readlink /proc/self/fd/0 > "$FAKE_DIR/stdin"
 pwd > "$FAKE_DIR/cwd"
 cp .guard-review/prompt.md "$FAKE_DIR/prompt.md"
 git push -q origin HEAD:refs/heads/sneaky 2>/dev/null && echo pushed >> "$FAKE_DIR/calls"
+git config --get-all url.guard-review-never-pushes:.pushInsteadOf > "$FAKE_DIR/no-push"
+git push -q "$FAKE_DIR/local.git" HEAD:refs/heads/test 2>/dev/null && echo pushed-local >> "$FAKE_DIR/calls"
 case $FAKE_REVIEW in
   fix-once) if grep -q 'a - b' calc.py; then sed -i 's/a - b/a + b/' calc.py; git commit -qam "fix: add adds"; fi
     echo "VERDICT: approve - adds as asked" ;;
@@ -1062,10 +1088,12 @@ case $FAKE_REVIEW in
   none) echo "It looks fine to me." ;;
   crash) echo 'Error: Authentication required.' >&2; exit 3 ;;
   semicolons) echo "VERDICT: escalate - ;split;; the reason;;; here;" ;;
+  fenced) printf 'Report.\n```\nVERDICT: approve - fenced verdict\n```\n' ;;
   *) printf 'Report.\nVERDICT: %s - reason for %s  \n\n' "$FAKE_REVIEW" "$FAKE_REVIEW" ;;
 esac
 FAKE
-chmod +x "$tmp/fake-reviewer"; mkdir -p "$tmp/fake" "$tmp/fakebin"; ln -s "$tmp/fake-reviewer" "$tmp/fakebin/codex"
+chmod +x "$tmp/fake-reviewer"; mkdir -p "$tmp/fake" "$tmp/fakebin"; ln -s "$tmp/fake-reviewer" "$tmp/fakebin/cursor-agent"
+git init -q --bare "$tmp/fake/local.git"
 pr_json() {  # pr_json [jq filter]: pull request 5 for feat/add at origin's head with one passing check, edited by the filter
   jq -nc --arg sha "$(git rev-parse origin/feat/add)" '{state: "OPEN", isDraft: false, headRefName: "feat/add", headRefOid: $sha,
     baseRefName: "main", isCrossRepository: false,
@@ -1098,6 +1126,9 @@ expect review-prompt-rules ok '^VERDICT: <approve\|changes\|escalate> - <one-lin
 expect review-stdin-closed ok '^/dev/null$' -- cat "$tmp/fake/stdin"
 expect review-no-token ok '^call no-token Read .guard-review/prompt.md' -- cat "$tmp/fake/calls"
 expect review-reviewer-cannot-push ok '^$' -- git ls-remote origin sneaky
+expect review-reviewer-cannot-push-github ok '^https://github.com/\|git@github.com:\|ssh://git@github.com/$' -- bash -c 'tail -n 3 "$1" | paste -sd"|"' _ "$tmp/fake/no-push"
+expect review-reviewer-cannot-push-origin ok "^$(git remote get-url origin)$" -- head -n 1 "$tmp/fake/no-push"
+expect review-reviewer-local-push ok '^pushed-local$' -- grep pushed-local "$tmp/fake/calls"
 expect review-comment ok '^pr comment 5 --body guard review: approve at [0-9a-f]{7}\. reason for approve$' -- cat "$tmp/gh.log"
 expect review-comment-no-brief fail - -- grep -q 'plz' "$tmp/gh.log"
 expect review-approve-queues-nothing ok '^Nothing needs you\.$' -- "$guard" needs-you
@@ -1130,9 +1161,10 @@ expect review-crash fail '^VERDICT: escalate - the reviewer command exited 3: Er
 expect review-dirty-discarded ok 'uncommitted edits, and they are discarded' -- review dirty
 expect review-dirty-not-pushed ok "^$old_head	" -- git ls-remote origin refs/heads/feat/add
 expect review-strict-verdict fail 'not a VERDICT line' -- review 'approve?'
+expect review-fenced-verdict ok '^VERDICT: approve - fenced verdict$' -- review fenced
 "$guard" config set reviewer_cmd_proprietary "" >/dev/null
-review approve PATH="$tmp/fakebin:$(path_without claude)" >/dev/null 2>&1
-expect review-default-reviewer ok '^call no-token exec --sandbox danger-full-access Read ' -- cat "$tmp/fake/calls"
+review approve PATH="$tmp/fakebin:$PATH" >/dev/null 2>&1
+expect review-default-reviewer ok '^call no-token -p --force --trust Read ' -- cat "$tmp/fake/calls"
 mkdir -p "$tmp/fakeclaude"; cat > "$tmp/fakeclaude/claude" <<FAKE
 #!/usr/bin/env bash
 printf '%s\n' "\$@" > "\$FAKE_DIR/argv"
@@ -1141,8 +1173,27 @@ FAKE
 chmod +x "$tmp/fakeclaude/claude"; review approve PATH="$tmp/fakeclaude:$PATH" >/dev/null 2>&1
 expect review-default-claude-argv ok '^-p\|--permission-mode\|acceptEdits\|--allowedTools=Bash\|Read \.guard-review/prompt\.md and follow it\. End your reply with the VERDICT line it describes\.$' -- \
   paste -sd'|' "$tmp/fake/argv"
-expect review-moved-head fail "origin/feat/add is not at the pull request's head" -- review approve MOCK_GH_PR="$(pr_json '.headRefOid = "0000000"')"
+mkdir -p "$tmp/badclaude"; cat > "$tmp/badclaude/claude" <<'FAKE'
+#!/usr/bin/env bash
+echo junk >> calc.py; git commit -qam "claude: half done"; echo stray > stray.txt
+echo "Failed to authenticate. API Error: 401" >&2; exit 1
+FAKE
+chmod +x "$tmp/badclaude/claude"; review approve PATH="$tmp/badclaude:$tmp/fakebin:$PATH" > "$tmp/fallback.out" 2>&1
+expect review-fallback-verdict ok '^VERDICT: approve - reason for approve$' -- cat "$tmp/fallback.out"
+expect review-fallback-named ok '^guard review: claude failed \(Failed to authenticate\. API Error: 401\); trying cursor-agent$' -- cat "$tmp/fallback.out"
+expect review-fallback-recorded ok '	approve	cursor-agent	reason for approve$' -- tail -n 1 "$reviews"
+expect review-fallback-one-call ok '^1$' -- grep -c '^call no-token -p --force --trust Read ' "$tmp/fake/calls"
+expect review-fallback-reset fail - -- grep -q 'uncommitted edits' "$tmp/fallback.out"
+expect review-fallback-not-pushed ok "^$old_head	" -- git ls-remote origin refs/heads/feat/add
+expect review-fallback-all-fail fail '^VERDICT: escalate - the reviewer command exited 3: Error: Authentication required\.$' -- \
+  review crash PATH="$tmp/badclaude:$tmp/fakebin:$PATH"
+expect review-fallback-all-fail-recorded ok '	escalate	cursor-agent	the reviewer command exited 3' -- tail -n 1 "$reviews"
+review approve PATH="$tmp/fakeclaude:$tmp/fakebin:$PATH" >/dev/null 2>&1
+expect review-claude-alone ok '^call no-token -p --permission-mode acceptEdits --allowedTools=Bash Read ' -- cat "$tmp/fake/calls"
+expect review-claude-alone-once ok '^1$' -- grep -c '^call' "$tmp/fake/calls"
+expect review-claude-alone-recorded ok '	approve	claude	reason for approve$' -- tail -n 1 "$reviews"
 "$guard" config set reviewer_cmd_proprietary "$tmp/fake-reviewer" >/dev/null
+expect review-moved-head fail "origin/feat/add is not at the pull request's head" -- review approve MOCK_GH_PR="$(pr_json '.headRefOid = "0000000"')"
 
 echo "== merge"
 gate=(MOCK_GH_TOKEN=github_pat_agent MOCK_GH_ADMIN=false "MOCK_GH_RULES=pull_request
@@ -1173,6 +1224,8 @@ expect merge-ok-queues-nothing ok '^Nothing needs you\.$' -- "$guard" needs-you
 expect merge-card-default ok '^pass  merge_policy is autonomous in guard/budget.card on origin/main$' -- merge
 expect merge-fence-required ok '^pass  main has an active ruleset requiring a pull request and guard-fence / fence$' -- merge
 expect merge-already-merged ok '^Pull request #5 is already merged\.$' -- merge MOCK_GH_PR="$(pr_json '.state = "MERGED"')"
+expect merge-admin-fine-grained ok '^pass  the gh login in this shell does not administer lab/proj$' -- \
+  merge MOCK_GH_ADMIN=true MOCK_GH_PROTECTION='!Resource not accessible by personal access token'
 expect merge-admin fail '^FAIL  the gh login in this shell administers lab/proj, so a merge here could bypass the ruleset$' -- merge MOCK_GH_ADMIN=true
 expect merge-admin-no-call fail - -- grep -q '^pr merge' "$tmp/gh.log"
 expect merge-admin-remedy fail '^      Run agents with a token that has no Administration permission: https://github.com/0jrm/harness4research/blob/main/docs/enforceable.md#5-give-agents-weaker-credentials$' -- merge MOCK_GH_ADMIN=true

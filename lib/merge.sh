@@ -42,7 +42,7 @@ else fail "merge_policy is $merge_policy in $merge_policy_from, so a human merge
 
 if [ -z "$slug" ]; then fail "cannot tell whether the gh login administers the repository: origin is not a github.com remote" \
   "Run guard merge in a clone whose origin is on github.com."
-elif ! admin=$(gh_admin "$slug"); then
+elif ! admin=$(gh_admin "$slug" "$base_ref"); then
   fail "cannot tell whether the gh login in this shell administers $slug: $(why "$admin")" \
     "Run guard merge where gh can read $slug with the agent's token: ${enforce}5-give-agents-weaker-credentials"
 else case $admin in

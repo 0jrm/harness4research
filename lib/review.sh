@@ -3,7 +3,9 @@
 # Runs the configured reviewer on a pull request in a fresh worktree, for up to review_rounds rounds. The reviewer may
 # commit small fixes and never pushes; this script pushes them, and a round that added commits is followed by another.
 # Approve is recorded only for a round that added no commits. The verdict goes to reviews.tsv and, without the brief,
-# to a pull request comment. Exit 0 on approve, 1 on changes or escalate, 2 when it refuses to start.
+# to a pull request comment. Without a configured command, a reviewer that exits nonzero hands the round, from its
+# starting commit, to the next default reviewer on PATH.
+# Exit 0 on approve, 1 on changes or escalate, 2 when it refuses to start.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=lib/config.sh
@@ -43,6 +45,13 @@ mkdir "$wt/.guard-review"; echo '*' > "$wt/.guard-review/.gitignore"
 mkdir -p "$state/reviews"
 ask="Read .guard-review/prompt.md and follow it. End your reply with the VERDICT line it describes."
 
+# Pushes to origin or anywhere on GitHub fail inside the reviewer; pushes the project's own tests make to local
+# repositories still work.
+no_push=(GIT_CONFIG_COUNT=4)
+for prefix in "$(git -C "$top" remote get-url origin)" https://github.com/ git@github.com: ssh://git@github.com/; do
+  n=$(( (${#no_push[@]} - 1) / 2 ))
+  no_push+=("GIT_CONFIG_KEY_$n=url.guard-review-never-pushes:.pushInsteadOf" "GIT_CONFIG_VALUE_$n=$prefix")
+done
 for ((round = 1; round <= rounds; round++)); do
   before=$(git -C "$wt" rev-parse HEAD)
   {
@@ -53,15 +62,20 @@ for ((round = 1; round <= rounds; round++)); do
     printf '\n## Diff\n\n```diff\n'; git -C "$wt" diff "origin/$base_ref...HEAD"; printf '```\n'
   } > "$wt/.guard-review/prompt.md"
   log=$state/reviews/$pr-${before:0:12}-r$round.txt
-  echo "guard review: pull request #$pr, round $round of $rounds at ${before:0:7}: $reviewer_cmd" >&2
-  rc=0
-  (cd "$wt" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK GIT_CONFIG_COUNT=1 \
-    GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=guard-review-never-pushes: \
-    bash -c "$reviewer_cmd \"\$@\"" reviewer "$ask") < /dev/null > "$log" 2> "$log.err" || rc=$?
-  last=$(grep -v '^[[:space:]]*$' "$log" | tail -n 1 | tr -d '\r' || true)
+  for ((i = 0; i < ${#reviewer_cmds[@]}; i++)); do
+    candidate=${reviewer_cmds[i]}
+    echo "guard review: pull request #$pr, round $round of $rounds at ${before:0:7}: $candidate" >&2
+    rc=0
+    (cd "$wt" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK "${no_push[@]}" \
+      bash -c "$candidate \"\$@\"" reviewer "$ask") < /dev/null > "$log" 2> "$log.err" || rc=$?
+    err=$(cat "$log.err" "$log" | grep -v '^[[:space:]]*$' | tail -n 1 | tr -d '\r' || true)
+    [ $rc -ne 0 ] && [ $((i + 1)) -lt ${#reviewer_cmds[@]} ] || break
+    echo "guard review: ${candidate%% *} failed (${err:-exit $rc}); trying ${reviewer_cmds[i + 1]%% *}" >&2
+    git -C "$wt" reset -q --hard "$before"; git -C "$wt" clean -qfdx -e .guard-review
+  done
+  last=$(grep -v -e '^[[:space:]]*$' -e '^[[:space:]]*```[[:space:]]*$' "$log" | tail -n 1 | tr -d '\r' || true)
   last=${last%"${last##*[![:space:]]}"}
   if [ $rc -ne 0 ]; then
-    err=$(cat "$log.err" "$log" | grep -v '^[[:space:]]*$' | tail -n 1 | tr -d '\r' || true)
     verdict=escalate reason="the reviewer command exited $rc${err:+: ${err:0:160}}"
   elif [[ $last =~ ^VERDICT:\ (approve|changes|escalate)\ -\ (.*[^[:space:]].*)$ ]]; then
     verdict=${BASH_REMATCH[1]} reason=${BASH_REMATCH[2]}
@@ -79,7 +93,7 @@ done
 
 head=$(git -C "$wt" rev-parse HEAD)
 [ -s "$state/reviews.tsv" ] || printf 'ts\tpr\thead\tverdict\treviewer\treason\n' > "$state/reviews.tsv"
-printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$pr" "$head" "$verdict" "${reviewer_cmd%% *}" "$reason" >> "$state/reviews.tsv"
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$pr" "$head" "$verdict" "${candidate%% *}" "$reason" >> "$state/reviews.tsv"
 gh pr comment "$pr" --body "guard review: $verdict at ${head:0:7}. $reason" >/dev/null \
   || echo "note: could not comment on pull request #$pr." >&2
 echo "VERDICT: $verdict - $reason"
