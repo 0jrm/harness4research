@@ -1020,7 +1020,7 @@ mkdir -p "$(dirname "$brief")"; printf '## Request (verbatim)\n\n## Plan\nChange
 expect review-empty-request fail "the '## Request \(verbatim\)' section of .* is empty" -- review approve
 printf '## Request (verbatim)\nMake add actually add, plz\n\n## Plan\nI fixed the docstring.\n\n## Test command\npython3 -c "import calc"\n' > "$brief"
 mkdir -p "$tmp/xdg-local/guard"; echo "reviewer: local" > "$tmp/xdg-local/guard/config"
-expect review-local-refuses fail "reviewer is local and no local command is set. Set one: guard config set reviewer_cmd_local 'codex exec --oss -m <model>'$" -- review approve XDG_CONFIG_HOME="$tmp/xdg-local"
+expect review-local-refuses fail "reviewer is local and no local command is set. Set one: guard config set reviewer_cmd_local 'codex exec --oss -m <model> --sandbox danger-full-access'$" -- review approve XDG_CONFIG_HOME="$tmp/xdg-local"
 expect review-not-open fail 'pull request #5 is merged' -- review approve MOCK_GH_PR="$(pr_json '.state = "MERGED"')"
 expect review-approve ok '^VERDICT: approve - reason for approve$' -- review approve
 expect review-one-round ok '^1$' -- grep -c '^call' "$tmp/fake/calls"

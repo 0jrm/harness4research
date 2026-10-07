@@ -26,7 +26,7 @@ case $reviewer in
   proprietary) cmd=$(config_get reviewer_cmd_proprietary)
     [ -n "$cmd" ] || cmd=$(default_reviewer) || refuse "no reviewer found. Install Claude Code, Codex or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'" ;;
   local) cmd=$(config_get reviewer_cmd_local)
-    [ -n "$cmd" ] || refuse "reviewer is local and no local command is set. Set one: guard config set reviewer_cmd_local 'codex exec --oss -m <model>'" ;;
+    [ -n "$cmd" ] || refuse "reviewer is local and no local command is set. Set one: guard config set reviewer_cmd_local 'codex exec --oss -m <model> --sandbox danger-full-access'" ;;
   *) refuse "reviewer is '$reviewer' in $config_file. Set it: guard config set reviewer proprietary" ;;
 esac
 rounds=$(config_get review_rounds)
