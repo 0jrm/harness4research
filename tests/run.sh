@@ -1059,6 +1059,14 @@ expect review-strict-verdict fail 'not a VERDICT line' -- review 'approve?'
 "$guard" config set reviewer_cmd_proprietary "" >/dev/null
 review approve PATH="$tmp/fakebin:$(path_without claude)" >/dev/null 2>&1
 expect review-default-reviewer ok '^call no-token exec --sandbox danger-full-access Read ' -- cat "$tmp/fake/calls"
+mkdir -p "$tmp/fakeclaude"; cat > "$tmp/fakeclaude/claude" <<FAKE
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "\$FAKE_DIR/argv"
+exec "$tmp/fake-reviewer" "\$@"
+FAKE
+chmod +x "$tmp/fakeclaude/claude"; review approve PATH="$tmp/fakeclaude:$PATH" >/dev/null 2>&1
+expect review-default-claude-argv ok '^-p\|--permission-mode\|acceptEdits\|--allowedTools=Bash\|Read \.guard-review/prompt\.md and follow it\. End your reply with the VERDICT line it describes\.$' -- \
+  paste -sd'|' "$tmp/fake/argv"
 expect review-moved-head fail "origin/feat/add is not at the pull request's head" -- review approve MOCK_GH_PR="$(pr_json '.headRefOid = "0000000"')"
 "$guard" config set reviewer_cmd_proprietary "$tmp/fake-reviewer" >/dev/null
 

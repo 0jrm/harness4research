@@ -15,7 +15,7 @@ pr=$1
 refuse() { echo "guard review: $1" >&2; exit 2; }
 
 default_reviewer() {
-  if command -v claude >/dev/null; then echo "claude -p --permission-mode acceptEdits --allowedTools Bash"
+  if command -v claude >/dev/null; then echo "claude -p --permission-mode acceptEdits --allowedTools=Bash"
   elif command -v codex >/dev/null; then echo "codex exec --sandbox danger-full-access"
   elif command -v cursor-agent >/dev/null; then echo "cursor-agent -p --force --trust"
   else return 1; fi
