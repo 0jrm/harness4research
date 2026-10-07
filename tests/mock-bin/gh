@@ -2,6 +2,21 @@
 # Mock: gh api prints MOCK_GH_ADMIN, MOCK_GH_RUNS or MOCK_GH_RULES as gh prints them after --jq.
 # An unset variable answers 404, and a value starting with ! answers the error after the !.
 # Without MOCK_GH_TOKEN or GH_TOKEN, gh is logged out: auth token fails and api exits 4.
+# gh pr view runs MOCK_GH_PR, the pull request's JSON, through jq with the --jq expression; unset means no such pull request.
+# gh pr merge and gh pr comment append their arguments to MOCK_GH_LOG, and a set MOCK_GH_MERGE fails the merge with that message.
+if [ "${1:-}" = pr ]; then
+  printf '%s\n' "$*" >> "${MOCK_GH_LOG:-/dev/null}"
+  case ${2:-} in
+    view) [ -n "${MOCK_GH_PR:-}" ] || { echo "GraphQL: Could not resolve to a PullRequest with the number of $3. (repository.pullRequest)" >&2; exit 1; }
+      expr=.; while [ $# -gt 0 ]; do [ "$1" = --jq ] && expr=$2; shift; done
+      jq -r "$expr" <<<"$MOCK_GH_PR" ;;
+    merge) [ -z "${MOCK_GH_MERGE:-}" ] || { echo "$MOCK_GH_MERGE" >&2; exit 1; }
+      echo "✓ Squashed and merged pull request lab/proj#$3" ;;
+    comment) echo "https://github.com/lab/proj/pull/$3#issuecomment-1" ;;
+    *) echo "mock gh: unsupported $*" >&2; exit 1 ;;
+  esac
+  exit
+fi
 token=${GH_TOKEN:-${MOCK_GH_TOKEN:-}}
 case "$*" in
   "auth token") [ -n "$token" ] || { echo "no oauth token found for github.com" >&2; exit 1; }; echo "$token"; exit ;;
