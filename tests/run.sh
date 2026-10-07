@@ -37,6 +37,8 @@ path_without() {  # path_without <cmd>: prints a PATH like this one on which <cm
   done
   echo "$out"
 }
+path_without_agent_clis() { PATH=$(path_without claude); PATH=$(path_without codex); path_without cursor-agent; }
+PATH=$(path_without_agent_clis)
 on_tty() {  # on_tty <command...>: runs it with stdout on a pseudo-terminal, TERM=xterm and no NO_COLOR; prints its output, keeps its exit code
   python3 -c '
 import os, signal, subprocess, sys
@@ -976,13 +978,12 @@ expect doctor-reviewer ok "^pass  reviewer is proprietary: $tmp/doctor-reviewer 
 xdg() {  # xdg <name> <config line>...: prints a fresh XDG_CONFIG_HOME whose guard config holds the lines
   mkdir -p "$tmp/xdg-$1/guard"; printf '%s\n' "${@:2}" > "$tmp/xdg-$1/guard/config"; echo "$tmp/xdg-$1"
 }
-no_reviewers=$(PATH=$(path_without claude); PATH=$(path_without codex); path_without cursor-agent)
 mkdir -p "$tmp/claude-bin"; ln -s "$tmp/doctor-reviewer" "$tmp/claude-bin/claude"
 expect doctor-reviewer-default ok '^pass  reviewer is proprietary: claude -p --permission-mode acceptEdits --allowedTools=Bash, and claude is on PATH$' -- \
-  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-bin:$no_reviewers"
-expect doctor-reviewer-missing fail '^FAIL  reviewer is proprietary, and none of claude, codex or cursor-agent is on PATH$' -- doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$no_reviewers"
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-bin:$PATH"
+expect doctor-reviewer-missing fail '^FAIL  reviewer is proprietary, and none of claude, codex or cursor-agent is on PATH$' -- doctor XDG_CONFIG_HOME="$(xdg empty)"
 expect doctor-reviewer-missing-hint fail "^      Install Claude Code, Codex or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'$" -- \
-  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$no_reviewers"
+  doctor XDG_CONFIG_HOME="$(xdg empty)"
 expect doctor-reviewer-not-on-path fail '^FAIL  reviewer is proprietary: no-such-reviewer -p, and no-such-reviewer is not on PATH$' -- \
   doctor XDG_CONFIG_HOME="$(xdg gone 'reviewer_cmd_proprietary: no-such-reviewer -p')"
 expect doctor-local-no-command fail "^      Set one: guard config set reviewer_cmd_local 'codex exec --oss -m <model> --sandbox danger-full-access'$" -- \
@@ -992,7 +993,7 @@ mkdir -p "$tmp/home/bin"; ln -s "$tmp/doctor-reviewer" "$tmp/home/bin/local-revi
 expect doctor-local-tilde ok "^pass  reviewer is local: ~/bin/local-reviewer --oss, and $tmp/home/bin/local-reviewer is an executable file$" -- \
   doctor XDG_CONFIG_HOME="$(xdg local-cmd 'reviewer: local' 'reviewer_cmd_local: ~/bin/local-reviewer --oss')"
 expect doctor-policy-card ok '^pass  merge_policy is autonomous in guard/budget.card on origin/main, so guard merge also needs the ruleset and non-admin login items above to pass$' -- \
-  doctor XDG_CONFIG_HOME="$(xdg semi 'merge_policy: semi-manual')"
+  doctor XDG_CONFIG_HOME="$(xdg semi 'merge_policy: semi-manual' "reviewer_cmd_proprietary: $tmp/doctor-reviewer -p")"
 git -C "$D.wt" switch -q -c doctor-semi guard/init; sed -i '/^merge_policy:/d' "$D.wt/guard/budget.card"; echo "merge_policy: semi-manual" >> "$D.wt/guard/budget.card"
 git -C "$D.wt" commit -q -am "semi-manual"; git -C "$D" update-ref refs/remotes/origin/main doctor-semi
 expect doctor-policy-card-semi ok '^pass  merge_policy is semi-manual in guard/budget.card on origin/main, so guard merge queues every merge for a human$' -- doctor
@@ -1136,7 +1137,7 @@ expect review-dirty-discarded ok 'uncommitted edits, and they are discarded' -- 
 expect review-dirty-not-pushed ok "^$old_head	" -- git ls-remote origin refs/heads/feat/add
 expect review-strict-verdict fail 'not a VERDICT line' -- review 'approve?'
 "$guard" config set reviewer_cmd_proprietary "" >/dev/null
-review approve PATH="$tmp/fakebin:$(path_without claude)" >/dev/null 2>&1
+review approve PATH="$tmp/fakebin:$PATH" >/dev/null 2>&1
 expect review-default-reviewer ok '^call no-token exec --sandbox danger-full-access Read ' -- cat "$tmp/fake/calls"
 mkdir -p "$tmp/fakeclaude"; cat > "$tmp/fakeclaude/claude" <<FAKE
 #!/usr/bin/env bash
@@ -1146,8 +1147,8 @@ FAKE
 chmod +x "$tmp/fakeclaude/claude"; review approve PATH="$tmp/fakeclaude:$PATH" >/dev/null 2>&1
 expect review-default-claude-argv ok '^-p\|--permission-mode\|acceptEdits\|--allowedTools=Bash\|Read \.guard-review/prompt\.md and follow it\. End your reply with the VERDICT line it describes\.$' -- \
   paste -sd'|' "$tmp/fake/argv"
-expect review-moved-head fail "origin/feat/add is not at the pull request's head" -- review approve MOCK_GH_PR="$(pr_json '.headRefOid = "0000000"')"
 "$guard" config set reviewer_cmd_proprietary "$tmp/fake-reviewer" >/dev/null
+expect review-moved-head fail "origin/feat/add is not at the pull request's head" -- review approve MOCK_GH_PR="$(pr_json '.headRefOid = "0000000"')"
 
 echo "== merge"
 gate=(MOCK_GH_TOKEN=github_pat_agent MOCK_GH_ADMIN=false "MOCK_GH_RULES=pull_request
