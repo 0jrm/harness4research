@@ -1173,7 +1173,7 @@ echo "== needs-you"
 in_dir() { local d=$1; shift; (cd "$d" && "$@"); }
 ny=$tmp/ny; git init -q -b main "$ny"; git -C "$ny" commit -q --allow-empty -m init
 expect ny-empty ok '^Nothing needs you\.$' -- in_dir "$ny" "$guard" needs-you
-expect ny-remind-empty ok - -- bash -c '[ -z "$(cd "$1" && "$2" needs-you --remind)" ]' _ "$ny" "$guard"
+expect ny-remind-empty ok - -- bash -c 'out=$(cd "$1" && "$2" needs-you --remind 2>&1) && [ -z "$out" ]' _ "$ny" "$guard"
 expect ny-add ok '^n1$' -- in_dir "$ny" "$guard" needs-you add --kind run --title 'Merge PR #41 (autonomous merge refused)' \
   --why 'the gh login in this shell administers the repository.' --run "cd $ny" --run 'gh pr merge 41 --squash' \
   --expect '"Squashed and merged pull request #41".' --undo 'git revert <merge commit> on a new branch.' --path "$here/README.md" --source claude
@@ -1237,7 +1237,10 @@ assert \"🩺 n1\" not in h[\"additionalContext\"]
 print(h[\"hookEventName\"])"' _ "$ny" "$guard"
 expect ny-hook-session-start ok '"hookEventName": "SessionStart"' -- bash -c 'cd "$1" && echo "{\"hook_event_name\": \"SessionStart\"}" | "$2" needs-you --remind --format claude-hook' _ "$ny" "$guard"
 mkdir -p "$tmp/ny-norepo"
-expect ny-remind-outside-repo ok - -- bash -c 'export GIT_CEILING_DIRECTORIES=$1; [ -z "$(cd "$1/ny-norepo" && "$2" needs-you --remind && echo "{}" | "$2" needs-you --remind --format claude-hook)" ]' _ "$tmp" "$guard"
+expect ny-remind-outside-repo ok - -- bash -c 'export GIT_CEILING_DIRECTORIES=$1; out=$(cd "$1/ny-norepo" && "$2" needs-you --remind 2>&1 && echo "{}" | "$2" needs-you --remind --format claude-hook 2>&1) && [ -z "$out" ]' _ "$tmp" "$guard"
+expect ny-remind-closed-stdin ok '^\{"systemMessage": "[^"]*n2 \\u00b7 check' -- bash -c 'cd "$1" && "$2" needs-you --remind --format claude-hook <&-' _ "$ny" "$guard"
+expect ny-remind-bad-cwd ok - -- bash -c 'out=$(echo "{\"cwd\": 5, \"hook_event_name\": \"UserPromptSubmit\"}" | "$2" needs-you --remind --format claude-hook 2>&1) && [ -z "$out" ]' _ "$ny" "$guard"
+expect ny-remind-ascii-stdout ok '"systemMessage": "\\ud83e\\ude7a ' -- bash -c 'cd "$1" && echo "{\"hook_event_name\": \"SessionStart\"}" | PYTHONIOENCODING=ascii "$2" needs-you --remind --format claude-hook' _ "$ny" "$guard"
 expect ny-list-outside-repo fail 'is not a git repository' -- env GIT_CEILING_DIRECTORIES="$tmp" bash -c 'cd "$1" && "$2" needs-you' _ "$tmp/ny-norepo" "$guard"
 git -C "$ny" worktree add -q "$tmp/ny-wt" -b other 2>/dev/null
 expect ny-worktree-add ok '^n3$' -- in_dir "$tmp/ny-wt" "$guard" needs-you add --kind approve --title 'Approve the question card' --path "$here/README.md"

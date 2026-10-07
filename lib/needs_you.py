@@ -127,7 +127,7 @@ def summary(top, items):
                       "See them with guard needs-you. guard needs-you ack <id> stops this reminder for one."])
 
 def hook_input():
-    if sys.stdin.isatty():
+    if not sys.stdin or sys.stdin.isatty():
         return {}
     try:
         data = json.loads(sys.stdin.read() or "{}")
@@ -153,7 +153,7 @@ def remind(fmt):
     event = hook.get("hook_event_name")
     if event in HOOK_EVENTS:
         out["hookSpecificOutput"] = {"hookEventName": event, "additionalContext": context}
-    print(json.dumps(out, ensure_ascii=False))
+    print(json.dumps(out))
 
 def add(queue, a):
     if a.kind == "run" and not a.run:
@@ -212,7 +212,11 @@ def main():
     a = ap.parse_args()
 
     if a.remind:
-        return remind(a.format)
+        try:
+            remind(a.format)
+        except Exception:
+            pass
+        return
     queue, _ = git_dir(os.getcwd())
     try:
         if not queue:
