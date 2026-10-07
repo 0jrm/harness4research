@@ -3,7 +3,7 @@
 # Per-user settings, flat `key: value` lines like the budget card; the first match wins. An empty VALUE removes the key.
 # GUARD_CONFIG names another file, for example to try a reviewer without changing XDG_CONFIG_HOME, where gh and the
 # agent CLIs keep their logins.
-# reviewer_cmd, reviewer_problem, reviewer_fix and merge_policy_from are read by the scripts that source this file.
+# reviewer_cmd, reviewer_problem, reviewer_fix and merge_policy_where are read by the scripts that source this file.
 # shellcheck disable=SC2034
 config_file=${GUARD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/guard/config}
 config_keys=(reviewer reviewer_cmd_proprietary reviewer_cmd_local review_rounds merge_policy)
@@ -46,15 +46,19 @@ resolve_reviewer() {
   reviewer_cmd=${reviewer_cmds[0]}
 }
 
-# read_merge_policy <repo> <base> <guarded 0|1>: sets merge_policy and merge_policy_from.
+# read_merge_policy <repo> <base> <guarded 0|1>: sets merge_policy and merge_policy_where, which reads "in <source>",
+# or "by default" with the source that leaves it unset.
 read_merge_policy() {
+  local from
   if [ "$3" = 1 ]; then
     merge_policy=$(git -C "$1" show "$2:guard/budget.card" 2>/dev/null | awk -F': *' '$1 == "merge_policy" { print $2; exit }') || true
-    merge_policy_from="guard/budget.card on $2"
+    from="guard/budget.card on $2"
   else
-    merge_policy=$(config_get merge_policy); merge_policy_from=$config_file
+    merge_policy=$(awk -F': *' '$1 == "merge_policy" { print $2; exit }' "$config_file" 2>/dev/null) || true
+    from=$config_file
   fi
-  merge_policy=${merge_policy:-autonomous}
+  if [ -n "$merge_policy" ]; then merge_policy_where="in $from"
+  else merge_policy=autonomous merge_policy_where="by default, since $from does not set it"; fi
 }
 
 config_check() {

@@ -37,8 +37,8 @@ echo "guard merge: pull request #$pr, $head_ref into $base_ref at ${head_sha:0:7
 read_merge_policy . "$base" "$guarded"
 remedy="A human merges it, or runs guard config set merge_policy autonomous."
 [ $guarded = 0 ] || remedy="A human merges it, or sets merge_policy: autonomous in guard/budget.card on the protected branch."
-if [ "$merge_policy" = autonomous ]; then pass "merge_policy is autonomous in $merge_policy_from"
-else fail "merge_policy is $merge_policy in $merge_policy_from, so a human merges" "$remedy"; fi
+if [ "$merge_policy" = autonomous ]; then pass "merge_policy is autonomous $merge_policy_where"
+else fail "merge_policy is $merge_policy $merge_policy_where, so a human merges" "$remedy"; fi
 
 if [ -z "$slug" ]; then fail "cannot tell whether the gh login administers the repository: origin is not a github.com remote" \
   "Run guard merge in a clone whose origin is on github.com."
@@ -98,4 +98,6 @@ if ! out=$(gh pr merge "$pr" --squash --match-head-commit "$head_sha" 2>&1); the
   hand_over "gh pr merge refused: $(why "$out")."
   exit 1
 fi
-echo "$out"
+[ -z "$out" ] || echo "$out"
+sha=$(gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid // empty' 2>/dev/null || true)
+echo "Merged pull request #$pr into $base_ref${sha:+ as ${sha:0:7}}."
