@@ -10,6 +10,8 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=lib/config.sh
 . "$here/lib/config.sh"
+# shellcheck source=lib/github.sh
+. "$here/lib/github.sh"
 # shellcheck source=lib/pr.sh
 . "$here/lib/pr.sh"
 [ $# -eq 1 ] && [[ $1 =~ ^[0-9]+$ ]] || { echo "usage: guard merge <pr number>" >&2; exit 64; }
@@ -19,7 +21,6 @@ passed=0; failed=()
 if [ -t 1 ]; then green=$'\e[32m' red=$'\e[31m' plain=$'\e[0m'; else green="" red="" plain=""; fi
 pass() { passed=$((passed+1)); echo "${green}pass${plain}  $1"; }
 fail() { failed+=("$1"); echo "${red}FAIL${plain}  $1"; echo "      $2"; }
-why() { local last=${1##*$'\n'}; echo "${last##*gh: }"; }
 
 info=$(gh pr view "$pr" --json state,isDraft,headRefName,headRefOid,baseRefName,statusCheckRollup --jq '
   [.state, (.isDraft | tostring), .headRefName, .headRefOid, .baseRefName, (.statusCheckRollup | length | tostring),
@@ -30,25 +31,18 @@ IFS=$'\t' read -r pr_state draft head_ref head_sha base_ref checks failing <<<"$
 [ "$pr_state" != MERGED ] || { echo "Pull request #$pr is already merged."; exit 0; }
 base=origin/$base_ref
 guarded=0; git cat-file -e "$base:guard/run" 2>/dev/null && guarded=1
-slug=""; url=$(git config --get remote.origin.url || true)
-[[ $url =~ github\.com[:/]([^/]+)/([^/]+)$ ]] && slug=${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}
+slug=$(github_slug .)
 echo "guard merge: pull request #$pr, $head_ref into $base_ref at ${head_sha:0:7}, reading $base as last fetched. Credentials are this shell's."
 
-if [ $guarded = 1 ]; then
-  policy=$(git show "$base:guard/budget.card" 2>/dev/null | awk -F': *' '$1 == "merge_policy" { print $2; exit }')
-  where="guard/budget.card on $base"
-  remedy="A human merges it, or sets merge_policy: autonomous in guard/budget.card on the protected branch."
-else
-  policy=$(config_get merge_policy); where=$config_file
-  remedy="A human merges it, or runs guard config set merge_policy autonomous."
-fi
-policy=${policy:-autonomous}
-if [ "$policy" = autonomous ]; then pass "merge_policy is autonomous in $where"
-else fail "merge_policy is $policy in $where, so a human merges" "$remedy"; fi
+read_merge_policy . "$base" "$guarded"
+remedy="A human merges it, or runs guard config set merge_policy autonomous."
+[ $guarded = 0 ] || remedy="A human merges it, or sets merge_policy: autonomous in guard/budget.card on the protected branch."
+if [ "$merge_policy" = autonomous ]; then pass "merge_policy is autonomous in $merge_policy_from"
+else fail "merge_policy is $merge_policy in $merge_policy_from, so a human merges" "$remedy"; fi
 
 if [ -z "$slug" ]; then fail "cannot tell whether the gh login administers the repository: origin is not a github.com remote" \
   "Run guard merge in a clone whose origin is on github.com."
-elif ! admin=$(gh api --method GET "repos/$slug" --jq .permissions.admin 2>&1); then
+elif ! admin=$(gh_admin "$slug"); then
   fail "cannot tell whether the gh login in this shell administers $slug: $(why "$admin")" \
     "Run guard merge where gh can read $slug with the agent's token: ${enforce}5-give-agents-weaker-credentials"
 else case $admin in
@@ -62,17 +56,11 @@ esac; fi
 need="a pull request"; [ $guarded = 0 ] || need="a pull request and guard-fence / fence"
 if [ -z "$slug" ]; then fail "cannot tell whether $base_ref has an active ruleset requiring $need: origin is not a github.com remote" \
   "Run guard merge in a clone whose origin is on github.com."
-elif ! rules=$(gh api --method GET "repos/$slug/rules/branches/$base_ref" \
-  --jq '.[] | if .type == "required_status_checks" then "check " + .parameters.required_status_checks[].context else .type end' 2>&1); then
-  fail "cannot tell whether $base_ref has an active ruleset requiring $need: $(why "$rules")" \
+elif ! missing=$(ruleset_missing "$slug" "$base_ref" $guarded); then
+  fail "cannot tell whether $base_ref has an active ruleset requiring $need: $(why "$missing")" \
     "Open Settings, Rules, Rulesets on GitHub: ${enforce}4-protect-the-default-branch"
-else
-  missing=(); grep -qx pull_request <<<"$rules" || missing+=("a pull request")
-  [ $guarded = 0 ] || grep -qxE 'check (guard-fence / )?fence' <<<"$rules" || missing+=("guard-fence / fence")
-  if [ ${#missing[@]} -eq 0 ]; then pass "$base_ref has an active ruleset requiring $need"
-  else fail "$base_ref has no active rule requiring $(printf '%s and ' "${missing[@]}" | sed 's/ and $//')" \
-    "Add a branch ruleset for $base_ref: ${enforce}4-protect-the-default-branch"; fi
-fi
+elif [ -z "$missing" ]; then pass "$base_ref has an active ruleset requiring $need"
+else fail "$base_ref has no active rule requiring $missing" "Add a branch ruleset for $base_ref: ${enforce}4-protect-the-default-branch"; fi
 
 if [ "$pr_state" != OPEN ]; then fail "pull request #$pr is ${pr_state,,}" "Reopen it if it should merge."
 elif [ "$draft" = true ]; then fail "pull request #$pr is a draft" "Mark it ready with gh pr ready $pr once the work is done."

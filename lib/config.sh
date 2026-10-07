@@ -14,6 +14,45 @@ config_get() {
   printf '%s\n' "$v"
 }
 
+default_reviewer() {
+  if command -v claude >/dev/null; then echo "claude -p --permission-mode acceptEdits --allowedTools=Bash"
+  elif command -v codex >/dev/null; then echo "codex exec --sandbox danger-full-access"
+  elif command -v cursor-agent >/dev/null; then echo "cursor-agent -p --force --trust"
+  else return 1; fi
+}
+
+# resolve_reviewer: sets reviewer and reviewer_cmd, the command the configured reviewer runs. When there is none, sets
+# reviewer_problem and reviewer_fix instead and returns 1.
+resolve_reviewer() {
+  reviewer=$(config_get reviewer)
+  case $reviewer in
+    proprietary) reviewer_cmd=$(config_get reviewer_cmd_proprietary)
+      [ -n "$reviewer_cmd" ] || reviewer_cmd=$(default_reviewer) || {
+        reviewer_problem="reviewer is proprietary, and none of claude, codex or cursor-agent is on PATH"
+        reviewer_fix="Install Claude Code, Codex or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'"
+        return 1; } ;;
+    local) reviewer_cmd=$(config_get reviewer_cmd_local)
+      [ -n "$reviewer_cmd" ] || {
+        reviewer_problem="reviewer is local and no local command is set"
+        reviewer_fix="Set one: guard config set reviewer_cmd_local 'codex exec --oss -m <model> --sandbox danger-full-access'"
+        return 1; } ;;
+    *) reviewer_problem="reviewer is '$reviewer' in $config_file"
+      reviewer_fix="Set it: guard config set reviewer proprietary"
+      return 1 ;;
+  esac
+}
+
+# read_merge_policy <repo> <base> <guarded 0|1>: sets merge_policy and merge_policy_from.
+read_merge_policy() {
+  if [ "$3" = 1 ]; then
+    merge_policy=$(git -C "$1" show "$2:guard/budget.card" 2>/dev/null | awk -F': *' '$1 == "merge_policy" { print $2; exit }') || true
+    merge_policy_from="guard/budget.card on $2"
+  else
+    merge_policy=$(config_get merge_policy); merge_policy_from=$config_file
+  fi
+  merge_policy=${merge_policy:-autonomous}
+}
+
 config_check() {
   case $1:$2 in
     reviewer:proprietary|reviewer:local|merge_policy:autonomous|merge_policy:semi-manual) ;;
