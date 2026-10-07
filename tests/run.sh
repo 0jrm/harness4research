@@ -1065,6 +1065,17 @@ expect config-unknown-key fail "unknown key 'colour'" -- "$guard" config get col
 expect config-private ok '^600$' -- stat -c %a "$XDG_CONFIG_HOME/guard/config"
 expect config-guard-config-override ok '^reviewer: local$' -- bash -c 'GUARD_CONFIG="$1/alt-config" "$2" config set reviewer local >/dev/null && cat "$1/alt-config"' _ "$tmp" "$guard"
 
+expect config-tier-defaults ok '^reviewer_model: <unset>\|review_small_lines: 200\|review_batch_max: 8\|ship_interval_hours: 24$' -- \
+  bash -c '"$1" config list | grep -E "^(review_small_lines|review_batch_max|ship_interval_hours|reviewer_model):" | paste -sd"|"' _ "$guard"
+for key in review_small_lines review_batch_max ship_interval_hours; do
+  expect "config-bad-$key" fail "^guard config: $key is a whole number of at least 1, not 'x'$" -- "$guard" config set "$key" x
+done
+expect config-set-batch-max ok '^review_batch_max: 3$' -- "$guard" config set review_batch_max 3
+"$guard" config set review_batch_max "" >/dev/null
+expect config-bad-model fail "^guard config: reviewer_model is one model name without spaces, not 'big model'$" -- "$guard" config set reviewer_model 'big model'
+expect config-set-model ok '^reviewer_model: claude-sonnet-5$' -- "$guard" config set reviewer_model claude-sonnet-5
+"$guard" config set reviewer_model "" >/dev/null
+
 echo "== review"
 RV=$keep/rv
 git init -q --bare -b main "$RV.git"; git clone -q "$RV.git" "$RV" 2>/dev/null; cd "$RV" || exit 1
@@ -1192,7 +1203,15 @@ review approve PATH="$tmp/fakeclaude:$tmp/fakebin:$PATH" >/dev/null 2>&1
 expect review-claude-alone ok '^call no-token -p --permission-mode acceptEdits --strict-mcp-config --setting-sources project --disable-slash-commands --tools=Bash,Read,Edit,Grep,Glob --allowedTools=Bash Read ' -- cat "$tmp/fake/calls"
 expect review-claude-alone-once ok '^1$' -- grep -c '^call' "$tmp/fake/calls"
 expect review-claude-alone-recorded ok '	approve	claude	reason for approve$' -- tail -n 1 "$reviews"
+"$guard" config set reviewer_model 'opus[1m]' >/dev/null
+review approve PATH="$tmp/fakeclaude:$PATH" >/dev/null 2>&1
+expect review-model-claude ok '\|--allowedTools=Bash\|--model\|opus\[1m\]\|Read \.guard-review/prompt\.md' -- paste -sd'|' "$tmp/fake/argv"
+review approve PATH="$tmp/fakebin:$PATH" >/dev/null 2>&1
+expect review-model-cursor ok '^call no-token -p --force --trust --model opus\[1m\] Read ' -- cat "$tmp/fake/calls"
 "$guard" config set reviewer_cmd_proprietary "$tmp/fake-reviewer" >/dev/null
+review approve >/dev/null 2>&1
+expect review-model-not-on-configured-command ok '^call no-token Read ' -- cat "$tmp/fake/calls"
+"$guard" config set reviewer_model "" >/dev/null
 expect review-moved-head fail "origin/feat/add is not at the pull request's head" -- review approve MOCK_GH_PR="$(pr_json '.headRefOid = "0000000"')"
 
 echo "== merge"
