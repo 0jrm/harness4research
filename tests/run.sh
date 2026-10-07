@@ -14,7 +14,8 @@ fi
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 guard=$here/bin/guard
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+tmp=$(mktemp -d); cache=${XDG_CACHE_HOME:-$HOME/.cache}; mkdir -p "$cache"
+keep=$(mktemp -d "$cache/guard-tests.XXXXXX"); trap 'rm -rf "$tmp" "$keep"' EXIT
 export PATH="$here/tests/mock-bin:$PATH" XDG_CONFIG_HOME=$tmp/xdg USER=tester GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 pass=0; fail=0
 expect() {  # expect <name> <want: ok|fail> <grep pattern or -> -- command...
@@ -981,7 +982,7 @@ expect config-unknown-key fail "unknown key 'colour'" -- "$guard" config get col
 expect config-private ok '^600$' -- stat -c %a "$XDG_CONFIG_HOME/guard/config"
 
 echo "== review"
-RV=$tmp/rv
+RV=$keep/rv
 git init -q --bare -b main "$RV.git"; git clone -q "$RV.git" "$RV" 2>/dev/null; cd "$RV" || exit 1
 git checkout -q -b main; printf 'def add(a, b):\n    return a - b\n' > calc.py; git add -A; git commit -q -m init
 git push -q -u origin main; git remote set-head origin -a >/dev/null
@@ -1009,8 +1010,8 @@ pr_json() {  # pr_json [jq filter]: pull request 5 for feat/add at origin's head
     statusCheckRollup: [{__typename: "CheckRun", name: "fence", status: "COMPLETED", conclusion: "SUCCESS"}]} | '"${1:-.}"
 }
 review() {  # review <FAKE_REVIEW> [env...]: guard review 5 with the fake reviewer, fresh call and gh logs
-  rm -f "$tmp/fake/calls" "$tmp/gh.log" "$tmp/guard.log"
-  env FAKE_REVIEW="$1" FAKE_DIR="$tmp/fake" MOCK_GH_LOG="$tmp/gh.log" MOCK_GUARD_LOG="$tmp/guard.log" MOCK_GH_PR="$(pr_json)" \
+  rm -f "$tmp/fake/calls" "$tmp/gh.log"
+  env FAKE_REVIEW="$1" FAKE_DIR="$tmp/fake" MOCK_GH_LOG="$tmp/gh.log" MOCK_GH_PR="$(pr_json)" \
     GH_TOKEN=github_pat_agent "${@:2}" "$guard" review 5
 }
 reviews=$RV/.git/guard/reviews.tsv brief=$RV/.git/guard/briefs/feat-add.md
@@ -1034,7 +1035,7 @@ expect review-no-token ok '^call no-token Read .guard-review/prompt.md' -- cat "
 expect review-reviewer-cannot-push ok '^$' -- git ls-remote origin sneaky
 expect review-comment ok '^pr comment 5 --body guard review: approve at [0-9a-f]{7}\. reason for approve$' -- cat "$tmp/gh.log"
 expect review-comment-no-brief fail - -- grep -q 'plz' "$tmp/gh.log"
-expect review-approve-queues-nothing fail - -- test -e "$tmp/guard.log"
+expect review-approve-queues-nothing ok '^Nothing needs you\.$' -- "$guard" needs-you
 expect review-worktree-removed ok '^1$' -- bash -c 'git worktree list | wc -l'
 old_head=$(git rev-parse origin/feat/add)
 expect review-fix-approves ok '^VERDICT: approve - adds as asked$' -- review fix-once
@@ -1044,15 +1045,18 @@ expect review-fix-one-commit ok '^fix: add adds$' -- git log --format=%s -1 orig
 expect review-fix-recorded-at-new-head ok "	5	$(git rev-parse origin/feat/add)	approve	" -- tail -n 1 "$reviews"
 expect review-fix-not-old-head fail - -- bash -c 'tail -n 1 "$1" | grep -q "$2"' _ "$reviews" "$old_head"
 expect review-still-fixing fail '^VERDICT: changes - the reviewer was still committing fixes after 2 rounds$' -- review fix-always
-expect review-still-fixing-queues ok '^check$' -- sed -n 4p "$tmp/guard.log"
+expect review-still-fixing-queues ok '^🩺 n1 · check · Review of PR #5 asks for changes$' -- "$guard" needs-you
 git push -q -f origin "$old_head:refs/heads/feat/add"; git fetch -q origin
+rm "$RV/.git/guard/needs-you.tsv"
 expect review-changes fail '^VERDICT: changes - reason for changes$' -- review changes
-expect review-changes-queue ok "^needs-you add --kind check --title Review of PR #5 asks for changes --why reason for changes --path $RV/.git/guard/reviews/5-[0-9a-f]{12}-r1.txt --path $brief --source guard review  needs-you show n1  $" -- \
-  bash -c 'tr "\n" " " < "$1"' _ "$tmp/guard.log"
-expect review-changes-block fail '^🩺 n1 · stub$' -- review changes
+expect review-changes-why ok '^Why: reason for changes$' -- "$guard" needs-you show n1
+expect review-changes-log ok "^  $RV/.git/guard/reviews/5-[0-9a-f]{12}-r1.txt$" -- "$guard" needs-you show n1
+expect review-changes-brief ok "^  $brief$" -- "$guard" needs-you show n1
+expect review-changes-block fail '^🩺 n1 · check · Review of PR #5 asks for changes$' -- review changes
+expect review-changes-once ok '^1$' -- bash -c '"$1" needs-you | grep -c "Review of PR #5 asks for changes$"' _ "$guard"
 expect review-changes-recorded ok '	changes	.*	reason for changes$' -- tail -n 1 "$reviews"
 expect review-escalate fail '^VERDICT: escalate - reason for escalate$' -- review escalate
-expect review-escalate-queue ok '^approve$' -- sed -n 4p "$tmp/guard.log"
+expect review-escalate-queue ok '^🩺 n2 · approve · Review of PR #5 needs your decision$' -- "$guard" needs-you
 expect review-no-verdict fail "^VERDICT: escalate - the reviewer's last line is not a VERDICT line$" -- review none
 expect review-crash fail '^VERDICT: escalate - the reviewer command exited 3$' -- review crash
 expect review-dirty-discarded ok 'uncommitted edits, and they are discarded' -- review dirty
@@ -1074,9 +1078,9 @@ expect review-moved-head fail "origin/feat/add is not at the pull request's head
 
 echo "== merge"
 gate=(MOCK_GH_TOKEN=github_pat_agent MOCK_GH_ADMIN=false "MOCK_GH_RULES=pull_request
-check guard-fence / fence" MOCK_GH_LOG="$tmp/gh.log" MOCK_GUARD_LOG="$tmp/guard.log")
+check guard-fence / fence" MOCK_GH_LOG="$tmp/gh.log")
 merge() {  # merge [env...]: guard merge 5 here with every gate open, unless an assignment changes one
-  rm -f "$tmp/gh.log" "$tmp/guard.log"
+  rm -f "$tmp/gh.log"
   env -u GH_TOKEN -u GITHUB_TOKEN "${gate[@]}" MOCK_GH_PR="$(pr_json)" "$@" "$guard" merge 5
 }
 on_github=(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0=https://github.com/lab/proj.git)
@@ -1097,17 +1101,17 @@ approve_at() { mkdir -p .git/guard; printf 'ts\tpr\thead\tverdict\treviewer\trea
 approve_at "$head5"
 expect merge-ok ok '^✓ Squashed and merged pull request lab/proj#5$' -- merge
 expect merge-ok-call ok "^pr merge 5 --squash --match-head-commit $head5$" -- grep '^pr merge' "$tmp/gh.log"
-expect merge-ok-queues-nothing fail - -- test -e "$tmp/guard.log"
+expect merge-ok-queues-nothing ok '^Nothing needs you\.$' -- "$guard" needs-you
 expect merge-card-default ok '^pass  merge_policy is autonomous in guard/budget.card on origin/main$' -- merge
 expect merge-fence-required ok '^pass  main has an active ruleset requiring a pull request and guard-fence / fence$' -- merge
 expect merge-already-merged ok '^Pull request #5 is already merged\.$' -- merge MOCK_GH_PR="$(pr_json '.state = "MERGED"')"
 expect merge-admin fail '^FAIL  the gh login in this shell administers lab/proj, so a merge here could bypass the ruleset$' -- merge MOCK_GH_ADMIN=true
 expect merge-admin-no-call fail - -- grep -q '^pr merge' "$tmp/gh.log"
 expect merge-admin-remedy fail '^      Run agents with a token that has no Administration permission: https://github.com/0jrm/harness4research/blob/main/docs/enforceable.md#5-give-agents-weaker-credentials$' -- merge MOCK_GH_ADMIN=true
-expect merge-admin-kind ok '^approve$' -- sed -n 4p "$tmp/guard.log"
-expect merge-admin-command ok '^gh pr merge 5 --squash$' -- cat "$tmp/guard.log"
-expect merge-admin-cd ok "^cd $D$" -- cat "$tmp/guard.log"
-expect merge-admin-block fail '^🩺 n1 · stub$' -- merge MOCK_GH_ADMIN=true
+expect merge-admin-queued ok '^🩺 n1 · approve · Merge PR #5$' -- "$guard" needs-you
+expect merge-admin-command ok '^  gh pr merge 5 --squash$' -- "$guard" needs-you show n1
+expect merge-admin-cd ok "^  cd $D$" -- "$guard" needs-you show n1
+expect merge-admin-block fail '^🩺 n1 · approve · Merge PR #5$' -- merge MOCK_GH_ADMIN=true
 expect merge-logged-out fail '^FAIL  cannot tell whether the gh login in this shell administers lab/proj: To get started with GitHub CLI' -- merge MOCK_GH_TOKEN=
 expect merge-no-ruleset fail '^FAIL  main has no active rule requiring a pull request and guard-fence / fence$' -- merge MOCK_GH_RULES=
 expect merge-no-fence-rule fail '^FAIL  main has no active rule requiring guard-fence / fence$' -- merge MOCK_GH_RULES=pull_request
@@ -1129,15 +1133,17 @@ expect merge-review-changes fail "^FAIL  the last guard review of pull request #
 rm .git/guard/reviews.tsv
 expect merge-no-review fail '^FAIL  guard review has no verdict for pull request #5$' -- merge
 approve_at "$head5"
-merge MOCK_GH_ADMIN=true MOCK_GH_PR="$(pr_json '.isDraft = true')" >/dev/null
-expect merge-one-item ok '^1$' -- grep -cx add "$tmp/guard.log"
-expect merge-why-lists-all ok '^autonomous merge refused: the gh login in this shell administers lab/proj, .*; pull request #5 is a draft\.$' -- cat "$tmp/guard.log"
+expect merge-one-item ok '^1$' -- bash -c '"$1" needs-you | grep -c "· Merge PR #5$"' _ "$guard"
+rm .git/guard/needs-you.tsv; merge MOCK_GH_ADMIN=true MOCK_GH_PR="$(pr_json '.isDraft = true')" >/dev/null
+expect merge-why-lists-all ok '^Why: autonomous merge refused: the gh login in this shell administers lab/proj, .*; pull request #5 is a draft\.$' -- "$guard" needs-you show n1
+rm .git/guard/needs-you.tsv
 expect merge-gh-refuses fail '^gh refused the merge: GraphQL: Head branch was modified' -- merge MOCK_GH_MERGE='GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)'
-expect merge-gh-refuses-queued ok '^gh pr merge refused: GraphQL: Head branch was modified' -- cat "$tmp/guard.log"
+expect merge-gh-refuses-queued ok '^Why: gh pr merge refused: GraphQL: Head branch was modified' -- "$guard" needs-you show n1
 git -C "$D.wt" switch -q -c semi guard/init; echo "merge_policy: semi-manual" >> "$D.wt/guard/budget.card"
 git -C "$D.wt" commit -q -am "semi-manual"; git update-ref refs/remotes/origin/main semi
+rm .git/guard/needs-you.tsv
 expect merge-semi-manual fail '^FAIL  merge_policy is semi-manual in guard/budget.card on origin/main, so a human merges$' -- merge
-expect merge-semi-manual-queued ok '^Merge PR #5$' -- cat "$tmp/guard.log"
+expect merge-semi-manual-queued ok '^🩺 n1 · approve · Merge PR #5$' -- "$guard" needs-you
 git update-ref refs/remotes/origin/main guard/init
 cd "$tmp/wt" || exit 1
 
