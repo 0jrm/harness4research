@@ -54,7 +54,7 @@ A guarded repo has a `guard/` directory, `FACTS.md`, and a `guard-fence` CI chec
 
 When a guard blocks you, the block is the answer. Report it. Do not route around it.
 
-This text describes guard schema 4. Once per session, read `git show origin/main:guard/VERSION`. If its `schema:` line is missing or lower, tell the human that `guard init <repo> --update` is pending. If it is higher, tell them to pull harness4research, and trust the scripts' output over this text. A usage error from `guard/run` means the project lacks that command. Report it, and never run the harness's own copy instead.
+This text describes guard schema 5. Once per session, read `git show origin/main:guard/VERSION`. If its `schema:` line is missing or lower, tell the human that `guard init <repo> --update` is pending. If it is higher, tell them to pull harness4research, and trust the scripts' output over this text. A usage error from `guard/run` means the project lacks that command. Report it, and never run the harness's own copy instead.
 
 ## Run lifecycle
 

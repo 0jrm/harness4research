@@ -24,7 +24,7 @@ git clone --recurse-submodules https://github.com/0jrm/harness4research ~/harnes
 guard version                           # prints this repo's commit and pstack's
 ```
 
-`install.sh` puts `guard` in `~/.local/bin` and links the skills into `~/.agents/skills`, `~/.claude/skills`, and `~/.cursor/skills`. To check that an agent sees them, open the agent and ask which skills it has. `safe-autonomous-hpc-science` and `present` should be in the list. `/present` asks for a present mid-task. If your agent reads skills from another folder, rerun with `--skills-dir <that folder>`.
+`install.sh` puts `guard` in `~/.local/bin` and links the skills into `~/.agents/skills`, `~/.claude/skills`, and `~/.cursor/skills`. To check that an agent sees them, open the agent and ask which skills it has. `safe-autonomous-hpc-science`, `present` and `review-and-merge` should be in the list. `/present` asks for a present mid-task. If your agent reads skills from another folder, rerun with `--skills-dir <that folder>`.
 
 ### 2. Propose the guard
 
@@ -133,6 +133,9 @@ The page re-surveys the project on reload, at most every `--every` seconds (defa
 | `guard atlas [repo] [--out f.html \| --serve PORT\|SOCKET] [--runs GLOB] [--title NAME] [--head-only]` | anywhere with the repo | read-only chart: hosts and fences, budget, ripples matrix, card map, per-run lifeline and receipts. Reads HEAD plus uncommitted run files; `--json` writes the data the page is drawn from ([docs/atlas-json.md](docs/atlas-json.md)); `--serve` re-surveys on reload at most every `--every` seconds; give it a socket path (contains `/`) instead of a port on a shared login node, since the socket is 0600 and `ssh -L 8765:/path/to/sock host` forwards it |
 | `guard needs-you [add \| show \| ack \| done \| dismiss]` | any git repository | the queue of what only you can do, check, or approve, shared by every worktree in `<git common dir>/guard/needs-you.tsv`; `add` refuses a relative, missing, or temporary path |
 | `guard hooks install claude [--user \| --project] [--dry-run]` | your machine | add Claude Code hooks that show open needs-you items at session start and on every prompt; keeps your other settings |
+| `guard config [list \| get KEY \| set KEY VALUE]` | anywhere | your settings in `~/.config/guard/config`: `reviewer` (`proprietary` or `local`), `reviewer_cmd_proprietary`, `reviewer_cmd_local`, `review_rounds`, and `merge_policy` for repositories without a guard |
+| `guard review <pr>` | the repository | runs the reviewer in a fresh worktree against the brief in `.git/guard/briefs/`; it may commit small fixes, which this command pushes; records the verdict in `.git/guard/reviews.tsv` and comments it on the pull request; exit 0 on approve |
+| `guard merge <pr>` | the repository | squash-merges at the reviewed head only when `merge_policy` is `autonomous`, the gh login is not an admin, a ruleset requires a pull request (and `guard-fence / fence` in a guarded project), the pull request is ready, every check passed, and the review approved; otherwise queues the merge for a human |
 | `guard/run preflight <run_dir> <job.sh> [sbatch options]` | cluster | submit or refuse |
 | `guard/run ripples <run_dir>` | cluster | warning signs |
 | `guard/run manifest <run_dir> "$0" "$@"` | inside a job | provenance record |
@@ -168,10 +171,11 @@ Pushing a change to `.github/workflows/` needs a token with the `workflow` scope
 - [docs/roadmap.md](docs/roadmap.md): the designed next steps, from field feedback
 - [skills/safe-autonomous-hpc-science/SKILL.md](skills/safe-autonomous-hpc-science/SKILL.md): what agents read for experiment work
 - [skills/present/SKILL.md](skills/present/SKILL.md): the `/present` block a person judges from the chat alone
+- [skills/review-and-merge/SKILL.md](skills/review-and-merge/SKILL.md): how an agent hands a finished change to `guard review` and `guard merge`
 
 ## Requirements
 
-bash 4 or later and git 2.30 or later on your machine and the cluster. Slurm on the cluster. GitHub for the fence, and `gh` for the printed PR commands. `tests/run.sh` needs python3 with PyYAML.
+bash 4 or later and git 2.30 or later on your machine and the cluster. Slurm on the cluster. GitHub for the fence, and `gh` for the printed PR commands. `tests/run.sh` needs python3 with PyYAML, and jq.
 
 ## Test
 
