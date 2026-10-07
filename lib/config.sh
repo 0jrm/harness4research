@@ -16,7 +16,7 @@ config_get() {
   printf '%s\n' "$v"
 }
 
-default_reviewer_cmds=("claude -p --permission-mode acceptEdits --allowedTools=Bash" "cursor-agent -p --force --trust")
+default_reviewer_cmds=("claude -p --permission-mode acceptEdits --strict-mcp-config --setting-sources project --disable-slash-commands --tools=Bash,Read,Edit,Grep,Glob --allowedTools=Bash" "cursor-agent -p --force --trust")
 
 # resolve_reviewer: sets reviewer and reviewer_cmds, the commands guard review tries in order until one exits 0, and
 # reviewer_cmd, the first of them. A configured command is the only one. Without one, a proprietary reviewer tries

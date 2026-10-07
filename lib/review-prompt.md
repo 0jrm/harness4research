@@ -11,9 +11,11 @@ Your working directory is a checkout of the pull request's head.
 1. Read the request. Work out what a user who typed those words expects to change.
 2. Read the diff. Check that it does all of that, and nothing the request did not ask for.
    If it adds or changes a line in `FACTS.md`, open the evidence that line cites (a path, a commit, a job id, or a command you can rerun) and confirm it says what the line claims. A fact whose evidence you cannot confirm means `changes`.
-3. Run the tests with the command the brief names. If it names none, find the command in AGENTS.md, the README, or the CI workflow. A test you could not run has not passed. Say which one and why.
-4. Fix a small defect if you find one, then run the tests again.
+3. Do not run the whole test suite. CI runs it on every pull request, and `guard merge` refuses to merge until it passes. Run one targeted test only when the diff raises a doubt that the test settles, and name the doubt.
+4. Fix a small defect if you find one, then rerun the targeted test that covers it.
 5. Give your verdict.
+
+Work from the diff in this prompt. Open a file only to see the code around a changed line or a cited piece of evidence. Aim to finish within about ten tool calls; a review that needs many more is a sign to escalate.
 
 ## Fixing
 
@@ -31,7 +33,7 @@ If a fix needs more than a few lines, or you cannot tell what the user meant, le
 
 ## Verdict
 
-- `approve` means the diff does what the request asks, the tests pass, and nothing is left to fix.
+- `approve` means the diff does what the request asks, any test you ran passed, and nothing is left to fix.
 - `changes` means the diff misses part of the request, or has a defect too large to fix here. Name what is missing.
 - `escalate` means a human must decide. The request is ambiguous, the plan contradicts it, the fix is large, or the work touches something only a human changes, such as a guard file, a frozen question card, a credential, or a limit.
 
