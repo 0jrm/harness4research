@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mock: gh api prints MOCK_GH_ADMIN, MOCK_GH_RUNS or MOCK_GH_RULES as gh prints them after --jq.
+# Mock: gh api prints MOCK_GH_ADMIN, MOCK_GH_PROTECTION, MOCK_GH_RUNS or MOCK_GH_RULES as gh prints them after --jq.
 # An unset variable answers 404, and a value starting with ! answers the error after the !.
 # Without MOCK_GH_TOKEN or GH_TOKEN, gh is logged out: auth token fails and api exits 4.
 # gh pr view runs MOCK_GH_PR, the pull request's JSON, through jq with the --jq expression; unset means no such pull request.
@@ -26,6 +26,7 @@ esac
 case "$*" in
   *" -i /") printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: %s\r\n\r\n{}\n' "${MOCK_GH_SCOPES:-}"; exit ;;
   *"/rules/branches/"*) v=MOCK_GH_RULES ;;
+  *"/branches/"*"/protection"*) v=MOCK_GH_PROTECTION ;;
   *"/actions/workflows/guard-fence.yml/runs"*) v=MOCK_GH_RUNS ;;
   *" repos/"*) v=MOCK_GH_ADMIN ;;
   *) echo "mock gh: unsupported $*" >&2; exit 1 ;;

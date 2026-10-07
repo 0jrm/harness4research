@@ -949,6 +949,11 @@ expect doctor-ssh fail '^FAIL  SSH_AUTH_SOCK is set in this shell' -- doctor SSH
 expect doctor-classic-token fail '^FAIL  the GitHub token in this shell is a classic or OAuth token with scopes repo, workflow,' -- \
   doctor MOCK_GH_TOKEN=gho_x MOCK_GH_SCOPES='repo, workflow'
 expect doctor-admin fail '^FAIL  the GitHub login in this shell administers lab/proj' -- doctor MOCK_GH_ADMIN=true
+expect doctor-admin-protected fail '^FAIL  the GitHub login in this shell administers lab/proj' -- doctor MOCK_GH_ADMIN=true MOCK_GH_PROTECTION='{}'
+expect doctor-admin-fine-grained ok '^pass  the GitHub login in this shell does not administer lab/proj$' -- \
+  doctor MOCK_GH_ADMIN=true MOCK_GH_PROTECTION='!Resource not accessible by personal access token'
+expect doctor-admin-forbidden-otherwise fail '^FAIL  the GitHub login in this shell administers lab/proj' -- \
+  doctor MOCK_GH_ADMIN=true MOCK_GH_PROTECTION='!API rate limit exceeded (HTTP 403)'
 expect doctor-no-token ok '^pass  no GitHub token in this shell' -- doctor MOCK_GH_TOKEN=
 expect doctor-cap ok '^pass  Slurm caps account gom at GrpTRESMins=cpu=600000$' -- doctor
 expect doctor-user-cap ok '^pass  Slurm caps account gom at GrpTRESMins=cpu=600000$' -- doctor MOCK_SACCTMGR_ASSOC=$'|\ntester|cpu=600000'
@@ -1173,6 +1178,8 @@ expect merge-ok-queues-nothing ok '^Nothing needs you\.$' -- "$guard" needs-you
 expect merge-card-default ok '^pass  merge_policy is autonomous in guard/budget.card on origin/main$' -- merge
 expect merge-fence-required ok '^pass  main has an active ruleset requiring a pull request and guard-fence / fence$' -- merge
 expect merge-already-merged ok '^Pull request #5 is already merged\.$' -- merge MOCK_GH_PR="$(pr_json '.state = "MERGED"')"
+expect merge-admin-fine-grained ok '^pass  the gh login in this shell does not administer lab/proj$' -- \
+  merge MOCK_GH_ADMIN=true MOCK_GH_PROTECTION='!Resource not accessible by personal access token'
 expect merge-admin fail '^FAIL  the gh login in this shell administers lab/proj, so a merge here could bypass the ruleset$' -- merge MOCK_GH_ADMIN=true
 expect merge-admin-no-call fail - -- grep -q '^pr merge' "$tmp/gh.log"
 expect merge-admin-remedy fail '^      Run agents with a token that has no Administration permission: https://github.com/0jrm/harness4research/blob/main/docs/enforceable.md#5-give-agents-weaker-credentials$' -- merge MOCK_GH_ADMIN=true

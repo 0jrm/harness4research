@@ -201,7 +201,7 @@ slug=$(github_slug "$repo")
 gh_why=""; admin=""
 if [ -z "$slug" ]; then gh_why="origin is not a github.com remote"
 elif ! command -v gh >/dev/null; then gh_why="gh is not on PATH"
-elif admin=$(gh_admin "$slug"); then :
+elif admin=$(gh_admin "$slug" "$branch"); then :
 elif [ $? -eq 4 ]; then gh_why="gh is not logged in"
 else gh_why=$(why "$admin"); fi
 token=${GH_TOKEN:-${GITHUB_TOKEN:-}}

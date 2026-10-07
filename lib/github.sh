@@ -13,9 +13,18 @@ gh_get() { gh api --method GET "$@" 2>&1; }
 # gh prints the JSON error body and then "gh: <message>" without a newline between them.
 why() { local last=${1##*$'\n'}; echo "${last##*gh: }"; }
 
-# gh_admin <slug>: prints true or false, whether this shell's gh login administers the repository. When gh fails, prints
-# its output and returns its status, which is 4 when gh is not logged in.
-gh_admin() { gh_get "repos/$1" --jq .permissions.admin; }
+# gh_admin <slug> <branch>: prints true or false, whether this shell's gh login administers the repository. When gh
+# fails, prints its output and returns its status, which is 4 when gh is not logged in.
+# repos/<slug> reports the user's role, so it says admin for a fine-grained token without the Administration permission
+# too. Reading the branch's protection needs that permission: such a token gets 403 "Resource not accessible by personal
+# access token".
+gh_admin() {
+  local role out
+  role=$(gh_get "repos/$1" --jq .permissions.admin) || { local rc=$?; echo "$role"; return $rc; }
+  [ "$role" = true ] || { echo "$role"; return 0; }
+  if ! out=$(gh_get "repos/$1/branches/$2/protection") && [[ $out == *"Resource not accessible by personal access token"* ]]
+  then echo false; else echo true; fi
+}
 
 # ruleset_missing <slug> <branch> <fence 0|1>: prints what the active rules on the branch fail to require, joined with
 # " and ": a pull request, and guard-fence / fence when fence is 1. Prints nothing when they require it all. When gh
