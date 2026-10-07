@@ -1250,6 +1250,12 @@ expect ny-worktree-sees-main ok '^🩺 n2 · check' -- in_dir "$tmp/ny-wt" "$gua
 for i in $(seq 8); do (cd "$ny" && "$guard" needs-you add --kind check --title "race $i" > /dev/null) & done; wait
 expect ny-concurrent-ids-unique ok '^n1 n2 n3 n4 n5 n6 n7 n8 n9 n10 n11 $' -- bash -c 'awk -F "\t" "\$3 == \"open\" {print \$1}" "$1" | sort -V | tr "\n" " "' _ "$ny/.git/guard/needs-you.tsv"
 
+rows=$(wc -l < "$ny/.git/guard/needs-you.tsv")
+expect ny-add-same-open-item ok '^n2$' -- in_dir "$ny" "$guard" needs-you add --kind check --title 'Read the report' --path "$here/README.md"
+expect ny-add-same-writes-nothing ok "^$rows\$" -- bash -c 'wc -l < "$1"' _ "$ny/.git/guard/needs-you.tsv"
+expect ny-add-same-title-other-kind ok '^n12$' -- in_dir "$ny" "$guard" needs-you add --kind approve --title 'Read the report'
+expect ny-add-same-as-closed ok '^n13$' -- in_dir "$ny" "$guard" needs-you add --kind run --title 'Merge PR #41 (autonomous merge refused)' --run 'gh pr merge 41 --squash'
+
 echo "== hooks install"
 home=$tmp/hooks-home; mkdir -p "$home/.claude" "$home/dotfiles"
 cat > "$home/dotfiles/settings.json" <<'JSON'

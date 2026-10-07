@@ -8,7 +8,8 @@
 A queue of what only a human can do, check, or approve. With no arguments it prints every open or acked item
 as a 🩺 block. add prints the new id, and refuses (exit 2) a path that is relative, missing, or somewhere that
 gets cleaned: /tmp, /var/tmp, $TMPDIR, or a directory named scratchpad. --remind prints nothing when no item
-is open or outside a git repository, so it can run on every prompt.
+is open or outside a git repository, so it can run on every prompt. Adding an item with the kind and title of an
+open one prints that item's id and queues nothing.
 """
 import argparse, datetime as dt, fcntl, json, os, subprocess, sys
 from collections import namedtuple
@@ -166,9 +167,14 @@ def add(queue, a):
                   undo=cell("undo", a.undo, part=True), note="", source=cell("source", a.source),
                   paths=[checked_path(p) for p in a.path], commands=[cell("run", c, part=True) for c in a.run])
     def new(items):
+        same = next((it for it in items if it.state == "open" and it.kind == a.kind and it.title == a.title), None)
+        if same:
+            print(same.id)
+            return None
         n = max((int(it.id[1:]) for it in items if it.id[1:].isdigit()), default=0) + 1
+        print(f"n{n}")
         return Item(id=f"n{n}", ts=now(), state="open", kind=a.kind, **fields)
-    print(transact(queue, new).id)
+    transact(queue, new)
 
 def move(queue, verb, ident, note):
     state, from_states = MOVES[verb]

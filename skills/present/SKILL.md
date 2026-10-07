@@ -71,7 +71,7 @@ guard needs-you add --kind run --title "Merge PR #41" --why "<one sentence>" \
 guard needs-you show n3
 ```
 
-`add` prints the new id. `--kind` is `approve` for a decision, `run` for a command, or `check` for something to look at. Give each command its own `--run`, in the order the human runs them. `add` refuses a path that is relative, missing, or under `/tmp`, `/var/tmp`, `$TMPDIR`, or a `scratchpad` directory, because the human may open it after that file is gone. Copy the file into the project and queue the copy.
+`add` prints the new id. If an open item already has the same kind and title, `add` prints that item's id and queues nothing, so a retry never queues a duplicate. `--kind` is `approve` for a decision, `run` for a command, or `check` for something to look at. Give each command its own `--run`, in the order the human runs them. `add` refuses a path that is relative, missing, or under `/tmp`, `/var/tmp`, `$TMPDIR`, or a `scratchpad` directory, because the human may open it after that file is gone. Copy the file into the project and queue the copy.
 
 Paste the output of `guard needs-you show <id>` verbatim, after the 🎁 block. In the present, name the id in the sentence that says what you need. The queue keeps the item for every worktree of the repository, and `guard needs-you` lists it until the human closes it. Never run `guard needs-you ack`, `done`, or `dismiss` yourself. Those mean the human saw it or did it.
 
