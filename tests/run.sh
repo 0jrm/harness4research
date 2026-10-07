@@ -1104,7 +1104,7 @@ expect merge-already-merged ok '^Pull request #5 is already merged\.$' -- merge 
 expect merge-admin fail '^FAIL  the gh login in this shell administers lab/proj, so a merge here could bypass the ruleset$' -- merge MOCK_GH_ADMIN=true
 expect merge-admin-no-call fail - -- grep -q '^pr merge' "$tmp/gh.log"
 expect merge-admin-remedy fail '^      Run agents with a token that has no Administration permission: https://github.com/0jrm/harness4research/blob/main/docs/enforceable.md#5-give-agents-weaker-credentials$' -- merge MOCK_GH_ADMIN=true
-expect merge-admin-kind ok '^run$' -- sed -n 4p "$tmp/guard.log"
+expect merge-admin-kind ok '^approve$' -- sed -n 4p "$tmp/guard.log"
 expect merge-admin-command ok '^gh pr merge 5 --squash$' -- cat "$tmp/guard.log"
 expect merge-admin-cd ok "^cd $D$" -- cat "$tmp/guard.log"
 expect merge-admin-block fail '^🩺 n1 · stub$' -- merge MOCK_GH_ADMIN=true
@@ -1114,7 +1114,6 @@ expect merge-no-fence-rule fail '^FAIL  main has no active rule requiring guard-
 expect merge-ruleset-unreadable fail '^FAIL  cannot tell whether main has an active ruleset requiring a pull request and guard-fence / fence: Upgrade to GitHub Pro' -- \
   merge MOCK_GH_RULES='!Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)'
 expect merge-draft fail '^FAIL  pull request #5 is a draft$' -- merge MOCK_GH_PR="$(pr_json '.isDraft = true')"
-expect merge-draft-kind ok '^approve$' -- sed -n 4p "$tmp/guard.log"
 expect merge-closed fail '^FAIL  pull request #5 is closed$' -- merge MOCK_GH_PR="$(pr_json '.state = "CLOSED"')"
 expect merge-failed-check fail '^FAIL  not every check passed: tests \(failure\)$' -- \
   merge MOCK_GH_PR="$(pr_json '.statusCheckRollup += [{__typename: "CheckRun", name: "tests", status: "COMPLETED", conclusion: "FAILURE"}]')"
@@ -1138,7 +1137,7 @@ expect merge-gh-refuses-queued ok '^gh pr merge refused: GraphQL: Head branch wa
 git -C "$D.wt" switch -q -c semi guard/init; echo "merge_policy: semi-manual" >> "$D.wt/guard/budget.card"
 git -C "$D.wt" commit -q -am "semi-manual"; git update-ref refs/remotes/origin/main semi
 expect merge-semi-manual fail '^FAIL  merge_policy is semi-manual in guard/budget.card on origin/main, so a human merges$' -- merge
-expect merge-semi-manual-queued ok '^Merge PR #5 \(autonomous merge refused\)$' -- cat "$tmp/guard.log"
+expect merge-semi-manual-queued ok '^Merge PR #5$' -- cat "$tmp/guard.log"
 git update-ref refs/remotes/origin/main guard/init
 cd "$tmp/wt" || exit 1
 

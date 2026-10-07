@@ -15,10 +15,10 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 [ $# -eq 1 ] && [[ $1 =~ ^[0-9]+$ ]] || { echo "usage: guard merge <pr number>" >&2; exit 64; }
 pr=$1
 enforce=https://github.com/0jrm/harness4research/blob/main/docs/enforceable.md#
-passed=0; failed=(); kind=run
+passed=0; failed=()
 if [ -t 1 ]; then green=$'\e[32m' red=$'\e[31m' plain=$'\e[0m'; else green="" red="" plain=""; fi
 pass() { passed=$((passed+1)); echo "${green}pass${plain}  $1"; }
-fail() { failed+=("$2"); [ "$1" = run ] || kind=approve; echo "${red}FAIL${plain}  $2"; echo "      $3"; }
+fail() { failed+=("$1"); echo "${red}FAIL${plain}  $1"; echo "      $2"; }
 why() { local last=${1##*$'\n'}; echo "${last##*gh: }"; }
 
 info=$(gh pr view "$pr" --json state,isDraft,headRefName,headRefOid,baseRefName,statusCheckRollup --jq '
@@ -44,58 +44,58 @@ else
 fi
 policy=${policy:-autonomous}
 if [ "$policy" = autonomous ]; then pass "merge_policy is autonomous in $where"
-else fail run "merge_policy is $policy in $where, so a human merges" "$remedy"; fi
+else fail "merge_policy is $policy in $where, so a human merges" "$remedy"; fi
 
-if [ -z "$slug" ]; then fail run "cannot tell whether the gh login administers the repository: origin is not a github.com remote" \
+if [ -z "$slug" ]; then fail "cannot tell whether the gh login administers the repository: origin is not a github.com remote" \
   "Run guard merge in a clone whose origin is on github.com."
 elif ! admin=$(gh api --method GET "repos/$slug" --jq .permissions.admin 2>&1); then
-  fail run "cannot tell whether the gh login in this shell administers $slug: $(why "$admin")" \
+  fail "cannot tell whether the gh login in this shell administers $slug: $(why "$admin")" \
     "Run guard merge where gh can read $slug with the agent's token: ${enforce}5-give-agents-weaker-credentials"
 else case $admin in
   false) pass "the gh login in this shell does not administer $slug" ;;
-  true) fail run "the gh login in this shell administers $slug, so a merge here could bypass the ruleset" \
+  true) fail "the gh login in this shell administers $slug, so a merge here could bypass the ruleset" \
     "Run agents with a token that has no Administration permission: ${enforce}5-give-agents-weaker-credentials" ;;
-  *) fail run "cannot tell whether the gh login in this shell administers $slug: GitHub returned '$admin'" \
+  *) fail "cannot tell whether the gh login in this shell administers $slug: GitHub returned '$admin'" \
     "Check the token's permissions on GitHub: ${enforce}5-give-agents-weaker-credentials" ;;
 esac; fi
 
 need="a pull request"; [ $guarded = 0 ] || need="a pull request and guard-fence / fence"
-if [ -z "$slug" ]; then fail run "cannot tell whether $base_ref has an active ruleset requiring $need: origin is not a github.com remote" \
+if [ -z "$slug" ]; then fail "cannot tell whether $base_ref has an active ruleset requiring $need: origin is not a github.com remote" \
   "Run guard merge in a clone whose origin is on github.com."
 elif ! rules=$(gh api --method GET "repos/$slug/rules/branches/$base_ref" \
   --jq '.[] | if .type == "required_status_checks" then "check " + .parameters.required_status_checks[].context else .type end' 2>&1); then
-  fail run "cannot tell whether $base_ref has an active ruleset requiring $need: $(why "$rules")" \
+  fail "cannot tell whether $base_ref has an active ruleset requiring $need: $(why "$rules")" \
     "Open Settings, Rules, Rulesets on GitHub: ${enforce}4-protect-the-default-branch"
 else
   missing=(); grep -qx pull_request <<<"$rules" || missing+=("a pull request")
   [ $guarded = 0 ] || grep -qxE 'check (guard-fence / )?fence' <<<"$rules" || missing+=("guard-fence / fence")
   if [ ${#missing[@]} -eq 0 ]; then pass "$base_ref has an active ruleset requiring $need"
-  else fail run "$base_ref has no active rule requiring $(printf '%s and ' "${missing[@]}" | sed 's/ and $//')" \
+  else fail "$base_ref has no active rule requiring $(printf '%s and ' "${missing[@]}" | sed 's/ and $//')" \
     "Add a branch ruleset for $base_ref: ${enforce}4-protect-the-default-branch"; fi
 fi
 
-if [ "$pr_state" != OPEN ]; then fail approve "pull request #$pr is ${pr_state,,}" "Reopen it if it should merge."
-elif [ "$draft" = true ]; then fail approve "pull request #$pr is a draft" "Mark it ready with gh pr ready $pr once the work is done."
+if [ "$pr_state" != OPEN ]; then fail "pull request #$pr is ${pr_state,,}" "Reopen it if it should merge."
+elif [ "$draft" = true ]; then fail "pull request #$pr is a draft" "Mark it ready with gh pr ready $pr once the work is done."
 else pass "pull request #$pr is open and ready for review"; fi
 
-if [ "$checks" = 0 ]; then fail approve "no checks ran on pull request #$pr, so nothing tested it" \
+if [ "$checks" = 0 ]; then fail "no checks ran on pull request #$pr, so nothing tested it" \
   "Wait for CI to start, or add a workflow that runs on pull requests, then rerun guard merge $pr."
-elif [ -n "$failing" ]; then fail approve "not every check passed: $failing" \
+elif [ -n "$failing" ]; then fail "not every check passed: $failing" \
   "Fix the failing checks and push, or wait for the pending ones, then rerun guard merge $pr."
 else pass "every check passed ($checks)"; fi
 
 row=$(awk -F'\t' -v pr="$pr" '$2 == pr { r = $3 "\t" $4 } END { print r }' "$state/reviews.tsv" 2>/dev/null || true)
 IFS=$'\t' read -r reviewed verdict <<<"$row"
-if [ -z "$row" ]; then fail approve "guard review has no verdict for pull request #$pr" "Run guard review $pr."
-elif [ "$verdict" != approve ]; then fail approve "the last guard review of pull request #$pr says $verdict at ${reviewed:0:7}" \
+if [ -z "$row" ]; then fail "guard review has no verdict for pull request #$pr" "Run guard review $pr."
+elif [ "$verdict" != approve ]; then fail "the last guard review of pull request #$pr says $verdict at ${reviewed:0:7}" \
   "Address the review and run guard review $pr again, or a human decides."
-elif [ "$reviewed" != "$head_sha" ]; then fail approve "guard review approved ${reviewed:0:7}, and the head is now ${head_sha:0:7}" \
+elif [ "$reviewed" != "$head_sha" ]; then fail "guard review approved ${reviewed:0:7}, and the head is now ${head_sha:0:7}" \
   "Run guard review $pr on the new head."
 else pass "guard review approved the head ${head_sha:0:7}"; fi
 
 brief=$(brief_path "$head_ref"); files=(); [ ! -f "$brief" ] || files=(--path "$brief")
 hand_over() {
-  queue --kind "$kind" --title "Merge PR #$pr (autonomous merge refused)" --why "$1" "${files[@]}" \
+  queue --kind approve --title "Merge PR #$pr" --why "$1" "${files[@]}" \
     --run "cd $top" --run "gh pr merge $pr --squash" --expect "\"Squashed and merged pull request #$pr\"." \
     --undo "git revert <merge commit> on a new branch, then open a pull request." --source "guard merge"
 }
