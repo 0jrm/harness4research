@@ -13,7 +13,7 @@ The gaps are below, ordered by what they cost in that session. Every item reache
 |---|---|---|
 | 0 | Upgrade strategy and compatibility contract | done, schema 2 |
 | 1 | `guard/run launch` for a host without a scheduler | done, schema 3 |
-| 2 | Standard check pack, checks run from the protected branch | next |
+| 2 | Standard check pack, checks run from the protected branch | exit 77 reads UNCHECKED done; the rest next |
 | 6 | Close the handled-failures bypass | small, early |
 | 5 | Script arguments for preflight | small, early |
 | 3 | Link question cards to what ran | after 1 |

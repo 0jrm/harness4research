@@ -112,6 +112,7 @@ for c in "$run_dir"/checks/*; do
   [ -x "$c" ] || continue; found=1
   out=$("$c" "$run_dir" 2>&1); rc=$?
   if [ $rc -eq 0 ]; then say PASS "check:$(basename "$c")" "$(tail -n1 <<<"$out")"
+  elif [ $rc -eq 77 ]; then say UNCHECKED "check:$(basename "$c")" "$(tail -n1 <<<"$out"); it exits 77 until its input exists"
   else say RIPPLE "check:$(basename "$c")" "$(tail -n1 <<<"$out"); run $c $run_dir for its full output"; fi
 done
 [ $found -eq 1 ] || say UNCHECKED domain-checks "no executable $run_dir/checks/*; add a script there that exits non-zero when a result looks wrong"
