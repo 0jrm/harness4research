@@ -156,13 +156,15 @@ def remind(fmt):
     print(json.dumps(out))
 
 def add(queue, a):
+    if not all(c.strip() for c in a.run):
+        raise Refused("--run is empty")
     if a.kind == "run" and not a.run:
         raise Refused("--kind run needs at least one --run command")
     if not a.title.strip():
         raise Refused("--title is empty")
     fields = dict(title=cell("title", a.title), why=cell("why", a.why, part=True), expect=cell("expect", a.expect, part=True),
                   undo=cell("undo", a.undo, part=True), note="", source=cell("source", a.source),
-                  paths=[checked_path(p) for p in a.path], commands=[cell("run", c, part=True) for c in a.run if c])
+                  paths=[checked_path(p) for p in a.path], commands=[cell("run", c, part=True) for c in a.run])
     def new(items):
         n = max((int(it.id[1:]) for it in items if it.id[1:].isdigit()), default=0) + 1
         return Item(id=f"n{n}", ts=now(), state="open", kind=a.kind, **fields)

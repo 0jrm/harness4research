@@ -1220,6 +1220,7 @@ expect ny-refuse-tab fail 'holds a tab or a newline' -- in_dir "$ny" "$guard" ne
 expect ny-refuse-newline fail 'holds a tab or a newline' -- in_dir "$ny" "$guard" needs-you add --kind check --title t --why "$(printf 'a\nb')"
 expect ny-refuse-separator fail "holds ';;'" -- in_dir "$ny" "$guard" needs-you add --kind run --title t --run 'case x in x) ;; esac'
 expect ny-refuse-run-without-command fail 'needs at least one --run' -- in_dir "$ny" "$guard" needs-you add --kind run --title t
+expect ny-refuse-empty-run fail '^guard needs-you: --run is empty$' -- in_dir "$ny" "$guard" needs-you add --kind run --title t --run ''
 expect ny-refusals-write-nothing ok "^$rows\$" -- bash -c 'wc -l < "$1"' _ "$ny/.git/guard/needs-you.tsv"
 expect ny-remind-text ok '^🩺 2 items in .* need you:$' -- in_dir "$ny" "$guard" needs-you --remind
 expect ny-ack ok '^n1 acked$' -- in_dir "$ny" "$guard" needs-you ack n1 --note seen
