@@ -1010,7 +1010,7 @@ expect doctor-local-no-command-line fail '^FAIL  reviewer is local and no local 
 mkdir -p "$tmp/home/bin"; ln -s "$tmp/doctor-reviewer" "$tmp/home/bin/local-reviewer"
 expect doctor-local-tilde ok "^pass  reviewer is local: ~/bin/local-reviewer --oss, and $tmp/home/bin/local-reviewer is an executable file$" -- \
   doctor XDG_CONFIG_HOME="$(xdg local-cmd 'reviewer: local' 'reviewer_cmd_local: ~/bin/local-reviewer --oss')"
-expect doctor-policy-card ok '^pass  merge_policy is autonomous in guard/budget.card on origin/main, so guard merge also needs the ruleset and non-admin login items above to pass$' -- \
+expect doctor-policy-card ok '^pass  merge_policy is autonomous by default, since guard/budget.card on origin/main does not set it, so guard merge also needs the ruleset and non-admin login items above to pass$' -- \
   doctor XDG_CONFIG_HOME="$(xdg semi 'merge_policy: semi-manual' "reviewer_cmd_proprietary: $tmp/doctor-reviewer -p")"
 git -C "$D.wt" switch -q -c doctor-semi guard/init; sed -i '/^merge_policy:/d' "$D.wt/guard/budget.card"; echo "merge_policy: semi-manual" >> "$D.wt/guard/budget.card"
 git -C "$D.wt" commit -q -am "semi-manual"; git -C "$D" update-ref refs/remotes/origin/main doctor-semi
@@ -1018,7 +1018,7 @@ expect doctor-policy-card-semi ok '^pass  merge_policy is semi-manual in guard/b
 git -C "$D" update-ref refs/remotes/origin/main guard/init; git -C "$D.wt" switch -q guard/init
 expect doctor-policy-config fail "^pass  merge_policy is semi-manual in $tmp/xdg-semi/guard/config, so guard merge queues every merge for a human$" -- \
   env HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/xdg-semi" "$guard" doctor "$tmp/agents"
-expect doctor-policy-config-autonomous fail "^pass  merge_policy is autonomous in $tmp/xdg/guard/config, so guard merge also needs the non-admin login item above and a ruleset requiring a pull request$" -- \
+expect doctor-policy-config-autonomous fail "^pass  merge_policy is autonomous by default, since $tmp/xdg/guard/config does not set it, so guard merge also needs the non-admin login item above and a ruleset requiring a pull request$" -- \
   env HOME="$tmp/home" "$guard" doctor "$tmp/agents"
 git -C "$D.wt" switch -q -c doctor-no-card guard/init; git -C "$D.wt" rm -q guard/budget.card
 git -C "$D.wt" commit -q -m "no card"; git -C "$D" update-ref refs/remotes/origin/main doctor-no-card
@@ -1205,7 +1205,7 @@ merge() {  # merge [env...]: guard merge 5 here with every gate open, unless an 
 on_github=(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0=https://github.com/lab/proj.git)
 review approve >/dev/null 2>&1
 expect merge-unguarded ok '^✓ Squashed and merged pull request lab/proj#5$' -- merge "${on_github[@]}" MOCK_GH_RULES=pull_request
-expect merge-unguarded-policy ok "^pass  merge_policy is autonomous in $tmp/xdg/guard/config$" -- merge "${on_github[@]}" MOCK_GH_RULES=pull_request
+expect merge-unguarded-policy ok "^pass  merge_policy is autonomous by default, since $tmp/xdg/guard/config does not set it$" -- merge "${on_github[@]}" MOCK_GH_RULES=pull_request
 expect merge-squash-pinned ok "^pr merge 5 --squash --match-head-commit $(git rev-parse origin/feat/add)$" -- grep '^pr merge' "$tmp/gh.log"
 expect merge-never-admin fail - -- grep -q -- --admin "$tmp/gh.log"
 expect merge-not-github fail '^FAIL  cannot tell whether the gh login administers the repository: origin is not a github.com remote$' -- merge
@@ -1213,6 +1213,8 @@ expect merge-not-github fail '^FAIL  cannot tell whether the gh login administer
 expect merge-config-semi-manual fail "^FAIL  merge_policy is semi-manual in $tmp/xdg/guard/config, so a human merges$" -- merge "${on_github[@]}" MOCK_GH_RULES=pull_request
 expect merge-config-remedy fail '^      A human merges it, or runs guard config set merge_policy autonomous\.$' -- merge "${on_github[@]}" MOCK_GH_RULES=pull_request
 "$guard" config set merge_policy autonomous >/dev/null
+expect merge-config-set-autonomous ok "^pass  merge_policy is autonomous in $tmp/xdg/guard/config$" -- merge "${on_github[@]}" MOCK_GH_RULES=pull_request
+"$guard" config set merge_policy "" >/dev/null
 
 cd "$D" || exit 1
 git update-ref refs/remotes/origin/feat/add "$(git rev-parse guard/init)"; head5=$(git rev-parse origin/feat/add)
@@ -1221,7 +1223,9 @@ approve_at "$head5"
 expect merge-ok ok '^✓ Squashed and merged pull request lab/proj#5$' -- merge
 expect merge-ok-call ok "^pr merge 5 --squash --match-head-commit $head5$" -- grep '^pr merge' "$tmp/gh.log"
 expect merge-ok-queues-nothing ok '^Nothing needs you\.$' -- "$guard" needs-you
-expect merge-card-default ok '^pass  merge_policy is autonomous in guard/budget.card on origin/main$' -- merge
+expect merge-card-default ok '^pass  merge_policy is autonomous by default, since guard/budget.card on origin/main does not set it$' -- merge
+expect merge-says-merged ok '^Merged pull request #5 into main\.$' -- merge
+expect merge-says-merge-commit ok '^Merged pull request #5 into main as abc1234\.$' -- merge MOCK_GH_PR="$(pr_json '.mergeCommit = {oid: "abc1234def"}')"
 expect merge-fence-required ok '^pass  main has an active ruleset requiring a pull request and guard-fence / fence$' -- merge
 expect merge-already-merged ok '^Pull request #5 is already merged\.$' -- merge MOCK_GH_PR="$(pr_json '.state = "MERGED"')"
 expect merge-admin-fine-grained ok '^pass  the gh login in this shell does not administer lab/proj$' -- \

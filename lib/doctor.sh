@@ -174,10 +174,10 @@ check_reviewer() {
 check_merge_policy() {
   read_merge_policy "$repo" "$base" "$p_guarded"
   if [ "$merge_policy" = autonomous ] && [ "$p_guarded" = 1 ]; then
-    result pass "merge_policy is autonomous in $merge_policy_from, so guard merge also needs the ruleset and non-admin login items above to pass"
+    result pass "merge_policy is autonomous $merge_policy_where, so guard merge also needs the ruleset and non-admin login items above to pass"
   elif [ "$merge_policy" = autonomous ]; then
-    result pass "merge_policy is autonomous in $merge_policy_from, so guard merge also needs the non-admin login item above and a ruleset requiring a pull request"
-  else result pass "merge_policy is $merge_policy in $merge_policy_from, so guard merge queues every merge for a human"; fi
+    result pass "merge_policy is autonomous $merge_policy_where, so guard merge also needs the non-admin login item above and a ruleset requiring a pull request"
+  else result pass "merge_policy is $merge_policy $merge_policy_where, so guard merge queues every merge for a human"; fi
 }
 
 check_hook() {
