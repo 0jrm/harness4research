@@ -74,7 +74,7 @@ for ((round = 1; round <= rounds; round++)); do
   last=${last%"${last##*[![:space:]]}"}
   if [ $rc -ne 0 ]; then verdict=escalate reason="the reviewer command exited $rc"
   elif [[ $last =~ ^VERDICT:\ (approve|changes|escalate)\ -\ (.*[^[:space:]].*)$ ]]; then
-    verdict=${BASH_REMATCH[1]} reason=${BASH_REMATCH[2]//$'\t'/ }
+    verdict=${BASH_REMATCH[1]} reason=$(sed -e 's/;;*/;/g' -e 's/^[; ]*//' -e 's/[; ]*$//' <<<"${BASH_REMATCH[2]//$'\t'/ }")
   else verdict=escalate reason="the reviewer's last line is not a VERDICT line"; fi
   git -C "$wt" status --porcelain | grep -q . && echo "note: the reviewer left uncommitted edits, and they are discarded." >&2
   after=$(git -C "$wt" rev-parse HEAD)

@@ -1000,6 +1000,7 @@ case $FAKE_REVIEW in
   dirty) echo junk >> calc.py; echo "VERDICT: approve - fine" ;;
   none) echo "It looks fine to me." ;;
   crash) exit 3 ;;
+  semicolons) echo "VERDICT: escalate - ;split;; the reason;;; here;" ;;
   *) printf 'Report.\nVERDICT: %s - reason for %s  \n\n' "$FAKE_REVIEW" "$FAKE_REVIEW" ;;
 esac
 FAKE
@@ -1057,6 +1058,9 @@ expect review-changes-once ok '^1$' -- bash -c '"$1" needs-you | grep -c "Review
 expect review-changes-recorded ok '	changes	.*	reason for changes$' -- tail -n 1 "$reviews"
 expect review-escalate fail '^VERDICT: escalate - reason for escalate$' -- review escalate
 expect review-escalate-queue ok '^🩺 n2 · approve · Review of PR #5 needs your decision$' -- "$guard" needs-you
+"$guard" needs-you dismiss n2 >/dev/null
+expect review-reason-semicolons fail '^VERDICT: escalate - split; the reason; here$' -- review semicolons
+expect review-reason-semicolons-queued ok '^Why: split; the reason; here$' -- "$guard" needs-you show n3
 expect review-no-verdict fail "^VERDICT: escalate - the reviewer's last line is not a VERDICT line$" -- review none
 expect review-crash fail '^VERDICT: escalate - the reviewer command exited 3$' -- review crash
 expect review-dirty-discarded ok 'uncommitted edits, and they are discarded' -- review dirty
