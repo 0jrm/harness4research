@@ -1030,6 +1030,7 @@ expect review-approve ok '^VERDICT: approve - reason for approve$' -- review app
 expect review-one-round ok '^1$' -- grep -c '^call' "$tmp/fake/calls"
 expect review-worktree-in-state ok "^$RV/.git/guard/review-worktrees/pr-5$" -- cat "$tmp/fake/cwd"
 expect review-prompt-scope ok 'If the brief has a "Scope" section' -- cat "$tmp/fake/prompt.md"
+expect review-prompt-facts ok 'line in `FACTS.md`, open the evidence' -- cat "$tmp/fake/prompt.md"
 expect review-recorded ok "	5	$(git rev-parse origin/feat/add)	approve	$tmp/fake-reviewer	reason for approve$" -- tail -n 1 "$reviews"
 expect review-tsv-header ok '^ts	pr	head	verdict	reviewer	reason$' -- head -n 1 "$reviews"
 expect review-prompt-request ok '^Make add actually add, plz$' -- cat "$tmp/fake/prompt.md"
