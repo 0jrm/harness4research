@@ -989,6 +989,7 @@ git switch -q -c feat/add; echo '# adds two numbers' >> calc.py; git commit -q -
 cat > "$tmp/fake-reviewer" <<'FAKE'
 #!/usr/bin/env bash
 echo "call ${GH_TOKEN:-no-token} $*" >> "$FAKE_DIR/calls"
+readlink /proc/self/fd/0 > "$FAKE_DIR/stdin"
 cp .guard-review/prompt.md "$FAKE_DIR/prompt.md"
 git push -q origin HEAD:refs/heads/sneaky 2>/dev/null && echo pushed >> "$FAKE_DIR/calls"
 case $FAKE_REVIEW in
@@ -1028,6 +1029,7 @@ expect review-tsv-header ok '^ts	pr	head	verdict	reviewer	reason$' -- head -n 1 
 expect review-prompt-request ok '^Make add actually add, plz$' -- cat "$tmp/fake/prompt.md"
 expect review-prompt-diff ok '^\+# adds two numbers$' -- cat "$tmp/fake/prompt.md"
 expect review-prompt-rules ok '^VERDICT: <approve\|changes\|escalate> - <one-line reason>$' -- cat "$tmp/fake/prompt.md"
+expect review-stdin-closed ok '^/dev/null$' -- cat "$tmp/fake/stdin"
 expect review-no-token ok '^call no-token Read .guard-review/prompt.md' -- cat "$tmp/fake/calls"
 expect review-reviewer-cannot-push ok '^$' -- git ls-remote origin sneaky
 expect review-comment ok '^pr comment 5 --body guard review: approve at [0-9a-f]{7}\. reason for approve$' -- cat "$tmp/gh.log"

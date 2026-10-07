@@ -69,7 +69,7 @@ for ((round = 1; round <= rounds; round++)); do
   rc=0
   (cd "$wt" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK GIT_CONFIG_COUNT=1 \
     GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=guard-review-never-pushes: \
-    bash -c "$cmd \"\$@\"" reviewer "$ask") > "$log" || rc=$?
+    bash -c "$cmd \"\$@\"" reviewer "$ask") < /dev/null > "$log" || rc=$?
   last=$(grep -v '^[[:space:]]*$' "$log" | tail -n 1 | tr -d '\r' || true)
   last=${last%"${last##*[![:space:]]}"}
   if [ $rc -ne 0 ]; then verdict=escalate reason="the reviewer command exited $rc"
