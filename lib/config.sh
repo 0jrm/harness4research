@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # usage: guard config [list | get KEY | set KEY VALUE]
 # Per-user settings, flat `key: value` lines like the budget card; the first match wins. An empty VALUE removes the key.
-config_file=${XDG_CONFIG_HOME:-$HOME/.config}/guard/config
+# GUARD_CONFIG names another file, for example to try a reviewer without changing XDG_CONFIG_HOME, where gh and the
+# agent CLIs keep their logins.
+config_file=${GUARD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/guard/config}
 config_keys=(reviewer reviewer_cmd_proprietary reviewer_cmd_local review_rounds merge_policy)
 declare -A config_default=([reviewer]=proprietary [review_rounds]=2 [merge_policy]=autonomous)
 

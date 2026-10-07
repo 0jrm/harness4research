@@ -980,6 +980,7 @@ expect config-bad-rounds fail 'review_rounds is a whole number' -- "$guard" conf
 expect config-bad-policy fail 'merge_policy is autonomous or semi-manual' -- "$guard" config set merge_policy yolo
 expect config-unknown-key fail "unknown key 'colour'" -- "$guard" config get colour
 expect config-private ok '^600$' -- stat -c %a "$XDG_CONFIG_HOME/guard/config"
+expect config-guard-config-override ok '^reviewer: local$' -- bash -c 'GUARD_CONFIG="$1/alt-config" "$2" config set reviewer local >/dev/null && cat "$1/alt-config"' _ "$tmp" "$guard"
 
 echo "== review"
 RV=$keep/rv
@@ -999,7 +1000,7 @@ case $FAKE_REVIEW in
   fix-always) date +%s%N >> calc.py; git commit -qam "fix: more"; echo "VERDICT: approve - fixed again" ;;
   dirty) echo junk >> calc.py; echo "VERDICT: approve - fine" ;;
   none) echo "It looks fine to me." ;;
-  crash) exit 3 ;;
+  crash) echo 'Error: Authentication required.' >&2; exit 3 ;;
   semicolons) echo "VERDICT: escalate - ;split;; the reason;;; here;" ;;
   *) printf 'Report.\nVERDICT: %s - reason for %s  \n\n' "$FAKE_REVIEW" "$FAKE_REVIEW" ;;
 esac
@@ -1062,7 +1063,7 @@ expect review-escalate-queue ok '^🩺 n2 · approve · Review of PR #5 needs yo
 expect review-reason-semicolons fail '^VERDICT: escalate - split; the reason; here$' -- review semicolons
 expect review-reason-semicolons-queued ok '^Why: split; the reason; here$' -- "$guard" needs-you show n3
 expect review-no-verdict fail "^VERDICT: escalate - the reviewer's last line is not a VERDICT line$" -- review none
-expect review-crash fail '^VERDICT: escalate - the reviewer command exited 3$' -- review crash
+expect review-crash fail '^VERDICT: escalate - the reviewer command exited 3: Error: Authentication required.$' -- review crash
 expect review-dirty-discarded ok 'uncommitted edits, and they are discarded' -- review dirty
 expect review-dirty-not-pushed ok "^$old_head	" -- git ls-remote origin refs/heads/feat/add
 expect review-strict-verdict fail 'not a VERDICT line' -- review 'approve?'
