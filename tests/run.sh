@@ -1078,6 +1078,8 @@ readlink /proc/self/fd/0 > "$FAKE_DIR/stdin"
 pwd > "$FAKE_DIR/cwd"
 cp .guard-review/prompt.md "$FAKE_DIR/prompt.md"
 git push -q origin HEAD:refs/heads/sneaky 2>/dev/null && echo pushed >> "$FAKE_DIR/calls"
+git config --get-all url.guard-review-never-pushes:.pushInsteadOf > "$FAKE_DIR/no-push"
+git push -q "$FAKE_DIR/local.git" HEAD:refs/heads/test 2>/dev/null && echo pushed-local >> "$FAKE_DIR/calls"
 case $FAKE_REVIEW in
   fix-once) if grep -q 'a - b' calc.py; then sed -i 's/a - b/a + b/' calc.py; git commit -qam "fix: add adds"; fi
     echo "VERDICT: approve - adds as asked" ;;
@@ -1086,10 +1088,12 @@ case $FAKE_REVIEW in
   none) echo "It looks fine to me." ;;
   crash) echo 'Error: Authentication required.' >&2; exit 3 ;;
   semicolons) echo "VERDICT: escalate - ;split;; the reason;;; here;" ;;
+  fenced) printf 'Report.\n```\nVERDICT: approve - fenced verdict\n```\n' ;;
   *) printf 'Report.\nVERDICT: %s - reason for %s  \n\n' "$FAKE_REVIEW" "$FAKE_REVIEW" ;;
 esac
 FAKE
 chmod +x "$tmp/fake-reviewer"; mkdir -p "$tmp/fake" "$tmp/fakebin"; ln -s "$tmp/fake-reviewer" "$tmp/fakebin/cursor-agent"
+git init -q --bare "$tmp/fake/local.git"
 pr_json() {  # pr_json [jq filter]: pull request 5 for feat/add at origin's head with one passing check, edited by the filter
   jq -nc --arg sha "$(git rev-parse origin/feat/add)" '{state: "OPEN", isDraft: false, headRefName: "feat/add", headRefOid: $sha,
     baseRefName: "main", isCrossRepository: false,
@@ -1122,6 +1126,9 @@ expect review-prompt-rules ok '^VERDICT: <approve\|changes\|escalate> - <one-lin
 expect review-stdin-closed ok '^/dev/null$' -- cat "$tmp/fake/stdin"
 expect review-no-token ok '^call no-token Read .guard-review/prompt.md' -- cat "$tmp/fake/calls"
 expect review-reviewer-cannot-push ok '^$' -- git ls-remote origin sneaky
+expect review-reviewer-cannot-push-github ok '^https://github.com/\|git@github.com:\|ssh://git@github.com/$' -- bash -c 'tail -n 3 "$1" | paste -sd"|"' _ "$tmp/fake/no-push"
+expect review-reviewer-cannot-push-origin ok "^$(git remote get-url origin)$" -- head -n 1 "$tmp/fake/no-push"
+expect review-reviewer-local-push ok '^pushed-local$' -- grep pushed-local "$tmp/fake/calls"
 expect review-comment ok '^pr comment 5 --body guard review: approve at [0-9a-f]{7}\. reason for approve$' -- cat "$tmp/gh.log"
 expect review-comment-no-brief fail - -- grep -q 'plz' "$tmp/gh.log"
 expect review-approve-queues-nothing ok '^Nothing needs you\.$' -- "$guard" needs-you
@@ -1154,6 +1161,7 @@ expect review-crash fail '^VERDICT: escalate - the reviewer command exited 3: Er
 expect review-dirty-discarded ok 'uncommitted edits, and they are discarded' -- review dirty
 expect review-dirty-not-pushed ok "^$old_head	" -- git ls-remote origin refs/heads/feat/add
 expect review-strict-verdict fail 'not a VERDICT line' -- review 'approve?'
+expect review-fenced-verdict ok '^VERDICT: approve - fenced verdict$' -- review fenced
 "$guard" config set reviewer_cmd_proprietary "" >/dev/null
 review approve PATH="$tmp/fakebin:$PATH" >/dev/null 2>&1
 expect review-default-reviewer ok '^call no-token -p --force --trust Read ' -- cat "$tmp/fake/calls"

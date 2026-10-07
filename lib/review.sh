@@ -45,6 +45,13 @@ mkdir "$wt/.guard-review"; echo '*' > "$wt/.guard-review/.gitignore"
 mkdir -p "$state/reviews"
 ask="Read .guard-review/prompt.md and follow it. End your reply with the VERDICT line it describes."
 
+# Pushes to origin or anywhere on GitHub fail inside the reviewer; pushes the project's own tests make to local
+# repositories still work.
+no_push=(GIT_CONFIG_COUNT=4)
+for prefix in "$(git -C "$top" remote get-url origin)" https://github.com/ git@github.com: ssh://git@github.com/; do
+  n=$(( (${#no_push[@]} - 1) / 2 ))
+  no_push+=("GIT_CONFIG_KEY_$n=url.guard-review-never-pushes:.pushInsteadOf" "GIT_CONFIG_VALUE_$n=$prefix")
+done
 for ((round = 1; round <= rounds; round++)); do
   before=$(git -C "$wt" rev-parse HEAD)
   {
@@ -59,15 +66,14 @@ for ((round = 1; round <= rounds; round++)); do
     candidate=${reviewer_cmds[i]}
     echo "guard review: pull request #$pr, round $round of $rounds at ${before:0:7}: $candidate" >&2
     rc=0
-    (cd "$wt" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK GIT_CONFIG_COUNT=1 \
-      GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=guard-review-never-pushes: \
+    (cd "$wt" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK "${no_push[@]}" \
       bash -c "$candidate \"\$@\"" reviewer "$ask") < /dev/null > "$log" 2> "$log.err" || rc=$?
     err=$(cat "$log.err" "$log" | grep -v '^[[:space:]]*$' | tail -n 1 | tr -d '\r' || true)
     [ $rc -ne 0 ] && [ $((i + 1)) -lt ${#reviewer_cmds[@]} ] || break
     echo "guard review: ${candidate%% *} failed (${err:-exit $rc}); trying ${reviewer_cmds[i + 1]%% *}" >&2
     git -C "$wt" reset -q --hard "$before"; git -C "$wt" clean -qfdx -e .guard-review
   done
-  last=$(grep -v '^[[:space:]]*$' "$log" | tail -n 1 | tr -d '\r' || true)
+  last=$(grep -v -e '^[[:space:]]*$' -e '^[[:space:]]*```[[:space:]]*$' "$log" | tail -n 1 | tr -d '\r' || true)
   last=${last%"${last##*[![:space:]]}"}
   if [ $rc -ne 0 ]; then
     verdict=escalate reason="the reviewer command exited $rc${err:+: ${err:0:160}}"
