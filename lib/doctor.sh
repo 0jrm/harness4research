@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # usage: guard doctor [repo]
-# Read-only checklist of the Quickstart setup. Writes nothing; calls gh api only with GET.
+# Read-only checklist of the Quickstart setup, the reviewer, the merge policy and the needs-you queue. Writes nothing;
+# calls gh api only with GET.
 # Exit 1 when any item fails, else 0. An item this host cannot check is counted apart and never as a pass.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=lib/version.sh
 . "$here/lib/version.sh"
+# shellcheck source=lib/config.sh
+. "$here/lib/config.sh"
+# shellcheck source=lib/github.sh
+. "$here/lib/github.sh"
 [ $# -le 1 ] || { echo "usage: guard doctor [repo]" >&2; exit 64; }
 repo=$(git -C "${1:-.}" rev-parse --show-toplevel 2>/dev/null) || { echo "guard doctor: ${1:-.} is not a git repository" >&2; exit 2; }
 step=https://github.com/0jrm/harness4research#
@@ -22,9 +27,6 @@ result() {
   esac
   echo "      $3"
 }
-gh_get() { gh api --method GET "$@" 2>&1; }
-# gh prints the JSON error body and then "gh: <message>" without a newline between them.
-why() { local last=${1##*$'\n'}; echo "${last##*gh: }"; }
 
 check_skills() {
   local d s dst wrong
@@ -94,22 +96,19 @@ check_fence_run() {
 }
 
 check_ruleset() {
-  local out missing=()
+  local missing
   if [ -n "$gh_why" ]; then result cannot "whether $branch has an active ruleset requiring guard-fence / fence: $gh_why" \
     "Run guard doctor where gh can read $slug, or open Settings, Rules, Rulesets: ${enforce}4-protect-the-default-branch"; return; fi
-  if ! out=$(gh_get "repos/$slug/rules/branches/$branch" \
-    --jq '.[] | if .type == "required_status_checks" then "check " + .parameters.required_status_checks[].context else .type end'); then
-    case $out in
-      *"Upgrade to GitHub Pro"*) result fail "GitHub offers no rulesets on $slug: $(why "$out")" \
+  if ! missing=$(ruleset_missing "$slug" "$branch" 1); then
+    case $missing in
+      *"Upgrade to GitHub Pro"*) result fail "GitHub offers no rulesets on $slug: $(why "$missing")" \
         "Make the repository public, or move it to a paid plan or an organization; without that, nothing protects $branch: ${enforce}4-protect-the-default-branch" ;;
-      *) result cannot "whether $branch has an active ruleset requiring guard-fence / fence: $(why "$out")" \
+      *) result cannot "whether $branch has an active ruleset requiring guard-fence / fence: $(why "$missing")" \
         "Open Settings, Rules, Rulesets on $slug: ${enforce}4-protect-the-default-branch" ;;
     esac; return
   fi
-  grep -qx pull_request <<<"$out" || missing+=("a pull request")
-  grep -qxE 'check (guard-fence / )?fence' <<<"$out" || missing+=("guard-fence / fence")
-  if [ ${#missing[@]} -eq 0 ]; then result pass "$branch has an active ruleset requiring a pull request and guard-fence / fence"
-  else result fail "$branch has no active rule requiring $(printf '%s and ' "${missing[@]}" | sed 's/ and $//')" \
+  if [ -z "$missing" ]; then result pass "$branch has an active ruleset requiring a pull request and guard-fence / fence"
+  else result fail "$branch has no active rule requiring $missing" \
     "Add a branch ruleset for the default branch: ${enforce}4-protect-the-default-branch"; fi
 }
 
@@ -155,13 +154,54 @@ check_account() {
     "Ask your cluster admins for a hard cap with docs/cluster-subaccount-request.md: ${enforce}6-cap-the-cluster-account"; fi
 }
 
+check_reviewer() {
+  local exe found
+  if ! resolve_reviewer; then result fail "$reviewer_problem" "$reviewer_fix"; return; fi
+  read -r exe _ <<<"$reviewer_cmd"; exe=${exe/#\~/$HOME}
+  found="on PATH"; [[ $exe != */* ]] || found="an executable file"
+  if command -v "$exe" >/dev/null; then result pass "reviewer is $reviewer: $reviewer_cmd, and $exe is $found"
+  else result fail "reviewer is $reviewer: $reviewer_cmd, and $exe is not $found" \
+    "Install it, or name another command: guard config set reviewer_cmd_$reviewer '<command>'"; fi
+}
+
+check_merge_policy() {
+  read_merge_policy "$repo" "$base" "$p_guarded"
+  if [ "$merge_policy" = autonomous ] && [ "$p_guarded" = 1 ]; then
+    result pass "merge_policy is autonomous in $merge_policy_from, so guard merge also needs the ruleset and non-admin login items above to pass"
+  elif [ "$merge_policy" = autonomous ]; then
+    result pass "merge_policy is autonomous in $merge_policy_from, so guard merge also needs the non-admin login item above and a ruleset requiring a pull request"
+  else result pass "merge_policy is $merge_policy in $merge_policy_from, so guard merge queues every merge for a human"; fi
+}
+
+check_hook() {
+  local f
+  [ -d "$HOME/.claude" ] || return 0
+  for f in "$HOME/.claude/settings.json" "$repo/.claude/settings.json"; do
+    PYTHONPATH=$here/lib python3 -B -c 'import sys; from hooks import load, add_missing_reminders; sys.exit(bool(add_missing_reminders(load(sys.argv[1]))))' \
+      "$f" 2>/dev/null || continue
+    result pass "Claude Code shows open needs-you items: ${f/#$HOME/\~} runs guard needs-you --remind on SessionStart and UserPromptSubmit"; return
+  done
+  result fail "Claude Code does not show open needs-you items: neither ~/.claude/settings.json nor $repo/.claude/settings.json runs guard needs-you --remind on SessionStart and UserPromptSubmit" \
+    "Run guard hooks install claude"
+}
+
+check_needs_you() {
+  local queue n=0
+  queue=$(cd "$repo" && cd "$(git rev-parse --git-common-dir)" && pwd)/guard/needs-you.tsv
+  [ ! -f "$queue" ] || n=$(awk -F'\t' 'NF == 9 && $1 != "id" { state[$1] = $3 } END { for (id in state) open += state[id] == "open"; print open + 0 }' "$queue")
+  case $n in
+    0) result pass "no open needs-you items" ;;
+    1) result pass "1 open needs-you item; guard needs-you lists it" ;;
+    *) result pass "$n open needs-you items; guard needs-you lists them" ;;
+  esac
+}
+
 project_version "$repo"; base=$p_base; branch=${base#origin/}
-slug=""; url=$(git -C "$repo" config --get remote.origin.url || true)
-[[ $url =~ github\.com[:/]([^/]+)/([^/]+)$ ]] && slug=${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}
+slug=$(github_slug "$repo")
 gh_why=""; admin=""
 if [ -z "$slug" ]; then gh_why="origin is not a github.com remote"
 elif ! command -v gh >/dev/null; then gh_why="gh is not on PATH"
-elif admin=$(gh_get "repos/$slug" --jq .permissions.admin); then :
+elif admin=$(gh_admin "$slug"); then :
 elif [ $? -eq 4 ]; then gh_why="gh is not logged in"
 else gh_why=$(why "$admin"); fi
 token=${GH_TOKEN:-${GITHUB_TOKEN:-}}
@@ -182,6 +222,10 @@ check_fence_run
 check_ruleset
 check_agent_env
 [ $p_guarded = 1 ] && check_account
+check_reviewer
+check_merge_policy
+check_hook
+check_needs_you
 echo
 echo "$passed passed, $failed failed, $unknown cannot check from here"
 [ $failed -eq 0 ]

@@ -22,7 +22,7 @@ Stable means additions only. Nothing on this list is renamed or removed.
 
 Free to change: the detail column, message wording after the fixed prefixes, internal code, and template comments.
 
-Optional budget keys, each with a working default the scripts share: `explore_max_nodes`, `explore_max_walltime_minutes`, `max_handled_failures`, and the launch and envelope keys below.
+Optional budget keys, each with a working default the scripts share: `explore_max_nodes`, `explore_max_walltime_minutes`, `max_handled_failures`, `merge_policy`, and the launch and envelope keys below.
 
 ## Launch hosts
 
@@ -31,6 +31,10 @@ Launch is off until a human sets `launch_hosts` on the protected branch, as a sp
 ## The execution envelope
 
 The question card holds the design and stays frozen. Its optional keys `budget_gpu_hours`, `budget_core_hours` and `deadline` cap one run; `default_run_gpu_hours` and `default_run_core_hours` in `guard/budget.card` are the workspace defaults, `0` meaning no per-run cap. Execution facts go in `runs/<id>/execution.tsv`. A `restart` or `resume` row may cite a resource stop (OUT_OF_MEMORY, HOST_OUT_OF_MEMORY, NODE_FAIL, PREEMPTED, SUPERVISOR_FAILED, CANCELLED, LAUNCH_FAILED), never a science stop (FAILED, TIMEOUT); the lists only grow. Ripples prints `execution-within-envelope` only for a run that has a ledger at HEAD. The fence rules `execution-ledger` and `execution-history` follow the ratchet.
+
+## Merge policy
+
+`merge_policy` in `guard/budget.card` decides whether `guard merge` may merge a pull request without a human. `autonomous`, the template value and the default when the key is missing, lets it merge once its other gates pass. Any other value, such as `semi-manual`, makes it refuse and queue the merge for a human. `guard merge` reads the key from the pull request's base branch, so an agent cannot change it on its own branch. A repository without a guard reads `merge_policy` from the user config instead (`guard config`). No other script reads the key, and `guard init --update` inserts it.
 
 ## Card lineage
 
@@ -45,7 +49,7 @@ Releases are annotated tags `vS.N`, where S is the schema. `v1.0` is the oldest 
 `guard init` writes `guard/VERSION` in the project:
 
 ```text
-schema: 4
+schema: 5
 installer: <full commit of the harness that wrote this file>
 release: <git describe of that commit>
 pstack: <commit>

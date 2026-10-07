@@ -21,6 +21,9 @@ The gaps are below, ordered by what they cost in that session. Every item reache
 | 4 | The execution envelope: design in the card, execution in `execution.tsv` | done, schema 3 |
 | 9 | One checklist per action | remedies on ripples and preflight lines done; the rest later |
 | 8 | Continuity across sessions | later, skill only |
+| 10 | A needs-you queue of what only the human can do, with Claude Code hooks | this release |
+| 11 | `guard review` and `guard merge`, with `merge_policy` | this release, schema 5 |
+| 12 | An agent-led onboarding skill, `guard-onboard` | this release, in review |
 
 Each item below gives the smallest design that closes the gap, its effect on existing projects, and its risks. Every new budget key is optional with a default. Every new fence rule follows the ratchet in the contract.
 
@@ -125,3 +128,7 @@ Skill bodies load only when invoked. `AGENTS.md` is the per-turn cost, and it is
 - every FAIL and RIPPLE line carries its remedy;
 - the skill stops restating what preflight checks;
 - `guard/README.md` holds a per-action checklist for human audit. The update now merges that file, so the checklist reaches old projects.
+
+## 10 to 12. Review, merge, and the needs-you queue
+
+These items let an agent take its own change from a branch to a merge, and hand a person only the steps that need one. [autonomy.md](autonomy.md) explains what each command checks and where the protection stops. `merge_policy` is an optional budget key with the default `autonomous`, so existing projects reach it through `guard init --update`.

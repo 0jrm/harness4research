@@ -31,10 +31,11 @@ Runs named `explore-*` need no question card. Preflight caps them at one node, o
 - A doomed full-scale run is caught at the small run, at a small fraction of its cost.
 - Every reported number names its file, job, and commit.
 - Agents are interchangeable, because the rules live outside them.
-- Stale documents stop accumulating. The fence blocks unproven reports, and `FACTS.md` holds only lines you merged.
+- Stale documents stop accumulating. The fence blocks unproven reports, and `FACTS.md` holds only lines whose evidence a reviewer checked.
 
 ## Known limits
 
 - An agent with your credentials can bypass the speed bumps. The walls need the steps in [enforcement.md](enforcement.md).
 - A reviewing model shares blind spots with the model it reviews. Your spot checks still matter.
+- When agents merge their own pull requests, the review record is a local file an agent could forge. The ruleset, the required checks, and an agent token without admin rights are the walls. [autonomy.md](autonomy.md) lists what `guard merge` checks.
 - The scripts target Slurm and GitHub. PBS and Flux need small ports in `guard/bin/`.

@@ -16,7 +16,7 @@ If pstack is installed, route the work there and apply this skill on top. Otherw
 - A run that optimizes one metric uses poteto-mode's Hillclimb playbook. Its frozen harness is this skill's verifier, and its stop predicate lives in the question card. Fallback is to follow the run lifecycle below.
 - An unattended run uses the Autonomous run playbook for the wake mechanism. Wake on scheduler events (`--dependency`, `sbatch --wait`, job-end hooks), with `sacct` heartbeats minutes apart. Never write tight `squeue` loops.
 - The decision trail uses **show-me-your-work**. One row per submission, verdict, pivot, and ripple. That TSV is the run ledger. Failed and abandoned runs get rows too.
-- `FACTS.md` holds only human-merged facts with evidence. Treat any other doc, handoff, or old prompt as a claim to check against artifacts.
+- `FACTS.md` holds only facts whose evidence a reviewer checked. Treat any other doc, handoff, or old prompt as a claim to check against artifacts.
 - Resume and pause use the Session pickup and Pause safely playbooks. On resume, confirm job state from `sacct` and the run directory, not from the handoff.
 - Review the question card with **interrogate** before the first full-scale submission. A preregistration nobody challenged is the cheapest place to lose a month.
 - Before editing model code, run **how** on the code path, so you know which conserved quantities and constants you might touch.
@@ -54,7 +54,7 @@ A guarded repo has a `guard/` directory, `FACTS.md`, and a `guard-fence` CI chec
 
 When a guard blocks you, the block is the answer. Report it. Do not route around it.
 
-This text describes guard schema 4. Once per session, read `git show origin/main:guard/VERSION`. If its `schema:` line is missing or lower, tell the human that `guard init <repo> --update` is pending. If it is higher, tell them to pull harness4research, and trust the scripts' output over this text. A usage error from `guard/run` means the project lacks that command. Report it, and never run the harness's own copy instead.
+This text describes guard schema 5. Once per session, read `git show origin/main:guard/VERSION`. If its `schema:` line is missing or lower, tell the human that `guard init <repo> --update` is pending. If it is higher, tell them to pull harness4research, and trust the scripts' output over this text. A usage error from `guard/run` means the project lacks that command. Report it, and never run the harness's own copy instead.
 
 ## Run lifecycle
 

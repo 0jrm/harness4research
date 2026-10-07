@@ -10,6 +10,7 @@ the page from the data collect() returns, which --json writes out.
 Read-only. Guard inputs come from the protected branch through git show. Runs come from HEAD plus the
 working tree, so uncommitted run dirs and manifests show up; --head-only reads HEAD alone.
 Ripples come from guard/run on the protected branch, as guard ripples runs it, so a working-tree edit cannot forge them.
+The needs-you queue comes from the git common directory, where guard needs-you keeps it.
 --serve takes a port, bound to 127.0.0.1, or a socket path (anything containing "/"). On a shared login
 node use a socket: it is created 0600, so only you can reach it, and ssh -L 8765:/path/to/sock host
 forwards it. Python 3 standard library only.
@@ -18,6 +19,7 @@ import argparse, datetime as dt, fnmatch, glob, json, os, re, signal, socket, so
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from atlas_render import render
+from needs_you import read as read_queue
 
 ATLAS_SCHEMA = 1  # of the --json data; bump on a renamed or removed field, never for an added one
 
@@ -262,7 +264,7 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
     data = {"atlas_schema": ATLAS_SCHEMA, "project": project, "title": title or project, "globs": list(globs), "top": top, "base": base,
             "base_sha": base_sha, "head": head, "behind_base": behind, "worktree": worktree,
             "uncommitted": sum(len(r["uncommitted_files"]) for r in runs), "code": code, "rippled": run_ripples,
-            "budget": budget, "version": version, "watch": watch, "runs": runs, "branches": branches,
+            "budget": budget, "version": version, "watch": watch, "runs": runs, "branches": branches, "queue": queue(top),
             "generated": now.strftime("%Y-%m-%d %H:%M UTC"), "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "summary": {"runs": len(runs), "ripples": sum(r["severity"] == "ripple" for r in runs),
                         "handled": sum(any(l["status"] == "HANDLED" for l in r["ripples"]) for r in runs),
@@ -271,6 +273,10 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
     data["waters"] = waters(data)
     data["lineage"] = lineage(runs)
     return data
+
+def queue(top):
+    common = os.path.join(top, git(top, "rev-parse", "--git-common-dir").strip())
+    return [it._asdict() for it in read_queue(os.path.join(common, "guard", "needs-you.tsv")) if it.state in ("open", "acked")]
 
 SLURM = re.compile(r"[0-9][0-9_]*")
 COMMIT = re.compile(r"(?:([\w.-]+)\s+)?([0-9a-f]{7,40})")
