@@ -40,7 +40,8 @@ Project setup, run from your machine:
   init <repo> --update  refresh guard scripts in a project that already has guard/
   version             this harness's release and schema, and inside a project whether either side is behind
   archive <repo>      tag every remote branch before any cleanup
-  doctor [repo]       read-only checklist of the Quickstart setup: ruleset, credentials, capped account, skills
+  doctor [repo]       read-only checklist of the Quickstart setup: ruleset, credentials, capped account, skills,
+                      reviewer, merge policy, needs-you hook and open items
   atlas [repo]        read-only HTML chart of runs, ripples, cards, receipts and the drawer; --serve PORT|SOCKET serves it live
 
 In any git repository, guarded or not:
