@@ -21,6 +21,7 @@
 | `budget`, `version`, `watch`, `code`, `globs` | the budget card, `guard/VERSION`, the watch list, the code repositories reports cite, and the `--runs` filters |
 | `lineage` | edges of the question map: `from`, `to`, `kind` (`supersedes`, `spawned_from` or `inferred`) and `lineage_inferred`. An inferred edge links a card that sets neither key to the id it looks like it grew out of: `<parent>-<suffix>`, a trailing letter such as `054b` after `054` or `e2c` after `e2b`, or a trailing number one higher. The page draws it dotted and labels it "inferred from name". A key set to `none` stops inference |
 | `branches` | remote branches ahead of `base`, with what they change under `guard/`, `.github/` and watched paths |
+| `queue` | the `guard needs-you` items that are `open` or `acked`, the latest row of each, in id order. Read from `guard/needs-you.tsv` in the git common directory on every survey, so `--serve` shows a change on the next re-survey. Empty when the file does not exist. Each item has `id`, `ts` (when its latest row was written), `state`, `kind` (`approve`, `run` or `check`), `title`, `why`, `expect`, `undo`, `note`, `paths` (absolute, checked when queued), `commands` (in the order to run them) and `source`. The page lists open items first under "Needs you" and acked items last, muted |
 | `runs` | one object per run, below |
 
 ## Per run
