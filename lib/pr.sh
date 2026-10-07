@@ -1,6 +1,6 @@
 # shellcheck shell=bash disable=SC2034,SC2154
-# Sourced by lib/review.sh and lib/merge.sh inside the pull request's repository. Sets top, the
-# repository root, and state, the per-repository local state that every worktree shares and git never commits.
+# Sourced inside the pull request's repository. Sets top, the repository root, and state, the per-repository local state
+# that every worktree shares and git never commits.
 top=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "guard: run this inside the pull request's repository" >&2; exit 2; }
 state=$(cd "$(git rev-parse --git-common-dir)" && pwd)/guard
 
@@ -21,10 +21,34 @@ queue() {
   else echo "Could not queue this for a human. Tell them directly." >&2; fi
 }
 
+# pr_tier <base> <head>: prints how guard review --batch treats the change from base to head.
+#   human    a path under guard/ or .github/workflows/, or a new runs/<id>/question.card. No model reviews it.
+#   records  every path is under runs/<id>/, and none is a question card or a report.
+#   small    at most review_small_lines added and deleted lines.
+#   large    anything else.
+pr_tier() {
+  git -C "$top" -c core.quotePath=false diff --no-renames --raw --numstat "$1...$2" | awk -F'\t' -v small="$(config_get review_small_lines)" '
+    /^:/ { status = substr($1, length($1)); path = $2; paths++
+      if (path ~ /^(guard|\.github\/workflows)\//) human = 1
+      run = path ~ /^runs\/[^\/]+\// && path !~ /^runs\/_template\//
+      if (status == "A" && run && path ~ /^runs\/[^\/]+\/question\.card$/) human = 1
+      if (!run || path ~ /(^|\/)(question\.card|report\.md)$/) other = 1
+      next }
+    NF >= 3 { lines += ($1 == "-" ? 0 : $1) + ($2 == "-" ? 0 : $2) }
+    END { print human ? "human" : (paths && !other) ? "records" : lines <= small ? "small" : "large" }'
+}
+
+# added_cards <base> <head>: prints each question card the change adds, one path per line.
+added_cards() {
+  git -C "$top" -c core.quotePath=false diff --no-renames --name-only --diff-filter=A "$1...$2" -- 'runs/*/question.card' \
+    | grep -E '^runs/[^/]+/question\.card$' | grep -v '^runs/_template/' || true
+}
+
 # run_reviewer <worktree> <log> <ask> <label>: runs each of reviewer_cmds in the worktree until one exits 0, with its
-# reply in <log>. Between tries it resets the worktree to the commit it started at. The reviewer gets no GitHub
-# credentials, and pushes to origin or anywhere on GitHub fail; pushes the project's own tests make to local
-# repositories still work. Sets candidate, the command that ran last, rc, its exit status, and err, its last line.
+# reply in <log>. Between tries it resets the worktree to the commit it started at. The reviewer runs without GH_TOKEN,
+# GITHUB_TOKEN or SSH_AUTH_SOCK, and its pushes to origin or anywhere on GitHub fail; pushes the project's own tests
+# make to local repositories still work. Sets candidate, the command that ran last, rc, its exit status, and err, its
+# last line.
 run_reviewer() {
   local wt=$1 log=$2 ask=$3 label=$4 before i n prefix no_push=(GIT_CONFIG_COUNT=4)
   for prefix in "$(git -C "$top" remote get-url origin)" https://github.com/ git@github.com: ssh://git@github.com/; do
