@@ -10,6 +10,7 @@ Your working directory is a checkout of the pull request's head.
 
 1. Read the request. Work out what a user who typed those words expects to change.
 2. Read the diff. Check that it does all of that, and nothing the request did not ask for.
+   If it adds or changes a line in `FACTS.md`, open the evidence that line cites (a path, a commit, a job id, or a command you can rerun) and confirm it says what the line claims. A fact whose evidence you cannot confirm means `changes`.
 3. Run the tests with the command the brief names. If it names none, find the command in AGENTS.md, the README, or the CI workflow. A test you could not run has not passed. Say which one and why.
 4. Fix a small defect if you find one, then run the tests again.
 5. Give your verdict.
