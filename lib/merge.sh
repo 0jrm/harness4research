@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# usage: guard merge <pr>
+# usage: guard merge <pr> | guard merge --batch
 # The gate for an agent's merge. It squash-merges the pull request, pinned to the head it checked, only when every item
 # passes: merge_policy is autonomous, the gh login cannot administer the repository, the base branch has an active
 # ruleset requiring a pull request (and guard-fence / fence in a guarded project), the pull request is open and not a
 # draft, at least one check ran and every check passed, and reviews.tsv records approve at the current head. Otherwise
-# it queues the merge for a human and prints that item. Never passes --admin.
+# it queues the merge for a human and prints that item. Never passes --admin. --batch merges every approved pull
+# request (lib/batch.sh).
 # Exit 0 when merged, 1 when gh refused the merge, 2 when this gate refused it.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -98,7 +99,8 @@ merge_one() {
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
-  [ $# -eq 1 ] && [[ $1 =~ ^[0-9]+$ ]] || { echo "usage: guard merge <pr number>" >&2; exit 64; }
+  [ "$*" != --batch ] || exec bash "$here/lib/batch.sh" merge
+  [ $# -eq 1 ] && [[ $1 =~ ^[0-9]+$ ]] || { echo "usage: guard merge <pr number> | guard merge --batch" >&2; exit 64; }
   rc=0; merge_one "$1" || rc=$?
   case $rc in
     1) queue_merge "$1" "${failed[0]}." "$head_ref" ;;

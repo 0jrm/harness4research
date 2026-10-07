@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# usage: guard review <pr>
+# usage: guard review <pr> | guard review --batch
 # Runs the configured reviewer on a pull request in a fresh worktree, for up to review_rounds rounds. The reviewer may
 # commit small fixes and never pushes; this script pushes them, and a round that added commits is followed by another.
 # Approve is recorded only for a round that added no commits. The verdict goes to reviews.tsv and, without the brief,
 # to a pull request comment. Without a configured command, a reviewer that exits nonzero hands the round, from its
-# starting commit, to the next default reviewer on PATH.
+# starting commit, to the next default reviewer on PATH. --batch reviews every open pull request by its tier
+# (lib/batch.sh).
 # Exit 0 on approve, 1 on changes or escalate, 2 when it refuses to start.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+[ "$*" != --batch ] || exec bash "$here/lib/batch.sh" review
 # shellcheck source=lib/config.sh
 . "$here/lib/config.sh"
 # shellcheck source=lib/pr.sh
 . "$here/lib/pr.sh"
-[ $# -eq 1 ] && [[ $1 =~ ^[0-9]+$ ]] || { echo "usage: guard review <pr number>" >&2; exit 64; }
+[ $# -eq 1 ] && [[ $1 =~ ^[0-9]+$ ]] || { echo "usage: guard review <pr number> | guard review --batch" >&2; exit 64; }
 pr=$1
 refuse() { echo "guard review: $1" >&2; exit 2; }
 
