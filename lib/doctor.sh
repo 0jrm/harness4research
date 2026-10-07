@@ -6,6 +6,8 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=lib/version.sh
 . "$here/lib/version.sh"
+# shellcheck source=lib/github.sh
+. "$here/lib/github.sh"
 [ $# -le 1 ] || { echo "usage: guard doctor [repo]" >&2; exit 64; }
 repo=$(git -C "${1:-.}" rev-parse --show-toplevel 2>/dev/null) || { echo "guard doctor: ${1:-.} is not a git repository" >&2; exit 2; }
 step=https://github.com/0jrm/harness4research#
@@ -22,9 +24,6 @@ result() {
   esac
   echo "      $3"
 }
-gh_get() { gh api --method GET "$@" 2>&1; }
-# gh prints the JSON error body and then "gh: <message>" without a newline between them.
-why() { local last=${1##*$'\n'}; echo "${last##*gh: }"; }
 
 check_skills() {
   local d s dst wrong
@@ -94,22 +93,19 @@ check_fence_run() {
 }
 
 check_ruleset() {
-  local out missing=()
+  local missing
   if [ -n "$gh_why" ]; then result cannot "whether $branch has an active ruleset requiring guard-fence / fence: $gh_why" \
     "Run guard doctor where gh can read $slug, or open Settings, Rules, Rulesets: ${enforce}4-protect-the-default-branch"; return; fi
-  if ! out=$(gh_get "repos/$slug/rules/branches/$branch" \
-    --jq '.[] | if .type == "required_status_checks" then "check " + .parameters.required_status_checks[].context else .type end'); then
-    case $out in
-      *"Upgrade to GitHub Pro"*) result fail "GitHub offers no rulesets on $slug: $(why "$out")" \
+  if ! missing=$(ruleset_missing "$slug" "$branch" 1); then
+    case $missing in
+      *"Upgrade to GitHub Pro"*) result fail "GitHub offers no rulesets on $slug: $(why "$missing")" \
         "Make the repository public, or move it to a paid plan or an organization; without that, nothing protects $branch: ${enforce}4-protect-the-default-branch" ;;
-      *) result cannot "whether $branch has an active ruleset requiring guard-fence / fence: $(why "$out")" \
+      *) result cannot "whether $branch has an active ruleset requiring guard-fence / fence: $(why "$missing")" \
         "Open Settings, Rules, Rulesets on $slug: ${enforce}4-protect-the-default-branch" ;;
     esac; return
   fi
-  grep -qx pull_request <<<"$out" || missing+=("a pull request")
-  grep -qxE 'check (guard-fence / )?fence' <<<"$out" || missing+=("guard-fence / fence")
-  if [ ${#missing[@]} -eq 0 ]; then result pass "$branch has an active ruleset requiring a pull request and guard-fence / fence"
-  else result fail "$branch has no active rule requiring $(printf '%s and ' "${missing[@]}" | sed 's/ and $//')" \
+  if [ -z "$missing" ]; then result pass "$branch has an active ruleset requiring a pull request and guard-fence / fence"
+  else result fail "$branch has no active rule requiring $missing" \
     "Add a branch ruleset for the default branch: ${enforce}4-protect-the-default-branch"; fi
 }
 
@@ -156,12 +152,11 @@ check_account() {
 }
 
 project_version "$repo"; base=$p_base; branch=${base#origin/}
-slug=""; url=$(git -C "$repo" config --get remote.origin.url || true)
-[[ $url =~ github\.com[:/]([^/]+)/([^/]+)$ ]] && slug=${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}
+slug=$(github_slug "$repo")
 gh_why=""; admin=""
 if [ -z "$slug" ]; then gh_why="origin is not a github.com remote"
 elif ! command -v gh >/dev/null; then gh_why="gh is not on PATH"
-elif admin=$(gh_get "repos/$slug" --jq .permissions.admin); then :
+elif admin=$(gh_admin "$slug"); then :
 elif [ $? -eq 4 ]; then gh_why="gh is not logged in"
 else gh_why=$(why "$admin"); fi
 token=${GH_TOKEN:-${GITHUB_TOKEN:-}}

@@ -14,21 +14,7 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 pr=$1
 refuse() { echo "guard review: $1" >&2; exit 2; }
 
-default_reviewer() {
-  if command -v claude >/dev/null; then echo "claude -p --permission-mode acceptEdits --allowedTools=Bash"
-  elif command -v codex >/dev/null; then echo "codex exec --sandbox danger-full-access"
-  elif command -v cursor-agent >/dev/null; then echo "cursor-agent -p --force --trust"
-  else return 1; fi
-}
-
-reviewer=$(config_get reviewer)
-case $reviewer in
-  proprietary) cmd=$(config_get reviewer_cmd_proprietary)
-    [ -n "$cmd" ] || cmd=$(default_reviewer) || refuse "no reviewer found. Install Claude Code, Codex or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'" ;;
-  local) cmd=$(config_get reviewer_cmd_local)
-    [ -n "$cmd" ] || refuse "reviewer is local and no local command is set. Set one: guard config set reviewer_cmd_local 'codex exec --oss -m <model> --sandbox danger-full-access'" ;;
-  *) refuse "reviewer is '$reviewer' in $config_file. Set it: guard config set reviewer proprietary" ;;
-esac
+resolve_reviewer || refuse "$reviewer_problem. $reviewer_fix"
 rounds=$(config_get review_rounds)
 [[ $rounds =~ ^[1-9][0-9]*$ ]] || refuse "review_rounds is '$rounds' in $config_file. Set it: guard config set review_rounds 2"
 
@@ -67,11 +53,11 @@ for ((round = 1; round <= rounds; round++)); do
     printf '\n## Diff\n\n```diff\n'; git -C "$wt" diff "origin/$base_ref...HEAD"; printf '```\n'
   } > "$wt/.guard-review/prompt.md"
   log=$state/reviews/$pr-${before:0:12}-r$round.txt
-  echo "guard review: pull request #$pr, round $round of $rounds at ${before:0:7}: $cmd" >&2
+  echo "guard review: pull request #$pr, round $round of $rounds at ${before:0:7}: $reviewer_cmd" >&2
   rc=0
   (cd "$wt" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK GIT_CONFIG_COUNT=1 \
     GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=guard-review-never-pushes: \
-    bash -c "$cmd \"\$@\"" reviewer "$ask") < /dev/null > "$log" 2> "$log.err" || rc=$?
+    bash -c "$reviewer_cmd \"\$@\"" reviewer "$ask") < /dev/null > "$log" 2> "$log.err" || rc=$?
   last=$(grep -v '^[[:space:]]*$' "$log" | tail -n 1 | tr -d '\r' || true)
   last=${last%"${last##*[![:space:]]}"}
   if [ $rc -ne 0 ]; then
@@ -93,7 +79,7 @@ done
 
 head=$(git -C "$wt" rev-parse HEAD)
 [ -s "$state/reviews.tsv" ] || printf 'ts\tpr\thead\tverdict\treviewer\treason\n' > "$state/reviews.tsv"
-printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$pr" "$head" "$verdict" "${cmd%% *}" "$reason" >> "$state/reviews.tsv"
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$pr" "$head" "$verdict" "${reviewer_cmd%% *}" "$reason" >> "$state/reviews.tsv"
 gh pr comment "$pr" --body "guard review: $verdict at ${head:0:7}. $reason" >/dev/null \
   || echo "note: could not comment on pull request #$pr." >&2
 echo "VERDICT: $verdict - $reason"
