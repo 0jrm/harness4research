@@ -1,0 +1,11 @@
+question: Can a stump-vote team on UCI WDBC meet a validation quality floor that majority cannot, at lower payload walltime than a 12-generation search, without using the locked test split for selection?
+decision_this_informs: whether the cheap live test exercises metric pairing and evidence paths
+setting: UCI WDBC sha256 d606af411f3e5be8a317a5a8b652b425aaf0ff38ca683d5327ffff94c3695f4a, campaign.py, seeds (1, 2, 3), local CPU, mock sbatch
+hypothesis: every seed produces a feasible stump team whose held-out balanced accuracy is above 0.5
+metric: constrained_cheap_score, campaign.py
+partner_metric: validation accuracy minus majority accuracy, and validation balanced accuracy minus 0.5; both must be positive and both classes predicted
+baseline: majority label from the training split
+baseline_tolerance: 0.01
+kill_criteria: stop if timer cannot see 1 vs 8 agents, if a selected team is constant, if test rows are used in selection, if any seed's selected evolve team fails Q on validation, if cost_core_hours is not 0
+negative_result_means: no stump team in budget meets the floor
+out_of_scope: language models, Jev, real Slurm, extra datasets
