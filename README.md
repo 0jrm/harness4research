@@ -24,7 +24,7 @@ git clone --recurse-submodules https://github.com/0jrm/harness4research ~/harnes
 guard version                           # prints this repo's commit and pstack's
 ```
 
-`install.sh` puts `guard` in `~/.local/bin` and links the skills into `~/.agents/skills`, `~/.claude/skills`, and `~/.cursor/skills`. To check that an agent sees them, open the agent and ask which skills it has. `safe-autonomous-hpc-science`, `present` and `review-and-merge` should be in the list. `/present` asks for a present mid-task. If your agent reads skills from another folder, rerun with `--skills-dir <that folder>`.
+`install.sh` puts `guard` in `~/.local/bin` and links the skills into `~/.agents/skills`, `~/.claude/skills`, and `~/.cursor/skills`. To check that an agent sees them, open the agent and ask which skills it has. `safe-autonomous-hpc-science`, `present`, `review-and-merge` and `guard-onboard` should be in the list. `/present` asks for a present mid-task. To have the agent walk you through steps 2 to 6, tell it "onboard me". The `guard-onboard` skill reads `guard doctor`, asks about your agents, compute, merge policy and reviewer, and applies each change after you confirm it. Say "check my setup" later to rerun it against what changed. If your agent reads skills from another folder, rerun with `--skills-dir <that folder>`.
 
 ### 2. Propose the guard
 
@@ -172,6 +172,7 @@ Pushing a change to `.github/workflows/` needs a token with the `workflow` scope
 - [skills/safe-autonomous-hpc-science/SKILL.md](skills/safe-autonomous-hpc-science/SKILL.md): what agents read for experiment work
 - [skills/present/SKILL.md](skills/present/SKILL.md): the `/present` block a person judges from the chat alone
 - [skills/review-and-merge/SKILL.md](skills/review-and-merge/SKILL.md): how an agent hands a finished change to `guard review` and `guard merge`
+- [skills/guard-onboard/SKILL.md](skills/guard-onboard/SKILL.md): the agent-led setup and recheck, from `guard doctor` to a confirmed plan and the human-only 🩺 items
 
 ## Requirements
 

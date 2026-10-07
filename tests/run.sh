@@ -928,6 +928,8 @@ expect doctor-version ok '^pass  guard schema [0-9]+ \(release .*\) against harn
 expect doctor-version-once ok - -- bash -c '! grep -E "\(release ([^ )]+)\1\)" <<<"$1"' _ "$(doctor)"
 expect doctor-workflow ok '^pass  .github/workflows/guard-fence.yml on origin/main defines guard-fence / fence$' -- doctor
 doctor > "$tmp/doctor-out"
+expect onboard-names-real-doctor-lines ok - -- bash -c 'grep -o "\`pass  [^\`]*\`" "$1" | tr -d "\`" | sed -e "s/<[^>]*>/.*/g" -e "s/\.\.\./.*/g" |
+  while IFS= read -r line; do grep -qE "^$line" "$2" || { echo "not in doctor output: $line"; exit 1; }; done' _ "$here/skills/guard-onboard/SKILL.md" "$tmp/doctor-out"
 expect doctor-no-colour-in-pipe fail - -- grep -q $'\e' "$tmp/doctor-out"
 expect doctor-no-gh ok '^cannot check from here  whether guard-fence / fence has run on GitHub: gh is not on PATH$' -- doctor PATH="$(path_without gh)"
 expect doctor-cannot-is-not-pass ok '^12 passed, 0 failed, 2 cannot check from here$' -- doctor PATH="$(path_without gh)"
@@ -955,7 +957,7 @@ expect doctor-other-user-cap fail '^FAIL  Slurm sets no GrpTRESMins cap on accou
 expect doctor-no-user-var ok '^pass  Slurm caps account gom at GrpTRESMins=cpu=600000$' -- env -u USER -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK HOME="$tmp/home" "${setup[@]}" "$guard" doctor "$D"
 expect doctor-no-account fail '^FAIL  Slurm has no account gom$' -- doctor MOCK_SACCTMGR_ASSOC=
 expect doctor-no-sacctmgr ok '^cannot check from here  whether Slurm caps account gom: sacctmgr is not on this host$' -- doctor PATH="$(path_without sacctmgr)"
-expect doctor-skills-missing fail '^FAIL  skills in ~/.agents/skills do not link to this harness: present \(missing\)' -- doctor HOME="$tmp/home-bare"
+expect doctor-skills-missing fail '^FAIL  skills in ~/.agents/skills do not link to this harness: .*present \(missing\)' -- doctor HOME="$tmp/home-bare"
 mkdir -p "$tmp/home/.claude"
 expect doctor-skills-claude fail '^FAIL  skills in ~/.claude/skills do not link to this harness' -- doctor
 rmdir "$tmp/home/.claude"
