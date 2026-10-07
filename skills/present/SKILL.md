@@ -17,14 +17,10 @@ Human context is the chat text on the screen. It excludes tool output, files, te
 
 The present is one block in the chat reply. A project rule may also require a file. Obey the rule, and still put the present in chat. The file is not the present.
 
-Fence the block with a gift emoji on its own line at the start and the same emoji on its own line at the end. They stay, including under unslop. Write every sentence inside per the unslop skill. Use no other emoji, except the 🩺 block below.
+Fence the block with a gift emoji right before its first word and the same emoji right after its last word, with no line break between an emoji and the prose. They stay, including under unslop. Write every sentence inside per the unslop skill. Use no other emoji, except the 🩺 block below.
 
 ```
-🎁
-
-<prose>
-
-🎁
+🎁<prose>🎁
 ```
 
 ## The ledger
@@ -47,10 +43,11 @@ A checked claim that belongs in `FACTS.md` goes in through a pull request with i
 
 Prose, in this order. Drop a job only when it is truly empty. A deviation and an unchecked claim always appear. If there were none, say that in one sentence.
 
-1. What is true now. Command outcomes in words. Give the exact command only when the human's next action is to run it, or the outcome is meaningless without it.
-2. What you need from them, or that you need nothing. If you need something, say what the action changes, in enough detail that they need not open a diff, a terminal, or a pull request to know what they are agreeing to.
-3. Names they will meet later. Each name once, and what it refers to.
-4. Assumptions, deviations, and unchecked claims.
+1. Macro view of the project/branch (short, relevant to auditor), session outline, and why this turn matters within this context (important).
+2. What is true now. Command outcomes in words. Give the exact command only when the human's next action is to run it, or the outcome is meaningless without it.
+3. What you need from them, or that you need nothing. If you need something, say what the action changes, in enough detail that they need not open a diff, a terminal, or a pull request to know what they are agreeing to.
+4. Names they will meet later. Each name once, and what it refers to.
+5. Assumptions, deviations, and unchecked claims.
 
 Add the facts that lived in tools, edits, names, and pastes. Leave out the session story and the essay they already read. If the present is longer than the work, you recopied the essay. Cut it.
 
@@ -76,23 +73,3 @@ guard needs-you show n3
 Paste the output of `guard needs-you show <id>` verbatim, after the 🎁 block. In the present, name the id in the sentence that says what you need. The queue keeps the item for every worktree of the repository, and `guard needs-you` lists it until the human closes it. Never run `guard needs-you ack`, `done`, or `dismiss` yourself. Those mean the human saw it or did it.
 
 When a hook tells you items are open, start the reply with their 🩺 blocks. If `guard` is not installed, say what you need in the present, and say that no 🩺 block was queued.
-
-## Examples
-
-Write this shape.
-
-```
-🎁
-
-The date test passed. `format_date` in `report.py` now writes UTC. You do not need to do anything.
-
-`runs/smoke-3` is this attempt. I assumed the cluster clock is UTC, and I did not check the host. You asked for local time. I used UTC because the question card says timestamps are UTC. The ledger is `.audit/present-smoke-3.tsv`. The unverified row is the clock.
-
-🎁
-```
-
-Do not write this. It recaps the session, hides an unchecked number, and has no fence.
-
-```
-I explored the date code and improved consistency across the pipeline. The suite looks good and the error rate is effectively zero. Let me know if you want anything else.
-```
