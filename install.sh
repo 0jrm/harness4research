@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# usage: ./install.sh [--pinned] [--pstack link|skip] [--skills-dir DIR]... [--bin-dir DIR]
+# usage: ./install.sh [--latest] [--pstack link|skip] [--skills-dir DIR]... [--bin-dir DIR]
 # Skips anything that already exists. Re-run it any time; it converges.
+# pstack stays at the commit this repository records unless --latest asks for upstream's newest.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-pinned=0; pstack="link"; bindir=$HOME/.local/bin; dirs=()
+latest=0; pstack="link"; bindir=$HOME/.local/bin; dirs=()
 while [ $# -gt 0 ]; do
   case $1 in
-    --pinned) pinned=1; shift ;;
+    --latest) latest=1; shift ;;
+    --pinned) shift ;;
     --pstack) pstack=$2; shift 2 ;;
     --skills-dir) dirs+=("$2"); shift 2 ;;
     --bin-dir) bindir=$2; shift 2 ;;
@@ -20,8 +22,8 @@ if [ ${#dirs[@]} -eq 0 ]; then
 fi
 
 cd "$here"
-if [ $pinned = 1 ]; then git submodule update --init vendor/pstack
-else git submodule update --init --remote vendor/pstack; fi
+if [ $latest = 1 ]; then git submodule update --init --remote vendor/pstack
+else git submodule update --init vendor/pstack; fi
 echo "pstack at $(git -C vendor/pstack log -1 --format='%h %ad' --date=short)"
 
 link() {

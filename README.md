@@ -90,7 +90,7 @@ The walls are only as strong as the gap between your credentials and the agent's
 
 ## pstack
 
-[pstack](https://github.com/cursor/plugins/tree/main/pstack) is Lauren Tan's skill stack for rigorous agent engineering. This repository loads the [Claude Code and Codex port](https://github.com/michael-denyer/pstack-claude) as a git submodule at `vendor/pstack`. `install.sh` updates it to the latest upstream commit on every run, or keeps the recorded commit with `--pinned`. It links pstack's skills into `~/.agents/skills`, and it links this repository's skill into `~/.agents/skills`, `~/.claude/skills`, and `~/.cursor/skills` where those tools are installed.
+[pstack](https://github.com/cursor/plugins/tree/main/pstack) is Lauren Tan's skill stack for rigorous agent engineering. This repository loads the [Claude Code and Codex port](https://github.com/michael-denyer/pstack-claude) as a git submodule at `vendor/pstack`. `install.sh` keeps the commit this repository records, so everyone who installs the same harness commit gets the same pstack. `--latest` updates it to upstream's newest commit instead. It links pstack's skills into `~/.agents/skills`, and it links this repository's skill into `~/.agents/skills`, `~/.claude/skills`, and `~/.cursor/skills` where those tools are installed.
 
 If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh --pstack skip` so each agent loads pstack once. The skill works without pstack, but uses its playbooks when present.
 
