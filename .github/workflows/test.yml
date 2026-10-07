@@ -20,7 +20,7 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck python3-yaml
       - name: Lint
         run: shellcheck -S warning bin/guard install.sh lib/*.sh templates/guard/run templates/guard/bin/*.sh tests/run.sh tests/atlas-fixture.sh tests/mock-bin/* examples/quickstart/run.sh examples/quickstart/job.sh examples/quickstart/checks/*
-      - name: Compile atlas
-        run: python3 -m py_compile lib/atlas.py
+      - name: Compile Python
+        run: python3 -m py_compile lib/*.py
       - name: End-to-end tests
         run: tests/run.sh
