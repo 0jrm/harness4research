@@ -155,13 +155,20 @@ check_account() {
 }
 
 check_reviewer() {
-  local exe found
+  local exe found item c names=()
   if ! resolve_reviewer; then result fail "$reviewer_problem" "$reviewer_fix"; return; fi
+  for c in "${reviewer_cmds[@]}"; do names+=("${c%% *}"); done
+  item="reviewer is $reviewer: $reviewer_cmd"
+  [ ${#names[@]} -eq 1 ] || item="reviewer is $reviewer: $(printf '%s, then ' "${names[@]}" | sed 's/, then $//')"
   read -r exe _ <<<"$reviewer_cmd"; exe=${exe/#\~/$HOME}
   found="on PATH"; [[ $exe != */* ]] || found="an executable file"
-  if command -v "$exe" >/dev/null; then result pass "reviewer is $reviewer: $reviewer_cmd, and $exe is $found"
-  else result fail "reviewer is $reviewer: $reviewer_cmd, and $exe is not $found" \
-    "Install it, or name another command: guard config set reviewer_cmd_$reviewer '<command>'"; fi
+  if ! command -v "$exe" >/dev/null; then result fail "$item, and $exe is not $found" \
+    "Install it, or name another command: guard config set reviewer_cmd_$reviewer '<command>'"
+  elif [ "${exe##*/}" != claude ] || ! [[ $("$exe" auth status 2>/dev/null) =~ \"loggedIn\":\ *false ]]; then
+    result pass "$item, and $exe is $found"
+  elif [ ${#names[@]} -gt 1 ]; then
+    result pass "$item, and $exe is $found; claude is not signed in, so reviews fall back to ${names[1]}; run claude auth login"
+  else result fail "$item, and claude is not signed in" "Run claude auth login"; fi
 }
 
 check_merge_policy() {

@@ -981,9 +981,27 @@ xdg() {  # xdg <name> <config line>...: prints a fresh XDG_CONFIG_HOME whose gua
 mkdir -p "$tmp/claude-bin"; ln -s "$tmp/doctor-reviewer" "$tmp/claude-bin/claude"
 expect doctor-reviewer-default ok '^pass  reviewer is proprietary: claude -p --permission-mode acceptEdits --allowedTools=Bash, and claude is on PATH$' -- \
   doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-bin:$PATH"
-expect doctor-reviewer-missing fail '^FAIL  reviewer is proprietary, and none of claude, codex or cursor-agent is on PATH$' -- doctor XDG_CONFIG_HOME="$(xdg empty)"
-expect doctor-reviewer-missing-hint fail "^      Install Claude Code, Codex or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'$" -- \
+expect doctor-reviewer-missing fail '^FAIL  reviewer is proprietary, and none of claude or cursor-agent is on PATH$' -- doctor XDG_CONFIG_HOME="$(xdg empty)"
+expect doctor-reviewer-missing-hint fail "^      Install Claude Code or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'$" -- \
   doctor XDG_CONFIG_HOME="$(xdg empty)"
+mkdir -p "$tmp/cursor-bin" "$tmp/claude-auth"; ln -s "$tmp/doctor-reviewer" "$tmp/cursor-bin/cursor-agent"
+cat > "$tmp/claude-auth/claude" <<'FAKE'
+#!/bin/sh
+[ "$*" = "auth status" ] && printf '{\n  "loggedIn": %s,\n  "authMethod": "none"\n}\n' "$MOCK_CLAUDE_LOGGED_IN"
+FAKE
+chmod +x "$tmp/claude-auth/claude"
+expect doctor-reviewer-chain ok '^pass  reviewer is proprietary: claude, then cursor-agent, and claude is on PATH$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-bin:$tmp/cursor-bin:$PATH"
+expect doctor-reviewer-cursor-only ok '^pass  reviewer is proprietary: cursor-agent -p --force --trust, and cursor-agent is on PATH$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/cursor-bin:$PATH"
+expect doctor-claude-signed-in ok '^pass  reviewer is proprietary: claude, then cursor-agent, and claude is on PATH$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-auth:$tmp/cursor-bin:$PATH" MOCK_CLAUDE_LOGGED_IN=true
+expect doctor-claude-signed-out-falls-back ok '^pass  reviewer is proprietary: claude, then cursor-agent, and claude is on PATH; claude is not signed in, so reviews fall back to cursor-agent; run claude auth login$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-auth:$tmp/cursor-bin:$PATH" MOCK_CLAUDE_LOGGED_IN=false
+expect doctor-claude-signed-out-alone fail '^FAIL  reviewer is proprietary: claude -p --permission-mode acceptEdits --allowedTools=Bash, and claude is not signed in$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-auth:$PATH" MOCK_CLAUDE_LOGGED_IN=false
+expect doctor-claude-signed-out-remedy fail '^      Run claude auth login$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-auth:$PATH" MOCK_CLAUDE_LOGGED_IN=false
 expect doctor-reviewer-not-on-path fail '^FAIL  reviewer is proprietary: no-such-reviewer -p, and no-such-reviewer is not on PATH$' -- \
   doctor XDG_CONFIG_HOME="$(xdg gone 'reviewer_cmd_proprietary: no-such-reviewer -p')"
 expect doctor-local-no-command fail "^      Set one: guard config set reviewer_cmd_local 'codex exec --oss -m <model> --sandbox danger-full-access'$" -- \
@@ -1071,7 +1089,7 @@ case $FAKE_REVIEW in
   *) printf 'Report.\nVERDICT: %s - reason for %s  \n\n' "$FAKE_REVIEW" "$FAKE_REVIEW" ;;
 esac
 FAKE
-chmod +x "$tmp/fake-reviewer"; mkdir -p "$tmp/fake" "$tmp/fakebin"; ln -s "$tmp/fake-reviewer" "$tmp/fakebin/codex"
+chmod +x "$tmp/fake-reviewer"; mkdir -p "$tmp/fake" "$tmp/fakebin"; ln -s "$tmp/fake-reviewer" "$tmp/fakebin/cursor-agent"
 pr_json() {  # pr_json [jq filter]: pull request 5 for feat/add at origin's head with one passing check, edited by the filter
   jq -nc --arg sha "$(git rev-parse origin/feat/add)" '{state: "OPEN", isDraft: false, headRefName: "feat/add", headRefOid: $sha,
     baseRefName: "main", isCrossRepository: false,
@@ -1138,7 +1156,7 @@ expect review-dirty-not-pushed ok "^$old_head	" -- git ls-remote origin refs/hea
 expect review-strict-verdict fail 'not a VERDICT line' -- review 'approve?'
 "$guard" config set reviewer_cmd_proprietary "" >/dev/null
 review approve PATH="$tmp/fakebin:$PATH" >/dev/null 2>&1
-expect review-default-reviewer ok '^call no-token exec --sandbox danger-full-access Read ' -- cat "$tmp/fake/calls"
+expect review-default-reviewer ok '^call no-token -p --force --trust Read ' -- cat "$tmp/fake/calls"
 mkdir -p "$tmp/fakeclaude"; cat > "$tmp/fakeclaude/claude" <<FAKE
 #!/usr/bin/env bash
 printf '%s\n' "\$@" > "\$FAKE_DIR/argv"
@@ -1147,6 +1165,25 @@ FAKE
 chmod +x "$tmp/fakeclaude/claude"; review approve PATH="$tmp/fakeclaude:$PATH" >/dev/null 2>&1
 expect review-default-claude-argv ok '^-p\|--permission-mode\|acceptEdits\|--allowedTools=Bash\|Read \.guard-review/prompt\.md and follow it\. End your reply with the VERDICT line it describes\.$' -- \
   paste -sd'|' "$tmp/fake/argv"
+mkdir -p "$tmp/badclaude"; cat > "$tmp/badclaude/claude" <<'FAKE'
+#!/usr/bin/env bash
+echo junk >> calc.py; git commit -qam "claude: half done"; echo stray > stray.txt
+echo "Failed to authenticate. API Error: 401" >&2; exit 1
+FAKE
+chmod +x "$tmp/badclaude/claude"; review approve PATH="$tmp/badclaude:$tmp/fakebin:$PATH" > "$tmp/fallback.out" 2>&1
+expect review-fallback-verdict ok '^VERDICT: approve - reason for approve$' -- cat "$tmp/fallback.out"
+expect review-fallback-named ok '^guard review: claude failed \(Failed to authenticate\. API Error: 401\); trying cursor-agent$' -- cat "$tmp/fallback.out"
+expect review-fallback-recorded ok '	approve	cursor-agent	reason for approve$' -- tail -n 1 "$reviews"
+expect review-fallback-one-call ok '^1$' -- grep -c '^call no-token -p --force --trust Read ' "$tmp/fake/calls"
+expect review-fallback-reset fail - -- grep -q 'uncommitted edits' "$tmp/fallback.out"
+expect review-fallback-not-pushed ok "^$old_head	" -- git ls-remote origin refs/heads/feat/add
+expect review-fallback-all-fail fail '^VERDICT: escalate - the reviewer command exited 3: Error: Authentication required\.$' -- \
+  review crash PATH="$tmp/badclaude:$tmp/fakebin:$PATH"
+expect review-fallback-all-fail-recorded ok '	escalate	cursor-agent	the reviewer command exited 3' -- tail -n 1 "$reviews"
+review approve PATH="$tmp/fakeclaude:$tmp/fakebin:$PATH" >/dev/null 2>&1
+expect review-claude-alone ok '^call no-token -p --permission-mode acceptEdits --allowedTools=Bash Read ' -- cat "$tmp/fake/calls"
+expect review-claude-alone-once ok '^1$' -- grep -c '^call' "$tmp/fake/calls"
+expect review-claude-alone-recorded ok '	approve	claude	reason for approve$' -- tail -n 1 "$reviews"
 "$guard" config set reviewer_cmd_proprietary "$tmp/fake-reviewer" >/dev/null
 expect review-moved-head fail "origin/feat/add is not at the pull request's head" -- review approve MOCK_GH_PR="$(pr_json '.headRefOid = "0000000"')"
 

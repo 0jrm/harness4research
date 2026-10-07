@@ -3,7 +3,7 @@
 # Per-user settings, flat `key: value` lines like the budget card; the first match wins. An empty VALUE removes the key.
 # GUARD_CONFIG names another file, for example to try a reviewer without changing XDG_CONFIG_HOME, where gh and the
 # agent CLIs keep their logins.
-# reviewer_problem, reviewer_fix and merge_policy_from are read by the scripts that source this file.
+# reviewer_cmd, reviewer_problem, reviewer_fix and merge_policy_from are read by the scripts that source this file.
 # shellcheck disable=SC2034
 config_file=${GUARD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/guard/config}
 config_keys=(reviewer reviewer_cmd_proprietary reviewer_cmd_local review_rounds merge_policy)
@@ -16,32 +16,34 @@ config_get() {
   printf '%s\n' "$v"
 }
 
-default_reviewer() {
-  if command -v claude >/dev/null; then echo "claude -p --permission-mode acceptEdits --allowedTools=Bash"
-  elif command -v codex >/dev/null; then echo "codex exec --sandbox danger-full-access"
-  elif command -v cursor-agent >/dev/null; then echo "cursor-agent -p --force --trust"
-  else return 1; fi
-}
+default_reviewer_cmds=("claude -p --permission-mode acceptEdits --allowedTools=Bash" "cursor-agent -p --force --trust")
 
-# resolve_reviewer: sets reviewer and reviewer_cmd, the command the configured reviewer runs. When there is none, sets
-# reviewer_problem and reviewer_fix instead and returns 1.
+# resolve_reviewer: sets reviewer and reviewer_cmds, the commands guard review tries in order until one exits 0, and
+# reviewer_cmd, the first of them. A configured command is the only one. Without one, a proprietary reviewer tries
+# each default whose executable is on PATH. When there is none, sets reviewer_problem and reviewer_fix instead and
+# returns 1.
 resolve_reviewer() {
-  reviewer=$(config_get reviewer)
+  local cmd
+  reviewer=$(config_get reviewer); reviewer_cmds=()
   case $reviewer in
-    proprietary) reviewer_cmd=$(config_get reviewer_cmd_proprietary)
-      [ -n "$reviewer_cmd" ] || reviewer_cmd=$(default_reviewer) || {
-        reviewer_problem="reviewer is proprietary, and none of claude, codex or cursor-agent is on PATH"
-        reviewer_fix="Install Claude Code, Codex or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'"
+    proprietary) cmd=$(config_get reviewer_cmd_proprietary)
+      if [ -n "$cmd" ]; then reviewer_cmds=("$cmd")
+      else for cmd in "${default_reviewer_cmds[@]}"; do command -v "${cmd%% *}" >/dev/null && reviewer_cmds+=("$cmd"); done; fi
+      [ ${#reviewer_cmds[@]} -gt 0 ] || {
+        reviewer_problem="reviewer is proprietary, and none of claude or cursor-agent is on PATH"
+        reviewer_fix="Install Claude Code or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'"
         return 1; } ;;
-    local) reviewer_cmd=$(config_get reviewer_cmd_local)
-      [ -n "$reviewer_cmd" ] || {
+    local) cmd=$(config_get reviewer_cmd_local)
+      [ -n "$cmd" ] || {
         reviewer_problem="reviewer is local and no local command is set"
         reviewer_fix="Set one: guard config set reviewer_cmd_local 'codex exec --oss -m <model> --sandbox danger-full-access'"
-        return 1; } ;;
+        return 1; }
+      reviewer_cmds=("$cmd") ;;
     *) reviewer_problem="reviewer is '$reviewer' in $config_file"
       reviewer_fix="Set it: guard config set reviewer proprietary"
       return 1 ;;
   esac
+  reviewer_cmd=${reviewer_cmds[0]}
 }
 
 # read_merge_policy <repo> <base> <guarded 0|1>: sets merge_policy and merge_policy_from.

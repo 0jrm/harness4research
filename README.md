@@ -78,7 +78,7 @@ In the worktree:
 
 [docs/enforceable.md](docs/enforceable.md) gives the steps: protect the default branch, give agents a token without admin rights, and cap the cluster account. `guard doctor` checks each one.
 
-By default, an agent that finishes a change runs `guard review` and then `guard merge`, which merges only when the review, the checks, the ruleset, and the agent's credentials all allow it. To click every merge yourself, set `merge_policy: semi-manual` in `guard/budget.card` through a pull request. To review with a local model instead of the first of `claude`, `codex`, and `cursor-agent` on your PATH, name its command:
+By default, an agent that finishes a change runs `guard review` and then `guard merge`, which merges only when the review, the checks, the ruleset, and the agent's credentials all allow it. To click every merge yourself, set `merge_policy: semi-manual` in `guard/budget.card` through a pull request. To review with a local model instead of `claude`, or `cursor-agent` when `claude` is missing or fails, name its command:
 
 ```shell
 guard config set reviewer local
@@ -216,7 +216,7 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 
 ## Requirements
 
-bash 4 or later and git 2.30 or later on your machine and the cluster. python3 for `guard needs-you`, `guard hooks`, `guard atlas`, and the walkthrough. Slurm on the cluster. GitHub for the fence, and `gh` for the printed pull request commands, `guard review`, and `guard merge`. `guard review` also needs a reviewer: Claude Code, Codex, or Cursor's agent CLI, or a command you name. `tests/run.sh` needs python3 with PyYAML, and jq.
+bash 4 or later and git 2.30 or later on your machine and the cluster. python3 for `guard needs-you`, `guard hooks`, `guard atlas`, and the walkthrough. Slurm on the cluster. GitHub for the fence, and `gh` for the printed pull request commands, `guard review`, and `guard merge`. `guard review` also needs a reviewer: Claude Code or Cursor's agent CLI, or a command you name. `tests/run.sh` needs python3 with PyYAML, and jq.
 
 ## Test
 
