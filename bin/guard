@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: guard <survey|init|archive|doctor|preflight|ripples|manifest|fence|code|launch|atlas|needs-you|hooks|version> [args...]
+# usage: guard <survey|init|archive|doctor|config|review|merge|preflight|ripples|manifest|fence|code|launch|atlas|needs-you|hooks|version> [args...]
 set -euo pipefail
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 cmd=${1:-help}; shift || true
@@ -42,13 +42,14 @@ Project setup, run from your machine:
   archive <repo>      tag every remote branch before any cleanup
   doctor [repo]       read-only checklist of the Quickstart setup: ruleset, credentials, capped account, skills
   atlas [repo]        read-only HTML chart of runs, ripples, cards, receipts and the drawer; --serve PORT|SOCKET serves it live
-  review <pr>         an independent reviewer judges the pull request against the brief, and may push small fixes
-  merge <pr>          squash-merges the pull request if policy, credentials, ruleset, checks and review allow it,
-                      and otherwise queues the merge for a human
 
 In any git repository, guarded or not:
   needs-you           list what only you can do, check, or approve; add, show, ack, done, dismiss manage the queue
   hooks install claude [--user|--project]  remind you and Claude Code of open needs-you items on every prompt
+  config [list | get KEY | set KEY VALUE]  your reviewer and merge settings
+  review <pr>         an independent reviewer judges the pull request against the brief, and may push small fixes
+  merge <pr>          squash-merges the pull request if policy, credentials, ruleset, checks and review allow it,
+                      and otherwise queues the merge for a human
 
 Inside a guarded project, guard <command> runs the project's guard/run from the protected branch:
   preflight, ripples, manifest, fence, code
