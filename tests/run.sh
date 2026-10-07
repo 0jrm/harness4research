@@ -181,6 +181,9 @@ export MOCK_SACCT_ROWS=$tmp/rows
 expect ripples-states fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED \(diagnose, then commit runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line for each; a resource stop of a launch continues with an execution.tsv restart or resume row instead\)$' -- guard/run ripples "$R"
 expect ripples-walltime fail 'RIPPLE.walltime-headroom.100:100% 101:90%' -- guard/run ripples "$R"
 expect ripples-check fail 'RIPPLE.check:nan.sh.nan count 3' -- guard/run ripples "$R"
+printf '#!/bin/bash\necho "no metrics.csv yet"; exit 77\n' > "$R/checks/later.sh"; chmod +x "$R/checks/later.sh"
+expect ripples-check-not-yet fail '^UNCHECKED	check:later.sh	no metrics.csv yet; it exits 77 until its input exists$' -- guard/run ripples "$R"
+rm "$R/checks/later.sh"
 expect ripples-watched fail 'RIPPLE.watched-paths' -- guard/run ripples "$R"
 expect ripples-quota fail 'PASS.quota.42%' -- guard/run ripples "$R"
 expect ripples-other-run-ignored fail 'retries.2 not' -- guard/run ripples "$R"
@@ -1161,6 +1164,11 @@ echo plain > "$tmp/atlas/not-a-socket"
 expect atlas-sock-refuses-file fail 'not a socket' -- bash -c '. "$1"; "$2" atlas --serve "$3" --no-ripples' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas/not-a-socket"
 expect atlas-serve-bad-value fail "port number or a socket path" -- "$guard" atlas --serve nope
 expect atlas-refuses-unguarded fail 'no guard/run' -- "$guard" atlas "$tmp/agents"
+
+echo "== quickstart"
+expect quickstart-walkthrough ok 'PREFLIGHT FAIL: guard/ differs from origin/main.*PREFLIGHT OK: cheap-evo.*PASS	evidence-paths.*PASS	check:finite.sh.*Look at:' -- bash -c '"$1/examples/quickstart/run.sh" "$2" 2>&1 | tr "\n" " "' _ "$here" "$tmp/quickstart"
+expect quickstart-rerun-replaces-its-own ok 'Look at:' -- "$here/examples/quickstart/run.sh" "$tmp/quickstart"
+expect quickstart-refuses-foreign-dir fail 'did not create it' -- "$here/examples/quickstart/run.sh" "$tmp/agents"
 
 echo; echo "$pass passed, $fail failed"
 [ $fail -eq 0 ]
