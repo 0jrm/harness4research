@@ -17,7 +17,7 @@ Human context is the chat text on the screen. It excludes tool output, files, te
 
 The present is one block in the chat reply. A project rule may also require a file. Obey the rule, and still put the present in chat. The file is not the present.
 
-Fence the block with a gift emoji on its own line at the start and the same emoji on its own line at the end. Those two marks are the only emoji. They stay, including under unslop. Write every sentence inside per the unslop skill.
+Fence the block with a gift emoji on its own line at the start and the same emoji on its own line at the end. They stay, including under unslop. Write every sentence inside per the unslop skill. Use no other emoji, except the 🩺 block below.
 
 ```
 🎁
@@ -57,6 +57,25 @@ Add the facts that lived in tools, edits, names, and pastes. Leave out the sessi
 Name the ledger path, and name which doubt a row answers. Keep in the chat any fact the decision needs. The path is there for a later check.
 
 If `/present` arrives before the work is finished, say that it is unfinished.
+
+## The 🩺 block
+
+A 🩺 block asks the human to do one thing only they can do: approve a decision, run a command on their machine, or look at a file. 🩺 is the second emoji this skill allows, after 🎁.
+
+Never write a 🩺 block by hand. Queue the item, then paste what the queue prints:
+
+```shell
+guard needs-you add --kind run --title "Merge PR #41" --why "<one sentence>" \
+  --run "cd /home/you/proj" --run "gh pr merge 41 --squash" \
+  --expect "<what they will see>" --undo "<how to reverse it>" --path /home/you/proj/report.md --source <your CLI name>
+guard needs-you show n3
+```
+
+`add` prints the new id. `--kind` is `approve` for a decision, `run` for a command, or `check` for something to look at. Give each command its own `--run`, in the order the human runs them. `add` refuses a path that is relative, missing, or under `/tmp`, `/var/tmp`, `$TMPDIR`, or a `scratchpad` directory, because the human may open it after that file is gone. Copy the file into the project and queue the copy.
+
+Paste the output of `guard needs-you show <id>` verbatim, after the 🎁 block. In the present, name the id in the sentence that says what you need. The queue keeps the item for every worktree of the repository, and `guard needs-you` lists it until the human closes it. Never run `guard needs-you ack`, `done`, or `dismiss` yourself. Those mean the human saw it or did it.
+
+When a hook tells you items are open, start the reply with their 🩺 blocks. If `guard` is not installed, say what you need in the present, and say that no 🩺 block was queued.
 
 ## Examples
 

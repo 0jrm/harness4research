@@ -131,6 +131,8 @@ The page re-surveys the project on reload, at most every `--every` seconds (defa
 | `guard archive <repo>` | your machine | tag every remote branch |
 | `guard doctor [repo]` | your machine, the agent's shell, the cluster | read-only checklist of the Quickstart: pass, FAIL, or cannot check from here, with a remedy for each; exit 1 when an item fails |
 | `guard atlas [repo] [--out f.html \| --serve PORT\|SOCKET] [--runs GLOB] [--title NAME] [--head-only]` | anywhere with the repo | read-only chart: hosts and fences, budget, ripples matrix, card map, per-run lifeline and receipts. Reads HEAD plus uncommitted run files; `--json` writes the data the page is drawn from ([docs/atlas-json.md](docs/atlas-json.md)); `--serve` re-surveys on reload at most every `--every` seconds; give it a socket path (contains `/`) instead of a port on a shared login node, since the socket is 0600 and `ssh -L 8765:/path/to/sock host` forwards it |
+| `guard needs-you [add \| show \| ack \| done \| dismiss]` | any git repository | the queue of what only you can do, check, or approve, shared by every worktree in `<git common dir>/guard/needs-you.tsv`; `add` refuses a relative, missing, or temporary path |
+| `guard hooks install claude [--user \| --project] [--dry-run]` | your machine | add Claude Code hooks that show open needs-you items at session start and on every prompt; keeps your other settings |
 | `guard/run preflight <run_dir> <job.sh> [sbatch options]` | cluster | submit or refuse |
 | `guard/run ripples <run_dir>` | cluster | warning signs |
 | `guard/run manifest <run_dir> "$0" "$@"` | inside a job | provenance record |
