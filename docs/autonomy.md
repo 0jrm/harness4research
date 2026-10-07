@@ -140,13 +140,14 @@ Some of these are walls that hold even against an agent that ignores its instruc
 |---|---|
 | change anything under `guard/` | the fence check, the ruleset, and `guard/run`, which runs the protected branch's copy |
 | touch a ruleset or credentials | a token with no Administration permission for the ruleset. Credentials are a rule in the skill. |
-| merge a change to `FACTS.md` | a rule in `AGENTS.md` and the skills. It is a wall only if you add `FACTS.md` to `guard/watch.list`, so the fence fails on it. |
 | approve a question card | a rule. The fence blocks edits to a card after its first commit, not the merge of a new card. |
 | decide to continue past a science stop (FAILED or TIMEOUT) | a rule. The agent writes the incident note, and the next call is yours. An `execution.tsv` restart row does not handle a science stop. |
 | ack, finish, or dismiss a needs-you item | a rule in the skill |
 | merge with `gh pr merge` | a line in `AGENTS.md` and the skill. A non-admin token can still run `gh pr merge` once the required checks pass. |
 
 What agents may do is queue any of these for you with `guard needs-you add`, with the exact command and the files to look at.
+
+Agents may merge lines into `FACTS.md` through `guard review` and `guard merge`. The reviewer opens the evidence each new or changed line cites and asks for changes when it cannot confirm it. To keep `FACTS.md` for humans only, add it to `guard/watch.list`, and the fence then fails any pull request that changes it.
 
 ## Where the protection stops
 

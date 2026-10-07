@@ -31,7 +31,7 @@ Runs named `explore-*` need no question card. Preflight caps them at one node, o
 - A doomed full-scale run is caught at the small run, at a small fraction of its cost.
 - Every reported number names its file, job, and commit.
 - Agents are interchangeable, because the rules live outside them.
-- Stale documents stop accumulating. The fence blocks unproven reports, and `FACTS.md` holds only lines you merged. Agents that merge their own pull requests are told never to merge a change to it, and listing it in `guard/watch.list` makes the fence block one.
+- Stale documents stop accumulating. The fence blocks unproven reports, and `FACTS.md` holds only lines whose evidence a reviewer checked.
 
 ## Known limits
 
