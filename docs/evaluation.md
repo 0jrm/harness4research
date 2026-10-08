@@ -1,6 +1,6 @@
 # Proposal: measure whether the harness helps local agents
 
-This page is a proposal. No result below has been measured. The question is whether harness4research raises the success and accuracy of agents that run on local models, or only adds cost.
+This page is a proposal. No result below has been measured. [evaluation-serving.md](evaluation-serving.md) is the brief for whoever serves the models. The question is whether harness4research raises the success and accuracy of agents that run on local models, or only adds cost.
 
 ## Design
 
