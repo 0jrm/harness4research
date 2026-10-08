@@ -77,18 +77,38 @@ while read -r f; do
 done < <(git diff --name-only --diff-filter=A "$base...$head" -- 'runs/*/question.card')
 [ -z "$undeclared" ] || say WARN card-lineage "set supersedes or spawned_from (or none) by amending the commit that added the card, since a second commit freezes the run:${undeclared%;}"
 
-unproven=""
-while read -r f; do
-  [ -n "$f" ] || continue
-  rows=$(git show "$head:$f" | awk '
+mb=$(git merge-base "$base" "$head")
+# unproven_rows <ref> <report> [shape]: line numbers of ## Evidence rows with no backticked path that exists at <ref>,
+# from the repository top or the report's directory, with any :line suffix dropped. With shape, a token that
+# merely looks like a path is enough, which is the rule a modified report's merge-base copy may still be under.
+unproven_rows() {
+  local ref=$1 f=$2 shape=${3:-} nr tok p
+  local -A seen=() ok=()
+  while IFS=$'\t' read -r nr tok; do
+    seen[$nr]=1
+    if [ -n "$shape" ]; then [[ $tok == *[/.]* ]] && ok[$nr]=1; continue; fi
+    tok=${tok#./}
+    [ -n "$tok" ] && [[ $tok != /* && $tok != *..* && $tok != *[[:space:]]* ]] || continue
+    for p in "$tok" "${tok%%:*}" "${f%/*}/$tok" "${f%/*}/${tok%%:*}"; do
+      [ "$p" != "$f" ] && git cat-file -e "$ref:$p" 2>/dev/null && { ok[$nr]=1; break; }
+    done
+  done < <(git show "$ref:$f" | awk '
     /^## / { e = ($0 ~ /^## Evidence/); n = 0; next }
-    e && /^\|/ { n++; if (n > 2 && $0 !~ /`[^`]*[\/.][^`]*`/) print NR }')
+    e && /^\|/ { n++; if (n <= 2) next; s = $0; t = 0
+      while (match(s, /`[^`]*`/)) { print NR "\t" substr(s, RSTART + 1, RLENGTH - 2); s = substr(s, RSTART + RLENGTH); t = 1 }
+      if (!t) print NR "\t" }')
+  for nr in "${!seen[@]}"; do [ -n "${ok[$nr]+x}" ] || echo "$nr"; done | sort -n
+}
+unproven=""
+while read -r st f; do
+  [ -n "$f" ] || continue
+  rule=""; [ "$st" = M ] && [ -n "$(unproven_rows "$mb" "$f")" ] && rule=shape
+  rows=$(unproven_rows "$head" "$f" ${rule:+"$rule"})
   [ -z "$rows" ] || unproven="$unproven $f:$(echo $rows | tr ' ' ',')"
-done < <(git diff --name-only --diff-filter=AM "$base...$head" -- 'runs/*/report.md')
-if [ -z "$unproven" ]; then say PASS evidence-paths ""; else say FAIL evidence-paths "evidence rows without a backticked artifact path:$unproven"; fi
+done < <(git diff --name-status --no-renames --diff-filter=AM "$base...$head" -- 'runs/*/report.md')
+if [ -z "$unproven" ]; then say PASS evidence-paths ""; else say FAIL evidence-paths "evidence rows without a backticked path to a file committed on the branch:$unproven"; fi
 
 # A rule added later judges an added file, and a modified file only if its merge-base copy already passed.
-mb=$(git merge-base "$base" "$head")
 bad_h=""
 while read -r st f; do
   [ -n "$f" ] || continue

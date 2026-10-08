@@ -80,7 +80,7 @@ env SLURM_JOB_ID=555 LOADEDMODULES=none bash job.sh runs/cheap-evo
 
 echo "== 5. The report and the fence"
 python3 runs/cheap-evo/campaign.py --write-report runs/cheap-evo
-git add runs/cheap-evo/report.md; git commit -q -m "report: cheap-evo"
+git add runs/cheap-evo/report.md runs/cheap-evo/campaign.json; git commit -q -m "report: cheap-evo"
 guard/run fence origin/main HEAD
 
 echo "== 6. Ripples after the job"

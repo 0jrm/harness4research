@@ -2,6 +2,8 @@
 # usage: guard/run ripples <run_dir>
 # One line per precursor: PASS, RIPPLE, HANDLED or UNCHECKED. Exit 1 on any RIPPLE, which means stop new submissions.
 set -uo pipefail
+# cron, containers and Slurm epilogs may leave USER unset, and set -u would stop at its first use.
+USER=${USER:-$(id -un)}
 [ $# -eq 1 ] || { echo "usage: guard/run ripples <run_dir>" >&2; exit 64; }
 run_dir=${1%/}; run_id=$(basename "$run_dir")
 base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
