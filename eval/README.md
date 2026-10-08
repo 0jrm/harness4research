@@ -2,7 +2,7 @@
 
 This directory holds the environment for the evaluation in [docs/evaluation.md](../docs/evaluation.md): a stand-in for a cluster login node where an agent works on a research project, with a scheduler, a protected git remote, and evaluator data the agent cannot reach. It needs bash, git, python3 and [bubblewrap](https://github.com/containers/bubblewrap), with unprivileged user namespaces. It needs no root and no Docker, so it can run on machines where the user has no sudo.
 
-The agent never sees this directory. The sandbox gets the harness without `eval/`, and nothing inside it names the evaluation.
+The agent never sees this directory. The sandbox gets only the parts of the harness that `guard` runs from (`bin`, `lib`, `skills`, `templates`, `SCHEMA`). It leaves out `eval/`, `docs/` and `README.md`, which describe this evaluation. An agent never reads those in a real install either, because its rules come from `AGENTS.md` and the skills. The self-test checks that no file inside mentions the evaluation.
 
 ## Check it
 
@@ -14,7 +14,7 @@ CI does not run it yet. A workflow change is a human's merge, and the step is in
 
 The self-test builds one episode and checks:
 
-- the isolation: user, environment, no host paths, the hidden data unreadable, no `eval/` code;
+- the isolation: user, environment, no host paths, the hidden data unreadable, no harness file that mentions the evaluation;
 - `guard init` running clean inside the sandbox;
 - preflight against the fake Slurm: one job submitted, one over-cap job refused;
 - `sacct` and ripples reading the finished job;
@@ -35,7 +35,7 @@ eval/env/down.sh <episode_dir>
 |---|---|---|
 | `home/` | `/home/agent` | the agent's HOME, with the project cloned at `~/<project>` |
 | `sandbox/tools/` | `/opt/site/bin`, `/opt/site/lib` | `sbatch`, `squeue`, `sacct`, `scancel`, `sacctmgr`, `forge-connect`, and `guard` with `--harness` |
-| `sandbox/harness/` | `/opt/harness4research` | the harness's tracked files without `eval/`, with `--harness` |
+| `sandbox/harness/` | `/opt/harness4research` | the harness's `bin`, `lib`, `skills`, `templates` and `SCHEMA`, with `--harness` |
 | `state/slurm/` | the socket only, at `/run/slurm/slurmctld.sock` | the fake Slurm's ledger (`state.json`), job scripts, and `audit.jsonl` |
 | `state/git/` | the socket only, at `/run/forge/forge.sock` | the protected repository and `forge.log` |
 | `hidden/` | nothing | the evaluator's data |

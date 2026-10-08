@@ -9,7 +9,7 @@
 #   <episode_dir>/hidden/          the evaluator's data                                   (outside the sandbox only)
 #
 # The project directory becomes the first commit on main. With --harness, the sandbox gets that repository's
-# tracked files without eval/, at /opt/harness4research, and `guard` on PATH. Name the episode directory neutrally:
+# bin, lib, skills, templates and SCHEMA at /opt/harness4research, and `guard` on PATH. Name the episode directory neutrally:
 # its path shows in the sandbox's mount table.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -40,7 +40,9 @@ for c in sbatch squeue sacct scancel sacctmgr; do ln -s /opt/site/lib/slurmclien
 ln -s /opt/site/lib/forge_connect.py "$ep/sandbox/tools/bin/forge-connect"
 if [ -n "$harness" ]; then
   mkdir "$ep/sandbox/harness"
-  git -C "$harness" archive HEAD | tar -x -C "$ep/sandbox/harness" --exclude=./eval --exclude=eval
+  # Only what guard runs from. docs/, README.md and eval/ describe this evaluation, and an agent never reads them in
+  # a real install either: its rules come from AGENTS.md and the skills.
+  git -C "$harness" archive HEAD -- bin lib skills templates SCHEMA | tar -x -C "$ep/sandbox/harness"
   ln -s /opt/harness4research/bin/guard "$ep/sandbox/tools/bin/guard"
 fi
 

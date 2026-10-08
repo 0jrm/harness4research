@@ -34,6 +34,7 @@ expect iso-no-host-home ok '^agent$' -- inside 'ls /home'
 expect iso-no-episode-path fail - -- inside "test -e '$ep'"
 expect iso-hidden-unreadable fail - -- inside "grep -rqs '$marker' /home /opt /run /tmp /etc"
 expect iso-no-eval-code fail - -- inside 'test -e /opt/harness4research/eval'
+expect iso-no-study-pages fail - -- inside 'grep -rqiE "evaluation|reward hack|trap task" /opt/harness4research'
 expect iso-pid1-clean ok '^bwrap --args 3 -- ' -- inside 'tr "\0" " " < /proc/1/cmdline'
 expect iso-remote-socket-only ok '^origin	ext::forge-connect %S \(push\)$' -- inside 'git -C proj remote -v'
 expect iso-no-ledger fail - -- inside 'ls /run/slurm/state.json'
