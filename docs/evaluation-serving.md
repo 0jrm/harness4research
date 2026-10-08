@@ -42,7 +42,7 @@ Every model needs these settings, so that runs can be repeated and compared:
 | gpt-oss-120b | `openai` | none needed | the [vLLM gpt-oss recipe](https://recipes.vllm.ai/openai/gpt-oss-120b) |
 | Ornith-1.5-35B-A3B | probably `qwen3_coder` | probably `qwen3` | unverified; it is built on Qwen3.5 |
 
-The flag names come from the [vLLM 0.12 documentation](https://docs.vllm.ai/en/v0.12.0/cli/serve/). Check them with `vllm serve --help` on the installed version.
+All of these flags are in both the [vLLM 0.12](https://docs.vllm.ai/en/v0.12.0/cli/serve/) and the [current](https://docs.vllm.ai/en/latest/cli/serve/) `vllm serve` documentation. skynet runs 0.21, so check them with `vllm serve --help` there.
 
 The agent client, Codex, uses the OpenAI Responses API (`/v1/responses`). Two other clients use Chat Completions (`/v1/chat/completions`). Both must return tool calls. This request checks one of them in a second:
 
@@ -64,7 +64,7 @@ The evaluation's question card freezes these before the first run, so please tel
 
 - Concurrency: one to four agent sessions at a time. We match the server's `--max-num-seqs` and never exceed it.
 - Requests: long-context tool calls. Each agent turn resends the conversation so far, so prompts grow toward the context limit and outputs are short. Prefix caching helps a lot.
-- Volume: the first run is 6 tasks × 2 arms × 10 repeats = 120 agent sessions on one model. Each later arm adds 60 sessions per model. Tokens and wall time per session are unmeasured. The first sessions will measure them, and we will share the numbers before scaling up.
+- Volume: the first run has 6 tasks, 3 traps and their 3 controls, so 6 tasks × 2 arms × 10 repeats = 120 agent sessions on one model. Each later arm adds 60 sessions per model, and each later trap adds 2 tasks, its control included. Tokens and wall time per session are unmeasured. The first sessions will measure them, and we will share the numbers before scaling up.
 - Schedule: whenever suits the GPU host. A run can stop between sessions and resume.
 
 ## How the agents reach the server
