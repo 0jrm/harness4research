@@ -1,2 +1,3 @@
 #!/usr/bin/env bash
-if [[ "$*" == *PENDING* ]]; then echo "128 1-00:00:00"; else printf 'j1\nj2\n'; fi
+# Mock: MOCK_SQUEUE_PENDING replaces the one pending row, "<cpus> <time limit>".
+if [[ "$*" == *PENDING* ]]; then echo "${MOCK_SQUEUE_PENDING:-128 1-00:00:00}"; else printf 'j1\nj2\n'; fi

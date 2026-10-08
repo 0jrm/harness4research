@@ -135,6 +135,14 @@ expect preflight-no-user ok 'SBATCH .*--job-name=2026-09-29-demo' -- env -u USER
 expect preflight-no-scheduler fail '^preflight: no scheduler on this host; guard/run manifest is the only allowed step here$' -- \
   env PATH="$(path_without sbatch)" guard/run preflight "$R" job.sh
 expect preflight-account-wins ok 'SBATCH --account=other .*--account=gom' -- guard/run preflight "$R" job.sh --account=other
+expect preflight-time-m-s ok 'PREFLIGHT OK: .* time=30m ' -- guard/run preflight "$R" job.sh --time=30:00
+expect preflight-time-seconds-round-up ok 'PREFLIGHT OK: .* time=2m ' -- guard/run preflight "$R" job.sh --time=1:30
+expect preflight-time-h-m-s ok 'PREFLIGHT OK: .* time=120m ' -- guard/run preflight "$R" job.sh --time=2:00:00
+expect preflight-time-days-hours fail 'PREFLIGHT FAIL: --time=1-12 \(2160 min\) exceeds max_walltime_minutes=720' -- guard/run preflight "$R" job.sh --time=1-12
+expect preflight-time-days-h-m ok 'PREFLIGHT OK: .* time=90m ' -- guard/run preflight "$R" job.sh --time=0-1:30
+expect preflight-time-malformed fail 'PREFLIGHT FAIL: --time=1h is not a Slurm time' -- guard/run preflight "$R" job.sh --time=1h
+expect preflight-queued-m-s ok 'PREFLIGHT OK: .* queued=10 ' -- env MOCK_SQUEUE_PENDING='128 5:00' guard/run preflight "$R" job.sh
+expect preflight-queued-unlimited ok 'PREFLIGHT OK: .* queued=0 ' -- env MOCK_SQUEUE_PENDING='128 UNLIMITED' guard/run preflight "$R" job.sh
 expect preflight-walltime fail 'exceeds max_walltime' -- guard/run preflight "$R" job.sh --time=1-00:00:00
 expect preflight-budget fail 'exceeds 8500 available' -- guard/run preflight "$R" job.sh --nodes=4 --time=12:00:00 --array=0-9%2
 expect preflight-reserve-open ok 'available=10000' -- env HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
