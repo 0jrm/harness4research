@@ -1,4 +1,3 @@
-[submodule "vendor/pstack"]
-	path = vendor/pstack
-	url = https://github.com/michael-denyer/pstack-claude
-	branch = main
+[submodule "vendor/cursor-plugins"]
+	path = vendor/cursor-plugins
+	url = https://github.com/cursor/plugins

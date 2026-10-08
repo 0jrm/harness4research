@@ -122,7 +122,7 @@ fi
   echo "schema: $h_schema"
   echo "installer: $(git -C "$here" rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "release: $(harness_release)"
-  echo "pstack: $(git -C "$here/vendor/pstack" rev-parse --short HEAD 2>/dev/null || echo not-installed)"
+  echo "pstack: $(git -C "$here/vendor/cursor-plugins" rev-parse --short HEAD 2>/dev/null || echo not-installed)"
   echo "installed: $(date -u +%F)"
 } > "$wt/guard/VERSION"; added+=(guard/VERSION)
 

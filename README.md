@@ -16,7 +16,7 @@ It is for research groups whose agents write code, submit jobs, and report resul
 The walkthrough builds a guarded throwaway project and takes one experiment through the guard. It uses a fake `sbatch`, so it needs no cluster and no GitHub account, only bash, git, and python3.
 
 ```shell
-git clone --recurse-submodules https://github.com/0jrm/harness4research ~/harness4research
+git clone https://github.com/0jrm/harness4research ~/harness4research
 ~/harness4research/examples/quickstart/run.sh ~/guard-quickstart
 ```
 
@@ -36,12 +36,12 @@ Then the job runs, the fence passes the report because every number names its fi
 ### 1. Install
 
 ```shell
-git clone --recurse-submodules https://github.com/0jrm/harness4research ~/harness4research
+git clone https://github.com/0jrm/harness4research ~/harness4research
 ~/harness4research/install.sh
 guard version
 ```
 
-If you cloned the repository for the walkthrough, skip the first line. `install.sh` puts `guard` in `~/.local/bin`. It links this repository's skills into `~/.agents/skills`, and also into `~/.claude/skills` and `~/.cursor/skills` when `~/.claude` and `~/.cursor` exist. It links the skills of [pstack](#pstack) into `~/.agents/skills`. If your agent reads skills from another folder, rerun it with `--skills-dir <that folder>`. If you already use the pstack plugin, add `--pstack skip`. To check that an agent sees the skills, open it and ask which skills it has. `safe-autonomous-hpc-science`, `present`, `review-and-merge`, and `guard-onboard` should be in the list.
+If you cloned the repository for the walkthrough, skip the first line. `install.sh` puts `guard` in `~/.local/bin`. It links this repository's skills into `~/.agents/skills`, and also into `~/.claude/skills` and `~/.cursor/skills` when `~/.claude` and `~/.cursor` exist. [pstack](#pstack) is optional, and `--pstack link` adds it. If your agent reads skills from another folder, rerun it with `--skills-dir <that folder>`. To check that an agent sees the skills, open it and ask which skills it has. `safe-autonomous-hpc-science`, `present`, `review-and-merge`, and `guard-onboard` should be in the list.
 
 ### Let your agent walk you through steps 2 to 4
 
@@ -197,9 +197,23 @@ Pushing a change to `.github/workflows/` needs a token with the `workflow` scope
 
 ## pstack
 
-[pstack](https://github.com/cursor/plugins/tree/main/pstack) is Lauren Tan's skill stack for rigorous agent engineering. This repository loads the [Claude Code and Codex port](https://github.com/michael-denyer/pstack-claude) as a git submodule at `vendor/pstack`. `install.sh` keeps the commit this repository records, so everyone who installs the same harness commit gets the same pstack. `--latest` updates it to upstream's newest commit instead.
+[pstack](https://github.com/cursor/plugins/tree/main/pstack) is Lauren Tan's skill stack for rigorous agent engineering, MIT-licensed. It is optional. This repository records its canonical source, [github.com/cursor/plugins](https://github.com/cursor/plugins), as a git submodule at `vendor/cursor-plugins`, pinned to commit `ccb5507` (pstack 0.15.15). It replaces the third-party Claude Code and Codex port that the repository used before.
 
-If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh --pstack skip` so each agent loads pstack once. The skills work without pstack, but use its playbooks when present.
+- In Cursor, install the plugin with `/add-plugin pstack`.
+- In Claude Code or Codex, run `install.sh --pstack link`. It fetches the submodule at the pinned commit, links pstack's skills into each skills folder, and links its agents into `~/.claude/agents`. `--latest` takes upstream's newest commit instead.
+
+Checked on 2026-10-08 with Claude Code, from the skill and agent lists in `claude -p`'s start-up message: all 51 skills and both agents load from those folders. `typescript-best-practices` loads only in projects with TypeScript files, as its own `paths` setting asks. The skills are written for Cursor, so some steps name things that Claude Code and Codex lack:
+
+- Cursor's `agent-transcripts` folder (in 8 skills);
+- the "Task tool" (7), which is the Agent tool in Claude Code;
+- the `generalPurpose` subagent (6), which Claude Code calls `general-purpose`;
+- Cursor's built-in `create-skill` (6);
+- the `cursor-team-kit` plugin (8);
+- grok as a default model.
+
+Whether those steps still work outside Cursor is unmeasured.
+
+Linked skills reach every agent session as instructions, so linking pstack means trusting cursor/plugins at the pinned commit. `--latest` means trusting whatever upstream's main holds that day. Read the upstream diff before moving the pin. The harness's own skills work without pstack, and use its playbooks when present.
 
 ## Documentation
 
@@ -241,4 +255,4 @@ find ~/.agents/skills ~/.claude/skills ~/.cursor/skills ~/.local/bin -maxdepth 1
 
 ## License
 
-MIT. pstack is MIT-licensed by its authors and included as a submodule, not copied.
+MIT. pstack is MIT-licensed by its author and referenced as a submodule, not copied.
