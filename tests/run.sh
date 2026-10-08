@@ -1115,6 +1115,7 @@ cat > "$tmp/fake-reviewer" <<'FAKE'
 echo "call ${GH_TOKEN:-no-token} $*" >> "$FAKE_DIR/calls"
 readlink /proc/self/fd/0 > "$FAKE_DIR/stdin"
 pwd > "$FAKE_DIR/cwd"
+echo "${GH_CONFIG_DIR:-unset} $(ls -A "${GH_CONFIG_DIR:-/nonexistent}" 2>/dev/null | wc -l)" > "$FAKE_DIR/ghdir"
 cp .guard-review/prompt.md "$FAKE_DIR/prompt.md"
 git push -q origin HEAD:refs/heads/sneaky 2>/dev/null && echo pushed >> "$FAKE_DIR/calls"
 git config --get-all url.guard-review-never-pushes:.pushInsteadOf > "$FAKE_DIR/no-push"
@@ -1164,6 +1165,7 @@ expect review-prompt-diff ok '^\+# adds two numbers$' -- cat "$tmp/fake/prompt.m
 expect review-prompt-rules ok '^VERDICT: <approve\|changes\|escalate> - <one-line reason>$' -- cat "$tmp/fake/prompt.md"
 expect review-stdin-closed ok '^/dev/null$' -- cat "$tmp/fake/stdin"
 expect review-no-token ok '^call no-token Read .guard-review/prompt.md' -- cat "$tmp/fake/calls"
+expect review-no-stored-gh-login ok '^/.* 0$' -- cat "$tmp/fake/ghdir"
 expect review-reviewer-cannot-push ok '^$' -- git ls-remote origin sneaky
 expect review-reviewer-cannot-push-github ok '^https://github.com/\|git@github.com:\|ssh://git@github.com/$' -- bash -c 'tail -n 3 "$1" | paste -sd"|"' _ "$tmp/fake/no-push"
 expect review-reviewer-cannot-push-origin ok "^$(git remote get-url origin)$" -- head -n 1 "$tmp/fake/no-push"

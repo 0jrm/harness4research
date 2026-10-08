@@ -1,6 +1,6 @@
 # How agents review and merge their own work
 
-An agent in a guarded repository can take a change from a finished branch to a merged pull request without a person in the loop. Three commands make that safe enough to allow: `guard review` gets a second model to judge the change, `guard merge` merges only when every condition holds, and `guard needs-you` queues whatever is left for a person. `guard ship` runs the first two over every open pull request at once, a few times a day. This page explains what each one checks, how `guard ship` sorts pull requests into tiers, what agents never do, and where the protection stops.
+An agent in a guarded repository can take a change from a finished branch to a merged pull request without a person in the loop. Three commands do the work: `guard review` gets a second model to judge the change, `guard merge` merges only when every condition holds, and `guard needs-you` queues whatever is left for a person. Whether this lowers rule violations or keeps agent success is unmeasured; [evaluation.md](evaluation.md) describes how it will be measured. The review is a quality tool, not an enforcement point: the walls are the checks and the ruleset, as the last section says. `guard ship` runs the first two over every open pull request at once, a few times a day. This page explains what each one checks, how `guard ship` sorts pull requests into tiers, what agents never do, and where the protection stops.
 
 ## Two merge modes
 
@@ -197,5 +197,6 @@ Agents may merge lines into `FACTS.md` through `guard review` and `guard merge`.
 - The real walls are outside the agent's reach: CI checks that must pass, the fence, a ruleset with only you on the bypass list, and an agent token with no admin rights. Without them, `guard merge` is a checklist an honest agent follows, not a lock.
 - A non-admin token with write access can run `gh pr merge` once the required checks pass, without `guard review`. Only the skill stops that. A required GitHub review would stop it, and needs a second account.
 - The reviewer reads the user's request but not your intent. A request that was wrong passes review.
+- The pull request's author controls text the reviewer reads and code it may run, so a diff can steer the verdict. [enforcement.md](enforcement.md#the-reviewer-reads-untrusted-text) lists what limits that and what does not.
 
 [enforcement.md](enforcement.md) explains the credential gap in full, and [enforceable.md](enforceable.md) gives the steps that close it.
