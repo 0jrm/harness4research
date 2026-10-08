@@ -7,12 +7,12 @@ Record each result in the last section. A test passes when every expected result
 ## 0. Install
 
 ```shell
-git clone --recurse-submodules https://github.com/0jrm/harness4research ~/harness4research
-~/harness4research/install.sh --pstack skip   # skip if a pstack plugin is already installed
+git clone https://github.com/0jrm/harness4research ~/harness4research
+~/harness4research/install.sh                  # add --pstack link for pstack, unless a pstack plugin is already installed
 guard version
 ```
 
-Expected: `guard version` prints this repo's commit and a pstack commit.
+Expected: `guard version` prints this repo's commit, and `pstack not-linked`, or the pinned cursor/plugins commit after `--pstack link`.
 
 ## 1. Survey
 
