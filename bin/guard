@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# usage: guard <survey|init|archive|doctor|config|review|merge|preflight|ripples|manifest|fence|code|launch|atlas|needs-you|hooks|version> [args...]
+# usage: guard <survey|init|archive|doctor|config|review|merge|ship|preflight|ripples|manifest|fence|code|launch|atlas|needs-you|hooks|version> [args...]
 set -euo pipefail
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 cmd=${1:-help}; shift || true
 case $cmd in
   survey|init|archive|doctor|config|review|merge) exec bash "$here/lib/$cmd.sh" "$@" ;;
+  ship) exec bash "$here/lib/batch.sh" ship "$@" ;;
   atlas) exec python3 "$here/lib/atlas.py" "$@" ;;
   needs-you) exec python3 "$here/lib/needs_you.py" "$@" ;;
   hooks) exec python3 "$here/lib/hooks.py" "$@" ;;
@@ -49,8 +50,13 @@ In any git repository, guarded or not:
   hooks install claude [--user|--project]  remind you and Claude Code of open needs-you items on every prompt
   config [list | get KEY | set KEY VALUE]  your reviewer and merge settings
   review <pr>         an independent reviewer judges the pull request against the brief, and may push small fixes
+  review --batch      reviews every open pull request by tier: records without a model, small ones several to a
+                      session, large ones one by one; new question cards and guard changes go to you
   merge <pr>          squash-merges the pull request if policy, credentials, ruleset, checks and review allow it,
                       and otherwise queues the merge for a human
+  merge --batch       runs merge on every pull request approved at its head, and queues one item for the refusals
+  ship [--now]        review --batch, then merge --batch, once review_batch_max pull requests wait or the oldest
+                      is ship_interval_hours old; until then it refreshes the question card digest
 
 Inside a guarded project, guard <command> runs the project's guard/run from the protected branch:
   preflight, ripples, manifest, fence, code

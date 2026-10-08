@@ -6,6 +6,8 @@
 # Prints the env lines a caller exports before running ripples or guard atlas against it. ATLAS_FIXTURE_STAMP, when set,
 # replaces the harness commit and release in guard/VERSION, so that with a fixed TZ every commit id is the same on any machine.
 set -euo pipefail
+# git rebase --exec and git hooks export GIT_DIR, which would turn every throwaway repo below into the caller's own.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 root=$(mkdir -p "$1" && cd "$1" && pwd); proj=$root/casts-v4-training
 export TZ=UTC GIT_AUTHOR_NAME=agent GIT_AUTHOR_EMAIL=agent@lab GIT_COMMITTER_NAME=agent GIT_COMMITTER_EMAIL=agent@lab

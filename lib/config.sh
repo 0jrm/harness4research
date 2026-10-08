@@ -6,8 +6,11 @@
 # reviewer_cmd, reviewer_problem, reviewer_fix and merge_policy_where are read by the scripts that source this file.
 # shellcheck disable=SC2034
 config_file=${GUARD_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/guard/config}
-config_keys=(reviewer reviewer_cmd_proprietary reviewer_cmd_local review_rounds merge_policy)
-declare -A config_default=([reviewer]=proprietary [review_rounds]=2 [merge_policy]=autonomous)
+config_keys=(reviewer reviewer_cmd_proprietary reviewer_cmd_local reviewer_model review_rounds review_small_lines review_batch_max
+  ship_interval_hours merge_policy)
+declare -A config_default=([reviewer]=proprietary [review_rounds]=2 [review_small_lines]=200 [review_batch_max]=8
+  [ship_interval_hours]=24 [merge_policy]=autonomous)
+whole_keys=" review_rounds review_small_lines review_batch_max ship_interval_hours "
 
 config_get() {
   local v
@@ -16,19 +19,28 @@ config_get() {
   printf '%s\n' "$v"
 }
 
+# config_whole <key>: prints the key's value when it is a whole number of at least 1. Otherwise prints how to fix it
+# and returns 1.
+config_whole() {
+  local v; v=$(config_get "$1")
+  [[ $v =~ ^[1-9][0-9]*$ ]] && { echo "$v"; return; }
+  echo "$1 is '$v' in $config_file. Set it: guard config set $1 ${config_default[$1]}"; return 1
+}
+
 default_reviewer_cmds=("claude -p --permission-mode acceptEdits --strict-mcp-config --setting-sources project --disable-slash-commands --tools=Bash,Read,Edit,Grep,Glob --allowedTools=Bash" "cursor-agent -p --force --trust")
 
 # resolve_reviewer: sets reviewer and reviewer_cmds, the commands guard review tries in order until one exits 0, and
 # reviewer_cmd, the first of them. A configured command is the only one. Without one, a proprietary reviewer tries
-# each default whose executable is on PATH. When there is none, sets reviewer_problem and reviewer_fix instead and
-# returns 1.
+# each default whose executable is on PATH, with --model when reviewer_model is set. When there is none, sets
+# reviewer_problem and reviewer_fix instead and returns 1.
 resolve_reviewer() {
-  local cmd
+  local cmd model
   reviewer=$(config_get reviewer); reviewer_cmds=()
+  model=$(config_get reviewer_model); [ -z "$model" ] || model=" --model $(printf %q "$model")"
   case $reviewer in
     proprietary) cmd=$(config_get reviewer_cmd_proprietary)
       if [ -n "$cmd" ]; then reviewer_cmds=("$cmd")
-      else for cmd in "${default_reviewer_cmds[@]}"; do command -v "${cmd%% *}" >/dev/null && reviewer_cmds+=("$cmd"); done; fi
+      else for cmd in "${default_reviewer_cmds[@]}"; do command -v "${cmd%% *}" >/dev/null && reviewer_cmds+=("$cmd$model"); done; fi
       [ ${#reviewer_cmds[@]} -gt 0 ] || {
         reviewer_problem="reviewer is proprietary, and none of claude or cursor-agent is on PATH"
         reviewer_fix="Install Claude Code or Cursor's agent CLI, or name a command: guard config set reviewer_cmd_proprietary '<command>'"
@@ -66,7 +78,8 @@ config_check() {
     reviewer:proprietary|reviewer:local|merge_policy:autonomous|merge_policy:semi-manual) ;;
     reviewer:*) echo "reviewer is proprietary or local, not '$2'" ;;
     merge_policy:*) echo "merge_policy is autonomous or semi-manual, not '$2'" ;;
-    review_rounds:*) [[ $2 =~ ^[1-9][0-9]*$ ]] || echo "review_rounds is a whole number of at least 1, not '$2'" ;;
+    reviewer_model:*) [[ $2 =~ ^[^[:space:]]+$ ]] || echo "reviewer_model is one model name without spaces, not '$2'" ;;
+    *) [[ $whole_keys != *" $1 "* || $2 =~ ^[1-9][0-9]*$ ]] || echo "$1 is a whole number of at least 1, not '$2'" ;;
   esac
   [[ $2 != *$'\n'* ]] || echo "$1 must fit on one line"
 }

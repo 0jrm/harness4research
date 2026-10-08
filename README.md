@@ -78,7 +78,7 @@ In the worktree:
 
 [docs/enforceable.md](docs/enforceable.md) gives the steps: protect the default branch, give agents a token without admin rights, and cap the cluster account. `guard doctor` checks each one.
 
-By default, an agent that finishes a change runs `guard review` and then `guard merge`, which merges only when the review, the checks, the ruleset, and the agent's credentials all allow it. To click every merge yourself, set `merge_policy: semi-manual` in `guard/budget.card` through a pull request. To review with a local model instead of `claude`, or `cursor-agent` when `claude` is missing or fails, name its command:
+By default, an agent that finishes a change opens a pull request and runs `guard ship`. Once a batch is due, `guard ship` reviews the open pull requests by tier and merges each one only when the review, the checks, the ruleset, and the agent's credentials all allow it. To click every merge yourself, set `merge_policy: semi-manual` in `guard/budget.card` through a pull request. To review with a local model instead of `claude`, or `cursor-agent` when `claude` is missing or fails, name its command:
 
 ```shell
 guard config set reviewer local
@@ -135,9 +135,12 @@ The walls are only as strong as the gap between your credentials and the agent's
 | `guard needs-you [add \| show \| ack \| done \| dismiss]` | any git repository | the queue of what only you can do, check, or approve, shared by every worktree in `<git common dir>/guard/needs-you.tsv`; `add` refuses a relative, missing, or temporary path |
 | `guard needs-you --remind` | any git repository | one line per open item, and nothing when the queue is empty |
 | `guard hooks install claude [--user \| --project] [--dry-run]` | your machine | add Claude Code hooks that show open needs-you items at session start and on every prompt; keeps your other settings |
-| `guard config [list \| get KEY \| set KEY VALUE]` | anywhere | your settings in `~/.config/guard/config`: `reviewer` (`proprietary` or `local`), `reviewer_cmd_proprietary`, `reviewer_cmd_local`, `review_rounds`, and `merge_policy` for repositories without a guard |
+| `guard config [list \| get KEY \| set KEY VALUE]` | anywhere | your settings in `~/.config/guard/config`: `reviewer` (`proprietary` or `local`), `reviewer_cmd_proprietary`, `reviewer_cmd_local`, `reviewer_model`, `review_rounds`, `review_small_lines`, `review_batch_max`, `ship_interval_hours`, and `merge_policy` for repositories without a guard |
 | `guard review <pr>` | the repository | runs the reviewer in a fresh worktree against the brief in `.git/guard/briefs/`; it may commit small fixes, which this command pushes; records the verdict in `.git/guard/reviews.tsv` and comments it on the pull request; exit 0 on approve |
 | `guard merge <pr>` | the repository | squash-merges at the reviewed head only when `merge_policy` is `autonomous`, the gh login is not an admin, a ruleset requires a pull request (and `guard-fence / fence` in a guarded project), the pull request is ready, every check passed, and the review approved; otherwise queues the merge for a human |
+| `guard review --batch` | the repository | sorts every open pull request into a tier and reviews the ones without a verdict at their head: records approve without a model, small ones share one read-only reviewer session, large ones get `guard review <pr>`, and new question cards and guard changes go to you as 🩺 items ([docs/autonomy.md](docs/autonomy.md#tiers-and-batches)) |
+| `guard merge --batch` | the repository | runs `guard merge` on every pull request approved at its head, lowest number first, and queues one item for the ones it refuses |
+| `guard ship [--now]` | the repository | `guard review --batch`, then `guard merge --batch`, once `review_batch_max` pull requests wait or the oldest is `ship_interval_hours` old; until then it refreshes the question card digest and says when the batch is due |
 | `guard/run preflight <run_dir> <job.sh> [sbatch options]` | cluster | submit or refuse |
 | `guard/run ripples <run_dir>` | cluster | warning signs |
 | `guard/run manifest <run_dir> "$0" "$@"` | inside a job | provenance record |
@@ -198,7 +201,7 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 
 ## Documentation
 
-- [docs/autonomy.md](docs/autonomy.md): how agents review and merge their own work, the needs-you queue, and where that protection stops
+- [docs/autonomy.md](docs/autonomy.md): how agents review and merge their own work, the tiers and batches of `guard ship`, the needs-you queue, and where that protection stops
 - [docs/evaluation.md](docs/evaluation.md): a proposal to measure whether the harness helps agents on local models
 - [docs/why.md](docs/why.md): the problem, alternatives, costs, and limits
 - [docs/enforceable.md](docs/enforceable.md): protecting the branch, weaker agent credentials, and a capped account, checked by `guard doctor`
@@ -211,7 +214,7 @@ If you use the pstack plugin in Claude Code, Codex, or Cursor, run `install.sh -
 - [docs/roadmap.md](docs/roadmap.md): the designed next steps, from field feedback
 - [skills/safe-autonomous-hpc-science/SKILL.md](skills/safe-autonomous-hpc-science/SKILL.md): what agents read for experiment work
 - [skills/present/SKILL.md](skills/present/SKILL.md): the `/present` block a person judges from the chat alone
-- [skills/review-and-merge/SKILL.md](skills/review-and-merge/SKILL.md): how an agent hands a finished change to `guard review` and `guard merge`
+- [skills/review-and-merge/SKILL.md](skills/review-and-merge/SKILL.md): how an agent hands a finished change to `guard ship`, or to `guard review` and `guard merge` when it is urgent
 - [skills/guard-onboard/SKILL.md](skills/guard-onboard/SKILL.md): the agent-led setup and recheck, from `guard doctor` to a confirmed plan and the human-only 🩺 items
 
 ## Requirements

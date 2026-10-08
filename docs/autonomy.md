@@ -1,6 +1,6 @@
 # How agents review and merge their own work
 
-An agent in a guarded repository can take a change from a finished branch to a merged pull request without a person in the loop. Three commands make that safe enough to allow: `guard review` gets a second model to judge the change, `guard merge` merges only when every condition holds, and `guard needs-you` queues whatever is left for a person. This page explains what each one checks, what agents never do, and where the protection stops.
+An agent in a guarded repository can take a change from a finished branch to a merged pull request without a person in the loop. Three commands make that safe enough to allow: `guard review` gets a second model to judge the change, `guard merge` merges only when every condition holds, and `guard needs-you` queues whatever is left for a person. `guard ship` runs the first two over every open pull request at once, a few times a day. This page explains what each one checks, how `guard ship` sorts pull requests into tiers, what agents never do, and where the protection stops.
 
 ## Two merge modes
 
@@ -22,10 +22,9 @@ The [review-and-merge skill](../skills/review-and-merge/SKILL.md) tells the agen
 1. Push the branch.
 2. Write a brief at `.git/guard/briefs/<branch>.md`, with `/` in the branch name replaced by `-`.
 3. Open the pull request with `gh pr create`, described in its own words.
-4. Run `guard review <pr>`.
-5. On approve, run `guard merge <pr>`.
+4. Run `guard ship`. It reviews and merges the open pull requests once the batch is due, and otherwise says when it is due.
 
-The agent never runs `gh pr merge` itself.
+For urgent work, the agent runs `guard review <pr>` and, on approve, `guard merge <pr>` instead. The agent never runs `gh pr merge` itself.
 
 ### The brief
 
@@ -76,12 +75,53 @@ Then it runs `gh pr merge <pr> --squash --match-head-commit <sha>`, so a push af
 
 Items 2 and 3 are why autonomous merge needs [the enforceable setup](enforceable.md). An agent that holds your admin login could bypass the ruleset, so `guard merge` refuses to merge with it.
 
+## Tiers and batches
+
+One model review costs between 1.5 and 3.5 million input tokens. In one project, 79 pull requests merged in a week, and 31 of them only added run records. `guard ship` spends a model review only where one helps. It sorts each open pull request into a tier by the paths it changes and its size, then reviews and merges them together, a few times a day.
+
+`pr_tier` in [lib/pr.sh](../lib/pr.sh) gives the tier from the diff between the base branch and the pull request's head. The first row that matches wins.
+
+| Tier | The pull request | What `guard review --batch` does |
+|---|---|---|
+| human | changes a path under `guard/` or `.github/workflows/`, or adds a `runs/<id>/question.card` | No review. A new question card joins one 🩺 item, `Approve question cards`, with a `gh pr merge` command for each card pull request. Any other change gets its own `Merge PR #<n>` item. |
+| records | changes only paths under `runs/<id>/`, and none of them is a `question.card` or a `report.md` | Approve without a model, recorded with reviewer `records-tier`. The fence and CI check the records. |
+| small | changes at most `review_small_lines` lines, added and deleted (default 200) | One reviewer session judges up to `review_batch_max` pull requests (default 8). |
+| large | anything else | `guard review <pr>`, with its rounds and fixes. |
+
+`runs/_template/` is a template, not a run, so its files count as ordinary code. A report carries science claims, so a pull request that changes a `report.md` gets a model review. A question card that already exists is frozen, and the fence fails a pull request that edits it.
+
+The small-tier session reads each pull request's brief and diff from one prompt, [lib/review-batch-prompt.md](../lib/review-batch-prompt.md). It runs in a checkout of the base branch, which it uses only to read code around a change. It runs no tests, commits nothing, and fixes nothing. It ends with one line per pull request:
+
+```text
+VERDICT #12: approve - adds the missing unit to the plot label as asked
+VERDICT #15: changes - renames the flag but leaves the old name in the README
+```
+
+A pull request without exactly one valid line gets `escalate`. Each verdict goes to `reviews.tsv` at that pull request's head, and `changes` and `escalate` queue an item as `guard review <pr>` does. A small pull request without a brief waits, because the brief carries your words.
+
+`guard review --batch` skips a pull request whose last verdict in `reviews.tsv` is at its current head, and it leaves out drafts and pull requests from forks. `guard merge --batch` runs the gate of `guard merge` on every pull request approved at its head, lowest number first. When the gate refuses some of them, one item, `Merge approved pull requests`, lists each with its first failing reason and its `gh pr merge` command.
+
+### When `guard ship` runs the batch
+
+A pull request waits for the batch when it is not in the human tier and has no verdict at its head, or has approve there and is not merged yet. `guard ship` runs `guard review --batch` and then `guard merge --batch` when either of these holds:
+
+- `review_batch_max` pull requests wait.
+- The oldest waiting pull request is `ship_interval_hours` old (default 24).
+
+Otherwise it refreshes the question card digest, which needs no model, and prints which pull requests wait and when the batch is due. `guard ship --now` runs the batch at once. After a batch, it prints the count per tier, each verdict, and each merged pull request with its merge commit.
+
+Run `guard ship` every few hours, by hand or from a scheduler, so the card digest stays current. A merge can wait up to `ship_interval_hours`. For a change that cannot wait, run `guard review <pr>` and `guard merge <pr>`.
+
+The digests update in place. `guard needs-you add --update` gives an open or acked item the new content under the same id and opens it again. When the content is the same, the item does not change. When no card pull request is open, `guard ship` marks the card digest done. When the gate refuses no approved pull request, `guard merge --batch` marks the merge digest done.
+
 ## Choose the reviewer
 
 `reviewer` in your user config picks the model that reviews.
 
 - `proprietary` is the default. `guard review` runs `reviewer_cmd_proprietary` if you set it. Otherwise it runs `claude`. When `claude` is not on your PATH or exits with an error, such as when it is not signed in, it runs `cursor-agent`.
 - `local` runs `reviewer_cmd_local`, a command you name that runs a local model. `guard review` refuses until you set it.
+
+`reviewer_model` names the model for the default `claude` and `cursor-agent` commands, which then get `--model <reviewer_model>`. A command you set in `reviewer_cmd_proprietary` or `reviewer_cmd_local` runs as written.
 
 For example, to review with a local model through Codex and Ollama:
 
