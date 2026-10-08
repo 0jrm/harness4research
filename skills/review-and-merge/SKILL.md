@@ -12,7 +12,7 @@ description: >-
 
 # Review and merge
 
-The agent that wrote a change does not review it and does not merge it by hand. `guard ship` reviews and merges the open pull requests together, a few times a day. It approves pull requests that change only run records without a model, reviews small ones several to a session, and runs `guard review` on large ones. Each model review judges the diff against the user's own words, with a different model from the one that wrote it. It merges only when the merge policy, the credentials, the branch ruleset, the checks and the review all allow it. A new question card or a change to `guard/` always goes to a human as a 🩺 item, and so does any merge the gate refuses.
+The agent that wrote a change does not review it and does not merge it by hand. `guard ship` reviews and merges the open pull requests together, a few times a day. It approves pull requests that change only run records without a model, reviews small ones several to a session, and runs `guard review` on large ones. Each model review judges the diff against the user's own words, in a fresh reviewer session that never saw the implementer's reasoning. It merges only when the merge policy, the credentials, the branch ruleset, the checks and the review all allow it. A new question card or a change to `guard/` always goes to a human as a 🩺 item, and so does any merge the gate refuses. A run's records ride one pull request from its `run/<run_id>` branch, as the safe-autonomous-hpc-science skill says, so never open a pull request for a single record.
 
 ## Steps
 

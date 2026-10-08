@@ -77,7 +77,7 @@ Items 2 and 3 are why autonomous merge needs [the enforceable setup](enforceable
 
 ## Tiers and batches
 
-One model review costs between 1.5 and 3.5 million input tokens. In one project, 79 pull requests merged in a week, and 31 of them only added run records. `guard ship` spends a model review only where one helps. It sorts each open pull request into a tier by the paths it changes and its size, then reviews and merges them together, a few times a day.
+A model review cost 1.5 to 3.5 million input tokens before the reviewer was trimmed, and costs about 300,000 to 400,000 now. In one project, 79 pull requests merged in a week, and 31 of them only added run records. `guard ship` spends a model review only where one helps. It sorts each open pull request into a tier by the paths it changes and its size, then reviews and merges them together, a few times a day.
 
 `pr_tier` in [lib/pr.sh](../lib/pr.sh) gives the tier from the diff between the base branch and the pull request's head. The first row that matches wins.
 

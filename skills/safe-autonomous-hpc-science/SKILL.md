@@ -65,6 +65,10 @@ This text describes guard schema 5. Once per session, read `git show origin/main
 5. Verify with a separate model, agent, or script that did not write the code. It reads artifacts and the question card, never the implementer's summary. `runs/<run_id>/checks/` holds the domain checks as executables that exit nonzero on failure, and exit 77 while their input does not exist yet, which ripples reports as UNCHECKED instead of a RIPPLE that would block the first submission. Write checks for NaN/Inf, conservation drift, physical bounds, output identical to input or baseline, and too-good metrics. `guard/watch.list` protects that directory from the implementer by default.
 6. Write the report, then decide continue, kill, or escalate from the card's kill criteria. Log the row.
 
+## Records travel together
+
+Work each run on its own branch, `run/<run_id>`, and keep code changes on other branches. Commit each record on the run branch as it happens: an `execution.tsv` row, an incident note, a log line. Preflight and ripples read the records from HEAD, so a record counts once it is committed there. Open one pull request for the run branch and keep pushing records to it. Never open a pull request for a single row. `guard ship` merges the run branch with its next batch, and a records-only branch needs no model review. After a merge, rebase the run branch on the default branch and open the next pull request when the next record lands. The question card and the report change the branch's tier: a new card waits for the human in the card digest, and the report gets a model review.
+
 ## Ripples pause spending, not work
 
 A RIPPLE stops new submissions. The agent keeps working on the cause within the verification reserve. It diagnoses at the small rung, reads logs, and writes `runs/<run_id>/incidents/<n>.md` with one `job: <id>` line per job it covers. This matches Autonomous run's rule that mid-run discoveries are the agent's to handle. The ripple that matters most is the agent's own diff touching a guard, a watched path, or the question card. An agent that hits a limit reaches for the limit before the cause, so treat that ripple as a stop.
