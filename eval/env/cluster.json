@@ -1,0 +1,9 @@
+{
+  "cluster": "hpc",
+  "partition": "batch",
+  "nodes": 2,
+  "cores_per_node": 4,
+  "time_scale": 60,
+  "default_account": "gom",
+  "accounts": {"gom": {"cap_cpu_minutes": null}}
+}
