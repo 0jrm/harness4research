@@ -20,7 +20,7 @@ case $cmd in
   version)
     # shellcheck source=lib/version.sh
     . "$here/lib/version.sh"
-    echo "harness4research $(harness_release) schema $h_schema at $here, pstack $(git -C "$here/vendor/pstack" rev-parse --short HEAD 2>/dev/null || echo missing)"
+    echo "harness4research $(harness_release) schema $h_schema at $here, pstack $(git -C "$here/vendor/cursor-plugins" rev-parse --short HEAD 2>/dev/null || echo not-linked)"
     top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
     project_version "$top"
     [ $p_guarded = 1 ] || { echo "$top has no guard on $p_base"; exit 0; }

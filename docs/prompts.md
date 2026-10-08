@@ -1,6 +1,6 @@
 # Prompts
 
-Paste these into any agent. Each one is self-contained. Where a prompt says "poteto-mode", use `/pstack:poteto-mode` in Claude Code, `$poteto-mode` in Codex, or `/poteto-mode` in Cursor. Each prompt also works without pstack.
+Paste these into any agent. Each one is self-contained. Where a prompt says "poteto-mode", use `/poteto-mode` in Claude Code or Cursor, or `$poteto-mode` in Codex. Each prompt also works without pstack.
 
 ## Poison pass
 
