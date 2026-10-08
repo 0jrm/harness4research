@@ -28,11 +28,17 @@ whole() {
   [[ $v =~ ^[[:space:]]*([0-9]+)[[:space:]]*$ ]] || fail "budget card '$1' must be a whole number: $v; a human fixes it in guard/budget.card on the protected branch"
   echo "${BASH_REMATCH[1]}"
 }
+# to_min <T>: Slurm time syntax (M, M:S, H:M:S, D-H, D-H:M, D-H:M:S) to minutes, seconds rounded up; prints nothing
+# when malformed, such as squeue's UNLIMITED. Two fields mean M:S, and H:M only after a day count.
 to_min() {
-  local t=$1 d=0 h=0 m=0 s=0 a b c
-  [[ $t == *-* ]] && { d=${t%%-*}; t=${t#*-}; }
+  local t=$1 d=0 days=0 h=0 m=0 s=0 a b c
+  [[ $t == *-* ]] && { days=1; d=${t%%-*}; t=${t#*-}; }
+  [[ $d =~ ^[0-9]+$ && $t =~ ^[0-9]+(:[0-9]+){0,2}$ ]] || return 0
   IFS=: read -r a b c <<<"$t"
-  if [ -n "${c:-}" ]; then h=$a; m=$b; s=$c; elif [ -n "${b:-}" ]; then h=$a; m=$b; else m=$a; fi
+  if [ -n "${c:-}" ]; then h=$a; m=$b; s=$c
+  elif [ -n "${b:-}" ]; then if [ $days = 1 ]; then h=$a; m=$b; else m=$a; s=$b; fi
+  elif [ $days = 1 ]; then h=$a
+  else m=$a; fi
   echo $(( 10#$d*1440 + 10#$h*60 + 10#$m + (10#$s > 0) ))
 }
 opt() {
@@ -86,6 +92,7 @@ wall=$(opt time "$@"); nodes=$(opt nodes "$@"); array=$(opt array "$@")
 [ -n "$wall" ] || fail "state --time=... explicitly"
 [[ $nodes =~ ^[0-9]+$ ]] || fail "state --nodes=N explicitly as one integer (got '${nodes}')"
 wmin=$(to_min "$wall"); n=$(tasks "$array")
+[ -n "$wmin" ] || fail "--time=$wall is not a Slurm time (M, M:S, H:M:S, D-H, D-H:M, D-H:M:S)"
 if [ $explore = 1 ]; then
   max_nodes=$(get explore_max_nodes); max_nodes=${max_nodes:-1}
   max_wall=$(get explore_max_walltime_minutes); max_wall=${max_wall:-60}

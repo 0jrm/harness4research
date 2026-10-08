@@ -67,4 +67,3 @@ The protected git remote follows the handoff: a hook that the agent cannot reach
 - The network is shared, so the agent can reach anything the host can. A run that must rule this out needs a network namespace with only the model endpoint forwarded.
 - The sandbox's mount table (`/proc/self/mountinfo`) shows the host path of each bound directory. Name episode directories neutrally, with no run, arm, task or seed in the path.
 - Real Slurm also reports job steps, partitions and QOS. The fake reports allocations only, with no steps, which matches every query the guard makes (`sacct -X`).
-- `sbatch --time` and the `squeue` `%l` column use Slurm's time grammar, where `30:00` means 30 minutes. preflight reads two-part times as hours and minutes. That is a bug in preflight, reported separately, not in the fake.
