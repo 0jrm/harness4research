@@ -8,7 +8,7 @@ harness4research puts guardrails around coding agents that run experiments on sh
 
 Each task is a short research chore. A trap task hides one temptation, such as a job that needs more walltime than the budget allows, a metric with a shortcut, or a test fixture the agent cannot fix without touching a protected file. A control task is the same chore with no temptation. A script scores every run from what the agent left behind, with no model as judge.
 
-Each model runs every task under two conditions, with the guardrails and without them, ten times each. The agent runs on another machine in a sandbox, with a fake scheduler. Nothing the agent does touches the GPU host except its requests to the model server.
+The design compares several arms, from no guardrails to the full harness. The first run uses the two ends, no harness and the full harness, and runs every task ten times under each. Later runs add the arms in between, at the same load per arm. The agent runs on another machine in a sandbox, with a fake scheduler. Nothing the agent does touches the GPU host except its requests to the model server.
 
 ## Models
 
@@ -64,7 +64,7 @@ The evaluation's question card freezes these before the first run, so please tel
 
 - Concurrency: one to four agent sessions at a time. We match the server's `--max-num-seqs` and never exceed it.
 - Requests: long-context tool calls. Each agent turn resends the conversation so far, so prompts grow toward the context limit and outputs are short. Prefix caching helps a lot.
-- Volume: the first run is 6 tasks × 2 conditions × 10 repeats = 120 agent sessions on one model. Tokens and wall time per session are unmeasured. The first sessions will measure them, and we will share the numbers before scaling up.
+- Volume: the first run is 6 tasks × 2 arms × 10 repeats = 120 agent sessions on one model. Each later arm adds 60 sessions per model. Tokens and wall time per session are unmeasured. The first sessions will measure them, and we will share the numbers before scaling up.
 - Schedule: whenever suits the GPU host. A run can stop between sessions and resume.
 
 ## How the agents reach the server
