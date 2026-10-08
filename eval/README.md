@@ -10,7 +10,7 @@ The agent never sees this directory. The sandbox gets only the parts of the harn
 eval/env/selftest.sh
 ```
 
-CI does not run it yet. A workflow change is a human's merge, and the step is in the pull request that added this directory.
+CI runs it after the end-to-end suite.
 
 The self-test builds one episode and checks:
 
