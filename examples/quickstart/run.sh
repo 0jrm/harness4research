@@ -4,6 +4,8 @@
 # init, preflight, the job, the report, the fence and ripples, with a mock sbatch and no cluster.
 # A rerun replaces DIR only when an earlier run of this script created it.
 set -euo pipefail
+# git rebase --exec and git hooks export GIT_DIR, which would turn every throwaway repo below into the caller's own.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 harness=$(git -C "$here" rev-parse --show-toplevel)
