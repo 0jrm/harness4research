@@ -421,7 +421,7 @@ cmd_checks() {
     if m=$(timeout 10 tail -c 1048576 "$log" 2>/dev/null | grep -E -o -m1 "$LOG_ERRORS"); then ent="$ent ${live_ids[i]}:${m// /_}"
     elif [ ! -r "$log" ]; then ent="$ent ${live_ids[i]}:log-unreadable"; fi
   done
-  if [ -n "$ent" ]; then say ENTRIES host-log-errors "${ent# }" "read each log and diagnose, then commit $rd/incidents/<n>.md with a job: <id> line for each"; else say PASS host-log-errors "$live running log(s) scanned"; fi
+  if [ -n "$ent" ]; then say ENTRIES host-log-errors "${ent# }" "read each log and diagnose, then merge $rd/incidents/<n>.md with a job: <id> line and the root cause for each"; else say PASS host-log-errors "$live running log(s) scanned"; fi
 }
 
 # strays: this user's processes holding a GPU compute context or more than half of host_max_mem_gb of RssAnon, minus

@@ -47,10 +47,11 @@ if [ -n "$launch" ] && launched --here; then
   sacct() { [ -z "$(type -P sacct)" ] || command sacct "$@"; [[ $* != *JobName* ]] || launched --sacct; }
 fi
 nosacct="sacct not found on PATH on this host; run ripples on the cluster login node to check"
-# A job is handled once a committed $run_dir/incidents/*.md has the line `job: <id>`.
+# A job is handled once $run_dir/incidents/*.md on the protected branch has the line `job: <id>`. Reading HEAD would
+# let an agent clear its own ripple with a bare job: line that nobody reviewed.
 declare -A incident=() acked=()
 while IFS=: read -r _ path line; do id=${line#job:}; incident[${id// /}]=incidents/$(basename "$path")
-done < <(git grep -E '^job: *[0-9A-Za-z][0-9A-Za-z_.-]* *$' HEAD -- "$run_dir/incidents/" 2>/dev/null)
+done < <(git grep -E '^job: *[0-9A-Za-z][0-9A-Za-z_.-]* *$' "$base" -- "$run_dir/incidents/" 2>/dev/null)
 # A committed execution.tsv restart or resume row citing a job handles it the same way.
 [ -z "$launch" ] || while read -r id ref; do [ -n "${incident[$id]+x}" ] || incident[$id]=$ref; done < <(launched --handled "$run_dir")
 sort_out() {  # sort_out <check> "<id>:<detail> ..." <next step>: HANDLED for entries with an incident, RIPPLE for the rest
@@ -72,7 +73,7 @@ else
   [ -n "$rows" ] || blind="sacct lists no job named $run_id on account $acct since $start from this host, so there is nothing to judge; if the run has submitted jobs, run ripples on the cluster login node"
 fi
 if [ -z "$blind" ]; then
-  incident_step="diagnose, then commit $run_dir/incidents/<n>.md with a job: <id> line for each"
+  incident_step="diagnose, then merge $run_dir/incidents/<n>.md with a job: <id> line and the root cause for each, since ripples reads incidents from $base"
   sort_out job-states "$(awk -F'|' '$3 ~ /TIMEOUT|OUT_OF_ME|NODE_FAIL|FAILED|PREEMPTED/ {printf "%s:%s ", $1, $3}' <<<"$rows")" \
     "$incident_step; a resource stop of a launch continues with an execution.tsv restart or resume row instead"
   sort_out walltime-headroom "$(awk -F'|' '$5>0 && $4 > 0.8*$5*60 {printf "%s:%d%% ", $1, 100*$4/($5*60)}' <<<"$rows")" "$incident_step"
@@ -81,7 +82,7 @@ if [ -z "$blind" ]; then
     if [ -n "${incident[$id]+x}" ]; then acked[$id]=1; else nfail=$((nfail+1)); fi
   done
   if [ "$nfail" -le 1 ]; then say PASS retries "$nfail not completed without an incident"
-  else say RIPPLE retries "$nfail not completed without an incident; diagnose, then commit one in $run_dir/incidents/ for each"; fi
+  else say RIPPLE retries "$nfail not completed without an incident; diagnose, then merge one in $run_dir/incidents/ for each"; fi
   cap=$(get max_handled_failures); [[ $cap =~ ^[0-9]+$ ]] || cap=2
   if [ ${#acked[@]} -gt "$cap" ]; then say RIPPLE handled-failures "${#acked[@]} handled, over max_handled_failures=$cap; the next call is the human's"
   else say PASS handled-failures "${#acked[@]} of $cap"; fi

@@ -156,7 +156,7 @@ The walls are only as strong as the gap between your credentials and the agent's
 A ripple is a warning sign about one run. `guard/run ripples <run_dir>` prints one line per check, each with a status:
 
 - `RIPPLE`: something is wrong, such as a failed job, a question card edited after it froze, a guard file changed on the branch, or spend above 80% of the budget. The command exits 1, and preflight refuses new submissions until the cause is handled.
-- `HANDLED`: a failure that an incident write-up in `runs/<id>/incidents/`, or a `restart` or `resume` row in `runs/<id>/execution.tsv`, explains.
+- `HANDLED`: a failure that an incident write-up in `runs/<id>/incidents/` on the protected branch, or a `restart` or `resume` row in `runs/<id>/execution.tsv`, explains. An incident counts once its pull request merges, and a model reviews that pull request.
 - `UNCHECKED`: the check could not see its input from this host, for example `sacct` off the cluster, a `sacct` that lists no job for the run, or a `quota_pct_cmd` whose path is not mounted here. An unchecked line is not a pass.
 - `PASS`: the check saw its input and found nothing.
 
@@ -228,6 +228,8 @@ tests/run.sh
 ```
 
 The suite builds throwaway repositories, a fake Slurm, and a fake `gh`, and checks each refusal and warning.
+
+Run as root (uid 0), for example in a container, the suite skips the one case that needs file permissions to refuse a write, and its last line counts it as skipped.
 
 ## Uninstall
 

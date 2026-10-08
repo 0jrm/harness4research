@@ -11,6 +11,7 @@ Your working directory is a checkout of the pull request's head.
 1. Read the request. Work out what a user who typed those words expects to change.
 2. Read the diff. Check that it does all of that, and nothing the request did not ask for.
    If it adds or changes a line in `FACTS.md`, open the evidence that line cites (a path, a commit, a job id, or a command you can rerun) and confirm it says what the line claims. A fact whose evidence you cannot confirm means `changes`.
+   If it adds or changes an incident note under `runs/<id>/incidents/`, check that the note names each job, states a root cause, and cites evidence for it, such as a log path and line or a manifest. A merged note turns that job's ripples into HANDLED lines, so a note that only lists `job:` lines means `changes`.
 3. Do not run the whole test suite. CI runs it on every pull request, and `guard merge` refuses to merge until it passes. Run one targeted test only when the diff raises a doubt that the test settles, and name the doubt.
 4. Fix a small defect if you find one, then rerun the targeted test that covers it.
 5. Give your verdict.
