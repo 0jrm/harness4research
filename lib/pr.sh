@@ -23,7 +23,8 @@ queue() {
 
 # pr_tier <base> <head>: prints how guard review --batch treats the change from base to head.
 #   human    a path under guard/ or .github/workflows/, or a new runs/<id>/question.card. No model reviews it.
-#   records  every path is under runs/<id>/, and none is a question card or a report.
+#   records  every path is under runs/<id>/, and none is a question card, a report, or an incident note, since an
+#            incident clears a ripple once it merges.
 #   small    at most review_small_lines added and deleted lines.
 #   large    anything else.
 pr_tier() {
@@ -32,7 +33,7 @@ pr_tier() {
       if (path ~ /^(guard|\.github\/workflows)\//) human = 1
       run = path ~ /^runs\/[^\/]+\// && path !~ /^runs\/_template\//
       if (status == "A" && run && path ~ /^runs\/[^\/]+\/question\.card$/) human = 1
-      if (!run || path ~ /(^|\/)(question\.card|report\.md)$/) other = 1
+      if (!run || path ~ /(^|\/)(question\.card|report\.md)$/ || path ~ /^runs\/[^\/]+\/incidents\//) other = 1
       next }
     NF >= 3 { lines += ($1 == "-" ? 0 : $1) + ($2 == "-" ? 0 : $2) }
     END { print human ? "human" : (paths && !other) ? "records" : lines <= small ? "small" : "large" }'

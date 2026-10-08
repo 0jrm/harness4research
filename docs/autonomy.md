@@ -84,7 +84,7 @@ A model review cost 1.5 to 3.5 million input tokens before the reviewer was trim
 | Tier | The pull request | What `guard review --batch` does |
 |---|---|---|
 | human | changes a path under `guard/` or `.github/workflows/`, or adds a `runs/<id>/question.card` | No review. A new question card joins one 🩺 item, `Approve question cards`, with a `gh pr merge` command for each card pull request. Any other change gets its own `Merge PR #<n>` item. |
-| records | changes only paths under `runs/<id>/`, and none of them is a `question.card` or a `report.md` | Approve without a model, recorded with reviewer `records-tier`. The fence and CI check the records. |
+| records | changes only paths under `runs/<id>/`, and none of them is a `question.card`, a `report.md`, or an incident note under `incidents/` | Approve without a model, recorded with reviewer `records-tier`. The fence and CI check the records. |
 | small | changes at most `review_small_lines` lines, added and deleted (default 200) | One reviewer session judges up to `review_batch_max` pull requests (default 8). |
 | large | anything else | `guard review <pr>`, with its rounds and fixes. |
 

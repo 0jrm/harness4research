@@ -17,6 +17,7 @@ For each pull request, in order:
 1. Read the request. Work out what a user who typed those words expects to change.
 2. Read the diff. Check that it does all of that, and nothing the request did not ask for.
    If it adds or changes a line in `FACTS.md`, open the evidence that line cites (a path, a commit, a job id, or a command you can rerun) and confirm it says what the line claims. A fact whose evidence you cannot confirm means `changes`.
+   If it adds or changes an incident note under `runs/<id>/incidents/`, check that the note names each job, states a root cause, and cites evidence for it, such as a log path and line or a manifest. A merged note turns that job's ripples into HANDLED lines, so a note that only lists `job:` lines means `changes`.
 3. Run no tests. CI runs the suite on every pull request, and `guard merge` refuses to merge until it passes. The checkout holds the base branch, so a test you ran here would test the wrong code. If only a test can settle a doubt, give `escalate` and name the doubt.
 4. Give its verdict.
 

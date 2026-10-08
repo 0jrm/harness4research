@@ -19,13 +19,17 @@ guard=$here/bin/guard
 tmp=$(mktemp -d); cache=${XDG_CACHE_HOME:-$HOME/.cache}; mkdir -p "$cache"
 keep=$(mktemp -d "$cache/guard-tests.XXXXXX"); trap 'rm -rf "$tmp" "$keep"' EXIT
 export PATH="$here/tests/mock-bin:$PATH" XDG_CONFIG_HOME=$tmp/xdg USER=tester GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
-pass=0; fail=0
+pass=0; fail=0; skipped=0
 expect() {  # expect <name> <want: ok|fail> <grep pattern or -> -- command...
   local name=$1 want=$2 pat=$3; shift 4
   local out rc; out=$("$@" 2>&1); rc=$?
   local got=ok; [ $rc -ne 0 ] && got=fail
   if [ "$got" = "$want" ] && { [ "$pat" = - ] || grep -q -E -- "$pat" <<<"$out"; }; then pass=$((pass+1)); echo "ok   $name"
   else fail=$((fail+1)); echo "FAIL $name (exit $rc, wanted $want, pattern '$pat')"; sed 's/^/     /' <<<"$out" | tail -8; fi
+}
+skip() { skipped=$((skipped+1)); echo "skip $1 ($2)"; }  # skip <name> <reason>: a case this host cannot run
+merged() {  # merged <command...>: runs it with the protected branch at HEAD, as if HEAD's pull request had merged
+  git push -q -f origin HEAD:refs/heads/merged && env HPC_GUARD_REF=origin/merged "$@"
 }
 path_without() {  # path_without <cmd>: prints a PATH like this one on which <cmd> is not found
   local cmd=$1 shadow=$tmp/no-$1 out="" d f IFS=:
@@ -170,11 +174,12 @@ echo "default_run_core_hours: 10" >> guard/budget.card; git commit -q -am "defau
 expect preflight-default-run-budget fail 'this job 64 core-h exceeds budget_core_hours=10' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-sketch job.sh --nodes=1 --time=00:30:00
 git reset -q --hard HEAD~1
 printf '100|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
-expect preflight-refuses-on-ripple fail '^PREFLIGHT FAIL: ripples reports job-states 100:FAILED \(diagnose, then commit runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line for each; a resource stop of a launch continues with an execution.tsv restart or resume row instead\); fix the cause' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
+expect preflight-refuses-on-ripple fail '^PREFLIGHT FAIL: ripples reports job-states 100:FAILED \(diagnose, then merge runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line and the root cause for each, since ripples reads incidents from origin/main; a resource stop of a launch continues with an execution.tsv restart or resume row instead\); fix the cause' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
 expect ripples-single-entry fail '^RIPPLE	job-states	100:FAILED \(diagnose' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run ripples "$R"
 expect preflight-reserve-skips-ripples ok 'SBATCH .*--job-name=2026-09-29-demo' -- env MOCK_SACCT_ROWS="$tmp/rows" HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
 mkdir -p "$R/incidents"; printf '# Incident 0\njob: 100\n' > "$R/incidents/0.md"; git add -A; git commit -q -m "run: incident 0"
-expect preflight-handled-ripple-passes ok 'SBATCH .*--job-name=2026-09-29-demo' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
+expect preflight-unmerged-incident fail 'ripples reports job-states 100:FAILED' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
+expect preflight-handled-ripple-passes ok 'SBATCH .*--job-name=2026-09-29-demo' -- merged env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
 printf '#!/usr/bin/env bash\nexit 3\n' > guard/bin/ripples.sh; git commit -q -am "ripples errors"
 expect preflight-ripples-error-fails-closed fail '^PREFLIGHT FAIL: ripples could not run \(exit 3\); run guard/run ripples runs/2026-09-29-demo to see why$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
@@ -184,7 +189,7 @@ echo "== ripples"
 mkdir -p "$R/checks"; printf '#!/bin/bash\necho "nan count 3"; exit 1\n' > "$R/checks/nan.sh"; chmod +x "$R/checks/nan.sh"
 printf '100|2026-09-29-demo|TIMEOUT|14400|240\n101|2026-09-29-demo|COMPLETED|13000|240\n102|2026-09-29-demo|FAILED|10|240\n103|other|FAILED|1|1\n' > "$tmp/rows"
 export MOCK_SACCT_ROWS=$tmp/rows
-expect ripples-states fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED \(diagnose, then commit runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line for each; a resource stop of a launch continues with an execution.tsv restart or resume row instead\)$' -- guard/run ripples "$R"
+expect ripples-states fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED \(diagnose, then merge runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line and the root cause for each, since ripples reads incidents from origin/main; a resource stop of a launch continues with an execution.tsv restart or resume row instead\)$' -- guard/run ripples "$R"
 expect ripples-walltime fail 'RIPPLE.walltime-headroom.100:100% 101:90%' -- guard/run ripples "$R"
 expect ripples-check fail 'RIPPLE.check:nan.sh.nan count 3' -- guard/run ripples "$R"
 printf '#!/bin/bash\necho "no metrics.csv yet"; exit 77\n' > "$R/checks/later.sh"; chmod +x "$R/checks/later.sh"
@@ -232,13 +237,14 @@ expect ripples-incident-exact-id fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED'
 printf '# Incident 1\njob: 100\n' > "$R/incidents/1.md"; printf '# Incident 2\njob: 102\n' > "$R/incidents/2.md"
 expect ripples-incident-uncommitted fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED' -- guard/run ripples "$R"
 git add -A; git commit -q -m "run: incidents 1 and 2"
-expect ripples-handled-states ok 'HANDLED.job-states.100:TIMEOUT->incidents/1.md 102:FAILED->incidents/2.md' -- guard/run ripples "$R"
-expect ripples-handled-walltime ok 'HANDLED.walltime-headroom.100:100%->incidents/1.md' -- guard/run ripples "$R"
-expect ripples-handled-retries ok 'PASS.retries.0 not completed' -- guard/run ripples "$R"
-expect ripples-handled-count ok 'PASS.handled-failures.2 of 2' -- guard/run ripples "$R"
+expect ripples-incident-unmerged fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED' -- guard/run ripples "$R"
+expect ripples-handled-states ok 'HANDLED.job-states.100:TIMEOUT->incidents/1.md 102:FAILED->incidents/2.md' -- merged guard/run ripples "$R"
+expect ripples-handled-walltime ok 'HANDLED.walltime-headroom.100:100%->incidents/1.md' -- merged guard/run ripples "$R"
+expect ripples-handled-retries ok 'PASS.retries.0 not completed' -- merged guard/run ripples "$R"
+expect ripples-handled-count ok 'PASS.handled-failures.2 of 2' -- merged guard/run ripples "$R"
 echo '103|2026-09-29-demo|FAILED|10|240' >> "$tmp/rows"; printf '# Incident 3\njob: 103\n' > "$R/incidents/3.md"
 git add -A; git commit -q -m "run: incident 3"
-expect ripples-handled-cap fail 'RIPPLE.handled-failures.3 handled, over max_handled_failures=2' -- guard/run ripples "$R"
+expect ripples-handled-cap fail 'RIPPLE.handled-failures.3 handled, over max_handled_failures=2' -- merged guard/run ripples "$R"
 git reset -q --hard "$pre"
 unset MOCK_SACCT_ROWS
 git switch -q -c marker; printf '#!/usr/bin/env bash\necho ran >> %s\n' "$tmp/marker" > guard/bin/launch.sh; git commit -q -am "launch that leaves a marker"
@@ -406,7 +412,7 @@ expect ripples-alive-gone ok 'skynet-20260901T050000Z:LAUNCH_FAILED' -- echo "$r
 expect ripples-remote-unended ok 'UNCHECKED	host-supervision	1 launch\(es\) unended on gpu2; run ripples there' -- echo "$rip"
 mkdir -p "$F/incidents"; printf '# Incident 1\njob: skynet-20260901T010000Z\n' > "$F/incidents/1.md"; printf '# Incident 2\njob: ../x\n' > "$F/incidents/2.md"
 git add -A; git commit -q -m "run: incidents"
-expect ripples-incident-alnum fail 'HANDLED	job-states	skynet-20260901T010000Z:OUT_OF_MEMORY->incidents/1.md' -- env PATH="$(path_without sacct)" guard/run ripples "$F"
+expect ripples-incident-alnum fail 'HANDLED	job-states	skynet-20260901T010000Z:OUT_OF_MEMORY->incidents/1.md' -- merged env PATH="$(path_without sacct)" guard/run ripples "$F"
 git reset -q --hard HEAD~1
 sleep 60 & stray_pid=$!
 printf 'GPU-aaaa, %s\n' "$stray_pid" > "$tmp/apps"
@@ -1329,6 +1335,7 @@ expect tier-records-deletion ok '^records$' -- tier_of 'git rm -q runs/r9/notes.
 expect tier-template-not-records ok '^small$' -- tier_of 'echo more >> runs/_template/report.md'
 expect tier-template-card-not-human ok '^small$' -- tier_of 'echo q > runs/_template/question.card'
 expect tier-report-not-records ok '^small$' -- tier_of 'mkdir -p runs/r1; echo "## Result" > runs/r1/report.md; echo 1 > runs/r1/a.csv'
+expect tier-incident-not-records ok '^small$' -- tier_of 'mkdir -p runs/r1/incidents; echo "job: 100" > runs/r1/incidents/1.md'
 expect tier-card-added ok '^human$' -- tier_of 'mkdir -p runs/r2; echo q > runs/r2/question.card'
 expect tier-card-modified ok '^small$' -- tier_of 'echo edit >> runs/r9/question.card'
 expect tier-guard ok '^human$' -- tier_of 'echo more >> guard/budget.card'
@@ -1849,9 +1856,10 @@ expect hooks-bad-json-untouched ok '^\{"hooks": $' -- cat "$tmp/bad-home/.claude
 echo '{"hooks": {"SessionStart": [{"hooks": null}]}}' > "$tmp/bad-home/.claude/settings.json"
 expect hooks-refuse-bad-shape fail 'does not have the shape Claude Code reads for hooks' -- env HOME="$tmp/bad-home" "$guard" hooks install claude
 mkdir -p "$tmp/locked-home/.claude"; chmod 555 "$tmp/locked-home/.claude"
-expect hooks-unwritable fail "^guard hooks: cannot write $tmp/locked-home/.claude/settings.json: Permission denied$" -- env HOME="$tmp/locked-home" "$guard" hooks install claude
+if [ "$(id -u)" -eq 0 ]; then skip hooks-unwritable "root writes through a read-only directory"
+else expect hooks-unwritable fail "^guard hooks: cannot write $tmp/locked-home/.claude/settings.json: Permission denied$" -- env HOME="$tmp/locked-home" "$guard" hooks install claude; fi
 chmod 755 "$tmp/locked-home/.claude"
 expect hooks-unknown-agent fail 'invalid choice' -- "$guard" hooks install codex
 
-echo; echo "$pass passed, $fail failed"
+echo; echo "$pass passed, $fail failed$([ "$skipped" -eq 0 ] || echo ", $skipped skipped")"
 [ $fail -eq 0 ]
