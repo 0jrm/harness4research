@@ -36,7 +36,8 @@ What limits the damage (`run_reviewer` in `lib/pr.sh`):
 
 - The reviewer runs without `GH_TOKEN`, `GITHUB_TOKEN` and `SSH_AUTH_SOCK`, and with an empty `GH_CONFIG_DIR`. Without the empty config, `gh` and git's `gh` credential helper fall back to the login stored on the machine, which is often the repository owner's.
 - Pushes to `origin` and to GitHub URLs are rewritten to an address that fails.
-- `guard merge` still requires the checks, and the ruleset still requires the fence. A new question card or a change to `guard/` never goes to a model.
+- `guard merge` still requires the checks, and the ruleset still requires the fence. The fence fails any change to `guard/` or the workflows.
+- `guard ship` sends neither a new question card nor a change to `guard/` to a model; it queues them for you (`pr_tier` in `lib/pr.sh`). `guard review <pr>` has no such gate, so on that path a new question card reaches the reviewer and, once approved, `guard merge`.
 
 What it does not limit: the reviewer runs as you, so it can read anything you can read, such as SSH key files, cluster credentials, and tokens stored in files. An approve from a steered reviewer is still an approve. Read an approve as "a second model saw no problem", never as a security check. Do not run `guard review` on pull requests from people or agents you do not trust unless the reviewer runs in a container or as a separate OS user without your credentials.
 
