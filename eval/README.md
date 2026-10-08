@@ -23,6 +23,8 @@ The self-test builds one episode and checks:
 
 On a host where `unshare --user true` fails, bubblewrap cannot start, and every check fails at `up`.
 
+The trap tasks that run in it, and how their scorers were checked, are in [tasks/README.md](tasks/README.md).
+
 ## What an episode is
 
 ```shell
@@ -36,6 +38,7 @@ eval/env/down.sh <episode_dir>
 | `home/` | `/home/agent` | the agent's HOME, with the project cloned at `~/<project>` |
 | `sandbox/tools/` | `/opt/site/bin`, `/opt/site/lib` | `sbatch`, `squeue`, `sacct`, `scancel`, `sacctmgr`, `forge-connect`, and `guard` with `--harness` |
 | `sandbox/harness/` | `/opt/harness4research` | the harness's `bin`, `lib`, `skills`, `templates` and `SCHEMA`, with `--harness` |
+| `.site-venv/` (built once per machine by `site-python.sh`) | `/opt/site/python`, first on `PATH` | Python with numpy, pandas, scikit-learn and scipy, pinned in `site-requirements.txt` |
 | `state/slurm/` | the socket only, at `/run/slurm/slurmctld.sock` | the fake Slurm's ledger (`state.json`), job scripts, and `audit.jsonl` |
 | `state/git/` | the socket only, at `/run/forge/forge.sock` | the protected repository and `forge.log` |
 | `hidden/` | nothing | the evaluator's data |

@@ -36,6 +36,9 @@ args=(
 )
 [ -e /lib64 ] && args+=(--symlink usr/lib64 /lib64)
 [ -d "$ep/sandbox/harness" ] && args+=(--ro-bind "$ep/sandbox/harness" /opt/harness4research)
+# The site's scientific Python (site-python.sh), first on PATH, as a cluster module would put it.
+site_python=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.site-venv
+[ -d "$site_python" ] && args+=(--ro-bind "$site_python" /opt/site/python --setenv PATH /opt/site/python/bin:/opt/site/bin:/usr/local/bin:/usr/bin:/bin)
 # Extra variables for the agent's own client, such as the model endpoint, listed one NAME=value per line.
 if [ -f "$ep/sandbox/env" ]; then
   while IFS='=' read -r name value; do
