@@ -19,8 +19,14 @@ jobs:
       - name: Install shellcheck, PyYAML and jq
         run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck python3-yaml jq
       - name: Lint
-        run: shellcheck -S warning bin/guard install.sh lib/*.sh templates/guard/run templates/guard/bin/*.sh tests/run.sh tests/atlas-fixture.sh tests/mock-bin/* examples/quickstart/run.sh examples/quickstart/job.sh examples/quickstart/checks/*
+        run: shellcheck -S warning bin/guard install.sh lib/*.sh templates/guard/run templates/guard/bin/*.sh tests/run.sh tests/atlas-fixture.sh tests/mock-bin/* examples/quickstart/run.sh examples/quickstart/job.sh examples/quickstart/checks/* eval/env/*.sh
       - name: Compile Python
-        run: python3 -m py_compile lib/*.py
+        run: python3 -m py_compile lib/*.py eval/env/*.py
       - name: End-to-end tests
         run: tests/run.sh
+      - name: Evaluation environment self-test
+        # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, and bubblewrap needs them.
+        run: |
+          sudo apt-get install -y -q bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          eval/env/selftest.sh
