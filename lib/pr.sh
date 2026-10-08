@@ -47,11 +47,14 @@ added_cards() {
 
 # run_reviewer <worktree> <log> <ask> <label>: runs each of reviewer_cmds in the worktree until one exits 0, with its
 # reply in <log>. Between tries it resets the worktree to the commit it started at. The reviewer runs without GH_TOKEN,
-# GITHUB_TOKEN or SSH_AUTH_SOCK, and its pushes to origin or anywhere on GitHub fail; pushes the project's own tests
+# GITHUB_TOKEN or SSH_AUTH_SOCK, and with an empty GH_CONFIG_DIR, because without a token gh and git's gh credential
+# helper fall back to the login stored on this machine, which is often the repository owner's. Its pushes to origin or
+# anywhere on GitHub fail; pushes the project's own tests
 # make to local repositories still work. Sets candidate, the command that ran last, rc, its exit status, and err, its
 # last line.
 run_reviewer() {
-  local wt=$1 log=$2 ask=$3 label=$4 before i n prefix no_push=(GIT_CONFIG_COUNT=4)
+  local wt=$1 log=$2 ask=$3 label=$4 before i n prefix no_push=(GIT_CONFIG_COUNT=4) ghdir
+  ghdir=$(mktemp -d)
   for prefix in "$(git -C "$top" remote get-url origin)" https://github.com/ git@github.com: ssh://git@github.com/; do
     n=$(( (${#no_push[@]} - 1) / 2 ))
     no_push+=("GIT_CONFIG_KEY_$n=url.guard-review-never-pushes:.pushInsteadOf" "GIT_CONFIG_VALUE_$n=$prefix")
@@ -61,13 +64,14 @@ run_reviewer() {
     candidate=${reviewer_cmds[i]}
     echo "guard review: $label: $candidate" >&2
     rc=0
-    (cd "$wt" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK "${no_push[@]}" \
+    (cd "$wt" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK GH_CONFIG_DIR="$ghdir" "${no_push[@]}" \
       bash -c "$candidate \"\$@\"" reviewer "$ask") < /dev/null > "$log" 2> "$log.err" || rc=$?
     err=$(cat "$log.err" "$log" | grep -v '^[[:space:]]*$' | tail -n 1 | tr -d '\r' || true)
     [ $rc -ne 0 ] && [ $((i + 1)) -lt ${#reviewer_cmds[@]} ] || break
     echo "guard review: ${candidate%% *} failed (${err:-exit $rc}); trying ${reviewer_cmds[i + 1]%% *}" >&2
     git -C "$wt" reset -q --hard "$before"; git -C "$wt" clean -qfdx -e .guard-review
   done
+  rm -rf "$ghdir"
 }
 
 # reply_lines <log>: prints the reviewer's reply without blank lines, code fences, carriage returns or trailing spaces.

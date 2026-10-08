@@ -115,9 +115,11 @@ One person uses harness4research so far, and it has had one multi-day field sess
 Each rule sits where every agent must pass, and each layer covers a gap in the layer below.
 
 - `AGENTS.md` and the skills tell an honest agent the rules.
-- The scripts refuse bad submissions and report edited limits. They always run the protected branch's copy, so an agent that edits them on its own branch changes nothing.
+- The scripts refuse bad submissions and report edited limits. They run the protected branch's copy, so editing them on a branch has no effect by itself. This layer is a speed bump, not a wall: an agent can set `HPC_GUARD_LOCAL=1` or `HPC_GUARD_REF=HEAD`, or move `origin/main` in its clone with `git update-ref`, and run its own copy.
 - The CI fence blocks merges that change the guard, workflows, watched paths, or started question cards, or that report numbers without a path to an artifact committed on the branch.
 - A capped cluster sub-account stops overspending by anyone, including an agent that skips the scripts.
+
+`guard review` and `guard merge` are quality tools, not one of these layers. The review verdict lives in a local file an agent can write, and text in a pull request can steer the reviewer. The wall behind them is the GitHub ruleset that requires a pull request and the `guard-fence` check.
 
 The walls are only as strong as the gap between your credentials and the agent's. [docs/enforcement.md](docs/enforcement.md) explains that gap and how to close it. [docs/why.md](docs/why.md) covers the alternatives, the costs in tokens and compute, and what you get for them.
 
