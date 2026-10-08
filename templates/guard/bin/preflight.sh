@@ -6,6 +6,8 @@
 # It also skips the ripples gate, because a ripple pauses new spending, not diagnosis within the reserve.
 # A run_dir named explore-* needs no question card but gets small caps, and the fence keeps its results out of reports.
 set -euo pipefail
+# cron, containers and Slurm epilogs may leave USER unset, and set -u would stop at its first use.
+USER=${USER:-$(id -un)}
 [ $# -ge 2 ] || { echo "usage: guard/run preflight <run_dir> <job_script> [sbatch options...]" >&2; exit 64; }
 command -v sbatch >/dev/null || { echo "preflight: no scheduler on this host; guard/run manifest is the only allowed step here" >&2; exit 2; }
 run_dir=${1%/}; job=$2; shift 2

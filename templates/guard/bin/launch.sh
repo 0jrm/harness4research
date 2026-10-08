@@ -27,6 +27,8 @@
 # Views (--list, --sacct, --checks) read every record and every process once, into arrays, and the accessors
 # below set $r, $st or $el instead of printing, because a `$(...)` per field would fork hundreds of times per call.
 set -uo pipefail
+# cron, containers and Slurm epilogs may leave USER unset, and set -u would stop at its first use.
+USER=${USER:-$(id -un)}
 
 readonly POLL_FAST=1 POLL=5 FAST_FOR=60 BEAT_EVERY=60 START_WAIT=15
 readonly LOG_ERRORS='Traceback \(most recent call last\)|CUDA out of memory|OutOfMemoryError|CUDA error|NCCL error|Segmentation fault|(^|[^[:alpha:]])[Ll]oss[^[:alnum:]]{0,4}(nan|inf)'

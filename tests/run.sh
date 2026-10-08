@@ -127,6 +127,7 @@ echo "== preflight"
 expect preflight-no-card fail 'not committed' -- guard/run preflight "$R" job.sh
 cp runs/_template/question.card "$R/question.card"; git add -A; git commit -q -m "run: question card"
 expect preflight-ok ok 'SBATCH .*--account=gom --job-name=2026-09-29-demo' -- guard/run preflight "$R" job.sh --array=0-3
+expect preflight-no-user ok 'SBATCH .*--job-name=2026-09-29-demo' -- env -u USER guard/run preflight "$R" job.sh
 expect preflight-no-scheduler fail '^preflight: no scheduler on this host; guard/run manifest is the only allowed step here$' -- \
   env PATH="$(path_without sbatch)" guard/run preflight "$R" job.sh
 expect preflight-account-wins ok 'SBATCH --account=other .*--account=gom' -- guard/run preflight "$R" job.sh --account=other
@@ -193,6 +194,7 @@ expect ripples-watched fail 'RIPPLE.watched-paths' -- guard/run ripples "$R"
 expect ripples-quota fail 'PASS.quota.42%' -- guard/run ripples "$R"
 expect ripples-other-run-ignored fail 'retries.2 not' -- guard/run ripples "$R"
 expect ripples-piped-tsv ok - -- bash -c 'out=$(guard/run ripples "$1" | cat); [ -n "$out" ] && ! grep -vE "^(PASS|RIPPLE|HANDLED|UNCHECKED)	[^	]+	[^	]*$" <<<"$out"' _ "$R"
+expect ripples-no-user fail 'PASS	budget' -- env -u USER guard/run ripples "$R"
 expect ripples-tty-exit ok - -- bash -c "$(declare -f on_tty)"'; on_tty guard/run ripples "$1" >/dev/null; [ $? -eq 1 ]' _ "$R"
 expect ripples-tty-opt-out fail '^RIPPLE	job-states	100:TIMEOUT 102:FAILED \(' -- on_tty env HPC_RIPPLES_TSV=1 guard/run ripples "$R"
 expect ripples-term-dumb ok - -- bash -c 'out=$1; [ -n "$out" ] && [ -z "$(tr -dc "\033\t" <<<"$out")" ]' _ "$(on_tty env TERM=dumb guard/run ripples "$R")"
@@ -559,6 +561,7 @@ expect launch-gpu-busy fail 'GPU 0 is busy \(pid 999\)' -- env MOCK_NVSMI_APPS=$
 expect launch-gpu-budget fail 'this job 12.0 GPU-h exceeds 10 GPU-h' -- L "$R2" --time=06:00:00 --gpus=0,1 --mem=0.01 -- true
 expect launch-no-nvidia-smi fail 'nvidia-smi not found' -- env PATH="$(path_without nvidia-smi)" HPC_SPEND_RESERVE=1 guard/run launch "$R2" --time=1 --gpus=0 --mem=0.01 -- true
 expect launch-cpu-without-nvidia-smi ok '^skynet-' -- env PATH="$(path_without nvidia-smi)" HPC_SPEND_RESERVE=1 guard/run launch runs/explore-cpu --time=1 --gpus=none --mem=0.01 -- true
+expect launch-no-user ok '^skynet-' -- env -u USER HPC_SPEND_RESERVE=1 guard/run launch runs/explore-cpu --time=1 --gpus=none --mem=0.01 -- true
 held=$(L runs/explore-held --time=1 --gpus=1 --mem=0.01 -- sleep 30 2>/dev/null)
 expect launch-gpu-held fail "GPU 1 is held by $held" -- L "$R2" --time=1 --gpus=1 --mem=0.01 -- true
 L runs/explore-race --time=1 --gpus=3 --mem=0.01 -- sleep 1 >"$tmp/race1" 2>&1 &
@@ -672,6 +675,24 @@ printf '| Claim | Value | Artifact | Job | Commit |\n' > /dev/null
 sed -i '/^|---|---|---|---|---|$/a | RMSE 50-200 m | 0.81 (0.06) | `runs/r1/metrics.csv` | 812400 | a1b2c3d |\n| looks great | 23% | none | - | - |' runs/r1/report.md
 git add -A; git commit -q -m "report"
 expect fence-unproven fail 'FAIL.evidence-paths.*runs/r1/report.md:' -- guard/run fence origin/main HEAD
+sed -i -e '/looks great/d' -e 's#`runs/r1/metrics.csv`#`foo.txt`#' runs/r1/report.md; git commit -q -am "report: cite foo.txt"
+expect fence-evidence-missing-file fail 'FAIL.evidence-paths.*runs/r1/report.md:[0-9]+$' -- guard/run fence origin/main HEAD
+echo 'rmse,0.81' > runs/r1/foo.txt; git add -A; git commit -q -m "run: foo.txt"
+expect fence-evidence-run-relative ok 'PASS.evidence-paths' -- guard/run fence origin/main HEAD
+sed -i 's#`foo.txt`#`runs/r1/foo.txt:1`#' runs/r1/report.md; git commit -q -am "report: line suffix"
+expect fence-evidence-line-suffix ok 'PASS.evidence-paths' -- guard/run fence origin/main HEAD
+git push -q origin pr/clean:refs/heads/proven-report
+sed -i 's#`runs/r1/foo.txt:1`#`runs/r1/gone.txt`#' runs/r1/report.md; git commit -q -am "report: cite gone.txt"
+expect fence-evidence-modified-proven fail 'FAIL.evidence-paths.*runs/r1/report.md:' -- guard/run fence origin/proven-report HEAD
+git reset -q --hard HEAD~1
+git switch -q -c pr/legacy-report origin/main; mkdir -p runs/r9; cp runs/_template/question.card runs/_template/report.md runs/r9/
+sed -i '/^|---|---|---|---|---|$/a | RMSE | 0.81 | `runs/r9/gone.csv` | 1 | a1b2c3d |' runs/r9/report.md
+git add -A; git commit -q -m "run: legacy report"; git push -q origin HEAD:refs/heads/legacy-report
+echo "A note." >> runs/r9/report.md; git commit -q -am "report: note"
+expect fence-evidence-ratchet ok 'PASS.evidence-paths' -- guard/run fence origin/legacy-report HEAD
+sed -i 's#`runs/r9/gone.csv`#none#' runs/r9/report.md; git commit -q -am "report: drop path"
+expect fence-evidence-ratchet-shape fail 'FAIL.evidence-paths.*runs/r9/report.md:' -- guard/run fence origin/legacy-report HEAD
+git switch -q pr/clean
 git switch -q -c pr/explore origin/main; mkdir -p runs/explore-a; cp runs/_template/report.md runs/explore-a/; git add -A; git commit -q -m x
 expect fence-explore-report fail 'FAIL.no-exploration-reports' -- guard/run fence origin/main HEAD
 git switch -q -c pr/guard origin/main; echo "max_nodes_per_job: 64" >> guard/budget.card; git commit -q -am x
@@ -1508,7 +1529,7 @@ upgrade_from() {
   expect "$c-preflight-ok" ok 'SBATCH --qos=normal .*--account=gom' -- guard/run preflight runs/r job.sh
   expect "$c-ripples-clean" ok - -- bash -c 'out=$(guard/run ripples runs/r) && ! grep -vE "^(PASS|UNCHECKED)	" <<<"$out"'
   sed -i '/^|---|---|---|---|---|$/a | rows | 3 | `runs/legacy/rows.csv` | 1 | abc1234 |' runs/legacy/report.md
-  git commit -q -am "edit the legacy report"
+  echo 3 > runs/legacy/rows.csv; git add -A; git commit -q -m "edit the legacy report"
   expect "$c-fence-legacy" ok - -- bash -c 'out=$(guard/run fence origin/main HEAD) && ! grep -q "^FAIL" <<<"$out"'
   expect "$c-check-names-kept" ok '^$' -- comm -23 <(echo "$old_names") <(names runs/legacy)
   expect "$c-no-new-required" ok '^$' -- comm -23 <(placeholders "$here/templates/guard/budget.card") \

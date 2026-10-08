@@ -116,7 +116,7 @@ Each rule sits where every agent must pass, and each layer covers a gap in the l
 
 - `AGENTS.md` and the skills tell an honest agent the rules.
 - The scripts refuse bad submissions and report edited limits. They always run the protected branch's copy, so an agent that edits them on its own branch changes nothing.
-- The CI fence blocks merges that change the guard, workflows, watched paths, or started question cards, or that report numbers without an artifact path.
+- The CI fence blocks merges that change the guard, workflows, watched paths, or started question cards, or that report numbers without a path to an artifact committed on the branch.
 - A capped cluster sub-account stops overspending by anyone, including an agent that skips the scripts.
 
 The walls are only as strong as the gap between your credentials and the agent's. [docs/enforcement.md](docs/enforcement.md) explains that gap and how to close it. [docs/why.md](docs/why.md) covers the alternatives, the costs in tokens and compute, and what you get for them.
