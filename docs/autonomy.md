@@ -146,24 +146,31 @@ The queue is one file, `.git/guard/needs-you.tsv`, shared by every worktree of t
 ```shell
 guard needs-you add --kind run --title "Ask the cluster admins for a capped account" \
   --why "preflight caps the budget card, and only the scheduler caps a direct sbatch" \
-  --run "open docs/cluster-subaccount-request.md" --expect "a reply naming the new account" --source codex
+  --run "open docs/cluster-subaccount-request.md" --expect "a reply naming the new account" \
+  --worry "a reply saying the account cannot be capped" --source codex
 ```
 
 `add` refuses a relative path, a missing path, or a path under `/tmp`, `/var/tmp`, `$TMPDIR`, or a directory named `scratchpad`, because those disappear when a session ends. `guard needs-you` prints each open item as a 🩺 block:
 
-```text
+````text
 🩺 n1 · run · Ask the cluster admins for a capped account
 
 Why: preflight caps the budget card, and only the scheduler caps a direct sbatch
 
-Run, in order:
-  open docs/cluster-subaccount-request.md
+```bash
+open docs/cluster-subaccount-request.md
+```
 
-Expect: a reply naming the new account
-Done: guard needs-you done n1
+Expected: a reply naming the new account
+Worrisome: a reply saying the account cannot be capped
+
+Close it once it is done:
+```bash
+cd /home/you/proj && guard needs-you done n1
+```
 
 🩺
-```
+````
 
 Agents paste blocks from `guard needs-you show <id>` and never write one by hand. You close an item with `guard needs-you ack <id>`, `done <id>`, or `dismiss <id>`. `ack` keeps the item in the list and stops its reminder.
 
