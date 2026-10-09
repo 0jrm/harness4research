@@ -63,12 +63,13 @@ Never write a 🩺 block by hand. Queue the item, then paste what the queue prin
 
 ```shell
 guard needs-you add --kind run --title "Merge PR #41" --why "<one sentence>" \
-  --run "cd /home/you/proj" --run "gh pr merge 41 --squash" \
-  --expect "<what they will see>" --undo "<how to reverse it>" --path /home/you/proj/report.md --source <your CLI name>
+  --run "# Merge the pull request with your own login" --run "cd /home/you/proj" --run "gh pr merge 41 --squash" \
+  --expect "<sample output that means it worked>" --worry "<sample output that means it did not>" \
+  --undo "<how to reverse it>" --path /home/you/proj/report.md --source <your CLI name>
 guard needs-you show n3
 ```
 
-`add` prints the new id. If an open item already has the same kind and title, `add` prints that item's id and queues nothing, so a retry never queues a duplicate. `--kind` is `approve` for a decision, `run` for a command, or `check` for something to look at. Give each command its own `--run`, in the order the human runs them. `add` refuses a path that is relative, missing, or under `/tmp`, `/var/tmp`, `$TMPDIR`, or a `scratchpad` directory, because the human may open it after that file is gone. Copy the file into the project and queue the copy.
+`add` prints the new id. If an open item already has the same kind and title, `add` prints that item's id and queues nothing, so a retry never queues a duplicate. `--kind` is `approve` for a decision, `run` for a command, or `check` for something to look at. Give each command its own `--run`, in the order the human runs them. The block puts them in one fenced code block the human pastes whole, so every command must work when pasted with the rest: no command that waits for input, and no quoted multi-word argument, because quotes can turn typographic on the way to a terminal. A `--run` that starts with `# ` is a short comment in that block; use one to say what a group of commands does, and for any step that is not a shell command, such as a slash command in an interactive session. Always give `--expect`, a sample of the output that means it worked, and `--worry` when some output means it did not. `add` refuses a path that is relative, missing, or under `/tmp`, `/var/tmp`, `$TMPDIR`, or a `scratchpad` directory, because the human may open it after that file is gone. Copy the file into the project and queue the copy.
 
 Paste the output of `guard needs-you show <id>` verbatim, after the 🎁 block. In the present, name the id in the sentence that says what you need. The queue keeps the item for every worktree of the repository, and `guard needs-you` lists it until the human closes it. Never run `guard needs-you ack`, `done`, or `dismiss` yourself. Those mean the human saw it or did it.
 
