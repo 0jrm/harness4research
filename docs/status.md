@@ -49,7 +49,7 @@ The handoff says not to start items 12 to 17 before item 10's result, except as 
   - GPUs 2 and 3 run the owner's own `hycom-emulator` training;
   - GPU 1 was free.
 - The relay on `127.0.0.1:9090` lists only `gemma4-26B-mtp` on `default-model`. That model is abliterated and out of bounds for the evaluation.
-- The four panel models are downloaded at the commits requested, in `/unity/g1/bgutierrez/Project/vLLM-bdgr/models/`: `qwen36-35b-fp8`, `gemma4-31b-qat`, `gptoss-120b` and `qwen35-9b`. None is served. The model host asked to stay off GPU 0 while he configures them.
+- The four panel models are downloaded at the commits requested, in `/unity/g1/bgutierrez/Project/vLLM-bdgr/models/`: `qwen36-35b-fp8`, `gemma4-31b-qat`, `gptoss-120b` and `qwen35-9b`. None is served. The model host asked us to stay off GPU 0 while they configure them.
 
 ## Open items in the queue
 
