@@ -60,7 +60,7 @@ The handoff says not to start items 12 to 17 before item 10's result, except as 
 
 ## The next steps, in order
 
-1. **The model host's values.** Get the relay alias of the Qwen3.6 instance and its `vllm serve` command. The owner relays messages with Brendon (bgutierrez); never contact him or change his servers yourself.
+1. **The model host's values.** Get the relay alias of the Qwen3.6 instance and its `vllm serve` command. The owner relays messages with Brendon (bgutierrez); never contact them or change their servers yourself.
 2. **The two checks.** Run n20 by reading `/v1/models` through the tunnel, and n18 with `check_seed.py`. Report the outcomes, so the owner can close the items with a note.
 3. **An analysis script.** None exists yet. Write `eval/analyze.py` over `results_dir/verdicts.jsonl`:
    - per arm and family: rates with Wilson 95% intervals;
