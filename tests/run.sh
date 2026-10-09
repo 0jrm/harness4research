@@ -1291,8 +1291,8 @@ expect merge-admin fail '^FAIL  the gh login in this shell administers lab/proj,
 expect merge-admin-no-call fail - -- grep -q '^pr merge' "$tmp/gh.log"
 expect merge-admin-remedy fail '^      Run agents with a token that has no Administration permission: https://github.com/0jrm/harness4research/blob/main/docs/enforceable.md#5-give-agents-weaker-credentials$' -- merge MOCK_GH_ADMIN=true
 expect merge-admin-queued ok '^🩺 n1 · approve · Merge PR #5$' -- "$guard" needs-you
-expect merge-admin-command ok '^  gh pr merge 5 --squash$' -- "$guard" needs-you show n1
-expect merge-admin-cd ok "^  cd $D$" -- "$guard" needs-you show n1
+expect merge-admin-command ok '^gh pr merge 5 --squash$' -- "$guard" needs-you show n1
+expect merge-admin-cd ok "^cd $D$" -- "$guard" needs-you show n1
 expect merge-admin-block fail '^🩺 n1 · approve · Merge PR #5$' -- merge MOCK_GH_ADMIN=true
 expect merge-logged-out fail '^FAIL  cannot tell whether the gh login in this shell administers lab/proj: To get started with GitHub CLI' -- merge MOCK_GH_TOKEN=
 expect merge-no-ruleset fail '^FAIL  main has no active rule requiring a pull request and guard-fence / fence$' -- merge MOCK_GH_RULES=
@@ -1432,7 +1432,7 @@ expect batch-human-no-review fail - -- grep -qE '	1[23]	' "$bt_reviews"
 expect batch-guard-merge-item ok '· approve · Merge PR #13$' -- "$guard" needs-you
 expect batch-card-digest ok '^Why: Only you approve a question card\. .*: #12 Change card \(runs/r2/question\.card\)$' -- \
   bash -c 'id=$("$1" needs-you find --kind approve --title "Approve question cards") && "$1" needs-you show "$id"' _ "$guard"
-expect batch-card-digest-run ok '^  gh pr merge 12 --squash$' -- bash -c '"$1" needs-you | sed -n "/Approve question cards/,/^🩺$/p"' _ "$guard"
+expect batch-card-digest-run ok '^gh pr merge 12 --squash$' -- bash -c '"$1" needs-you | sed -n "/Approve question cards/,/^🩺$/p"' _ "$guard"
 expect batch-summary-tiers ok '^tiers: records 1, small 3, large 1, human 2$' -- cat "$tmp/batch.out"
 expect batch-summary-verdict ok '^  #15 small: escalate - the reviewer.s reply does not end' -- cat "$tmp/batch.out"
 expect batch-comments ok '^pr comment 14 --body guard review: approve at [0-9a-f]{7}\. fine 14$' -- cat "$tmp/gh.log"
@@ -1472,8 +1472,8 @@ expect batch-refused-one-item ok '^1$' -- bash -c '"$1" needs-you | grep -c "· 
 expect batch-refused-no-per-pr fail - -- bash -c '"$1" needs-you | grep -qE "· Merge PR #1[47]$"' _ "$guard"
 expect batch-refused-why ok '^Why: guard merge refused these approved pull requests, .*: #14 not every check passed: tests \(failure\); #17 no checks ran on pull request #17, so nothing tested it$' -- \
   bash -c '"$1" needs-you show "$("$1" needs-you find --kind approve --title "Merge approved pull requests")"' _ "$guard"
-expect batch-refused-commands ok '^  cd .*/bt\|  gh pr merge 14 --squash\|  gh pr merge 17 --squash$' -- \
-  bash -c '"$1" needs-you show "$("$1" needs-you find --kind approve --title "Merge approved pull requests")" | grep "^  " | paste -sd"|"' _ "$guard"
+expect batch-refused-commands ok '^cd .*/bt\|gh pr merge 14 --squash\|gh pr merge 17 --squash$' -- \
+  bash -c '"$1" needs-you show "$("$1" needs-you find --kind approve --title "Merge approved pull requests")" | awk "/^\`\`\`bash\$/ {f=1; next} /^\`\`\`\$/ {exit} f" | paste -sd"|"' _ "$guard"
 expect batch-refused-summary ok '^refused #17: no checks ran on pull request #17, so nothing tested it$' -- cat "$tmp/batch.out"
 PRS=$(prs_json "$old" "${all[@]}")
 batch "$guard" merge --batch >/dev/null 2>&1
@@ -1733,7 +1733,8 @@ expect ny-empty ok '^Nothing needs you\.$' -- in_dir "$ny" "$guard" needs-you
 expect ny-remind-empty ok - -- bash -c 'out=$(cd "$1" && "$2" needs-you --remind 2>&1) && [ -z "$out" ]' _ "$ny" "$guard"
 expect ny-add ok '^n1$' -- in_dir "$ny" "$guard" needs-you add --kind run --title 'Merge PR #41 (autonomous merge refused)' \
   --why 'the gh login in this shell administers the repository.' --run "cd $ny" --run 'gh pr merge 41 --squash' \
-  --expect '"Squashed and merged pull request #41".' --undo 'git revert <merge commit> on a new branch.' --path "$here/README.md" --source claude
+  --expect '"Squashed and merged pull request #41".' --worry 'Pull request is not mergeable.' \
+  --undo 'git revert <merge commit> on a new branch.' --path "$here/README.md" --source claude
 expect ny-add-next ok '^n2$' -- in_dir "$ny" "$guard" needs-you add --kind check --title 'Read the report' --path "$here/README.md" --path "$here/bin/guard"
 expect ny-tsv-header ok '^id	ts	state	kind	title	action	paths	commands	source$' -- head -1 "$ny/.git/guard/needs-you.tsv"
 expect ny-show ok - -- bash -c 'diff <(cd "$1" && "$2" needs-you show n1) - <<BLOCK
@@ -1741,14 +1742,20 @@ expect ny-show ok - -- bash -c 'diff <(cd "$1" && "$2" needs-you show n1) - <<BL
 
 Why: the gh login in this shell administers the repository.
 
-Run, in order:
-  cd $1
-  gh pr merge 41 --squash
+\`\`\`bash
+cd $1
+gh pr merge 41 --squash
+\`\`\`
 
-Expect: "Squashed and merged pull request #41".
+Expected: "Squashed and merged pull request #41".
+Worrisome: Pull request is not mergeable.
 Undo: git revert <merge commit> on a new branch.
 Files: $3/README.md
-Done: guard needs-you done n1
+
+Close it once it is done:
+\`\`\`bash
+cd $1 && guard needs-you done n1
+\`\`\`
 
 🩺
 BLOCK' _ "$ny" "$guard" "$here"
@@ -1758,7 +1765,11 @@ expect ny-show-omits-empty ok - -- bash -c 'diff <(cd "$1" && "$2" needs-you sho
 Files:
   $3/README.md
   $3/bin/guard
-Done: guard needs-you done n2
+
+Close it once it is done:
+\`\`\`bash
+cd $1 && guard needs-you done n2
+\`\`\`
 
 🩺
 BLOCK' _ "$ny" "$guard" "$here"
@@ -1818,7 +1829,7 @@ expect ny-update-same-content ok '^n14$' -- in_dir "$ny" "$guard" needs-you add 
 expect ny-update-same-writes-nothing ok "^$rows\$" -- bash -c 'wc -l < "$1"' _ "$ny/.git/guard/needs-you.tsv"
 expect ny-update-refreshes ok '^n14$' -- in_dir "$ny" "$guard" needs-you add --kind approve --title Digest --why 'two cards' --run 'gh pr merge 1 --squash' --run 'gh pr merge 2 --squash' --update
 expect ny-update-content ok '^Why: two cards$' -- in_dir "$ny" "$guard" needs-you show n14
-expect ny-update-commands ok '^  gh pr merge 2 --squash$' -- in_dir "$ny" "$guard" needs-you show n14
+expect ny-update-commands ok '^gh pr merge 2 --squash$' -- in_dir "$ny" "$guard" needs-you show n14
 expect ny-update-one-open ok '^1$' -- bash -c '(cd "$1" && "$2" needs-you) | grep -c "· Digest$"' _ "$ny" "$guard"
 expect ny-without-update-keeps ok '^n14$' -- in_dir "$ny" "$guard" needs-you add --kind approve --title Digest --why 'three cards'
 expect ny-without-update-unchanged ok '^Why: two cards$' -- in_dir "$ny" "$guard" needs-you show n14

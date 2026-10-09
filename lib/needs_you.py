@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """usage: guard needs-you [--remind [--format text|claude-hook]]
        guard needs-you add --kind approve|run|check --title T [--why W] [--path P]... [--run CMD]...
-                           [--expect E] [--undo U] [--source S] [--update]
+                           [--expect E] [--worry W] [--undo U] [--source S] [--update]
        guard needs-you find --kind approve|run|check --title T
        guard needs-you show <id>
        guard needs-you ack|done|dismiss <id> [--note N]
 
 A queue of what only a human can do, check, or approve. With no arguments it prints every open or acked item
-as a 🩺 block. add prints the new id, and refuses (exit 2) a path that is relative, missing, or somewhere that
+as a 🩺 block: the commands in one fenced block the person can paste whole, a --run that starts with "# " as a
+short comment in it, then a sample of the expected (--expect) and the worrisome (--worry) output, and the command
+that closes the item. add prints the new id, and refuses (exit 2) a path that is relative, missing, or somewhere that
 gets cleaned: /tmp, /var/tmp, $TMPDIR, or a directory named scratchpad. --remind prints nothing when no item
 is open or outside a git repository, so it can run on every prompt. Adding an item with the kind and title of an
 open one prints that item's id and queues nothing. With --update, an open or acked item of that kind and title takes
@@ -19,7 +21,7 @@ from collections import namedtuple
 
 COLUMNS = ("id", "ts", "state", "kind", "title", "action", "paths", "commands", "source")
 KINDS = ("approve", "run", "check")
-ACTION_KEYS = ("why", "expect", "undo", "note")
+ACTION_KEYS = ("why", "expect", "worry", "undo", "note")
 SEP = ";;"
 Move = namedtuple("Move", "sets from_states")
 MOVES = {"ack": Move("acked", {"open"}), "done": Move("done", {"open", "acked"}), "dismiss": Move("dismissed", {"open", "acked"})}
@@ -109,21 +111,29 @@ def checked_path(p):
                 raise Refused(f"{p} is under {d}, which gets cleaned. {STABLE}")
     return norm
 
-def block(it):
+def block(it, top):
+    """One item as a 🩺 block. Commands go in one fenced block, so a person can copy them and run them with one
+    Enter; a command starting with "# " is a comment there. The closing command cds into the repository first,
+    because the queue belongs to the repository it runs in."""
     lines = [f"🩺 {it.id} · {it.kind} · {it.title}", ""]
     if it.why:
         lines += [f"Why: {it.why}", ""]
     if it.commands:
-        lines += ["Run, in order:", *("  " + c for c in it.commands), ""]
+        lines += ["```bash", *it.commands, "```", ""]
     if it.expect:
-        lines.append(f"Expect: {it.expect}")
+        lines.append(f"Expected: {it.expect}")
+    if it.worry:
+        lines.append(f"Worrisome: {it.worry}")
     if it.undo:
         lines.append(f"Undo: {it.undo}")
     if len(it.paths) == 1:
         lines.append(f"Files: {it.paths[0]}")
     elif it.paths:
         lines += ["Files:", *("  " + p for p in it.paths)]
-    return "\n".join(lines + [f"Done: guard needs-you done {it.id}", "", "🩺"])
+    if lines[-1]:
+        lines.append("")
+    return "\n".join(lines + ["Close it once it is done:", "```bash", f"cd {top} && guard needs-you done {it.id}", "```",
+                              "", "🩺"])
 
 def summary(top, items):
     head = f"🩺 {len(items)} item{'s' if len(items) > 1 else ''} in {top} need{'s' if len(items) == 1 else ''} you:"
@@ -152,7 +162,7 @@ def remind(fmt):
                "things only they can do, check, or approve. Start your reply with each 🩺 block below, verbatim, before "
                "anything else, and keep doing so on every reply until the human acks it (guard needs-you ack <id>), "
                "finishes it, or dismisses it. Never ack, finish, or dismiss an item yourself.\n\n"
-               + "\n\n".join(block(it) for it in items))
+               + "\n\n".join(block(it, top) for it in items))
     out = {"systemMessage": summary(top, items)}
     event = hook.get("hook_event_name")
     if event in HOOK_EVENTS:
@@ -167,6 +177,7 @@ def add(queue, a):
     if not a.title.strip():
         raise Refused("--title is empty")
     fields = dict(title=cell("title", a.title), why=cell("why", a.why, part=True), expect=cell("expect", a.expect, part=True),
+                  worry=cell("worry", a.worry, part=True),
                   undo=cell("undo", a.undo, part=True), note="", source=cell("source", a.source),
                   paths=[checked_path(p) for p in a.path], commands=[cell("run", c, part=True) for c in a.run])
     def new(items):
@@ -217,7 +228,8 @@ def main():
     p.add_argument("--why", default="")
     p.add_argument("--path", action="append", default=[])
     p.add_argument("--run", action="append", default=[])
-    p.add_argument("--expect", default="")
+    p.add_argument("--expect", default="", help="a sample of the output that means it worked")
+    p.add_argument("--worry", default="", help="a sample of the output that means it did not")
     p.add_argument("--undo", default="")
     p.add_argument("--source", default="")
     p.add_argument("--update", action="store_true", help="give an open or acked item of the same kind and title this content")
@@ -237,7 +249,7 @@ def main():
         except Exception:
             pass
         return
-    queue, _ = git_dir(os.getcwd())
+    queue, top = git_dir(os.getcwd())
     try:
         if not queue:
             raise Refused(f"{os.getcwd()} is not a git repository")
@@ -252,12 +264,12 @@ def main():
             it = next((it for it in read(queue) if it.id == a.id), None)
             if not it:
                 raise Refused(f"no item {a.id} in {queue}")
-            print(block(it))
+            print(block(it, top))
         elif a.cmd in MOVES:
             move(queue, a.cmd, a.id, a.note)
         else:
             items = [it for it in read(queue) if it.state in ("open", "acked")]
-            print("\n\n".join(block(it) for it in items) if items else "Nothing needs you.")
+            print("\n\n".join(block(it, top) for it in items) if items else "Nothing needs you.")
     except Refused as e:
         print(f"guard needs-you: {e}", file=sys.stderr)
         sys.exit(2)

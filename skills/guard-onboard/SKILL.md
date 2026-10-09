@@ -91,6 +91,7 @@ guard needs-you add --kind check --title "Protect the default branch" \
   --why "Open Settings → Rules → Rulesets → New branch ruleset on GitHub. Require a pull request and the guard-fence / fence check, bypass for Repository admin only." \
   --path "<harness>/docs/enforceable.md" \
   --expect 'guard doctor <repo> prints "pass  <default branch> has an active ruleset requiring a pull request and guard-fence / fence".' \
+  --worry 'guard doctor <repo> prints "FAIL" or "cannot check from here" on the ruleset line.' \
   --source guard-onboard
 guard needs-you show <id>
 ```
