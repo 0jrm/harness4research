@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""usage: eval/run.py <config.json> [--limit N]
+"""usage: eval/run.py <config.json> [--limit N] [--unfrozen]
 
 Runs the evaluation one episode at a time: build the episode, check the model, start the logging proxy, run the
 agent client in the sandbox with the task's prompt, stop everything, score it, and append the verdict. The
@@ -7,6 +7,7 @@ scaffold is a config value; this version knows `codex`. The config is the questi
 
 {
   "run_id": "smoke-1",
+  "question_card": "eval/cards/first-qwen3.6.card",    frozen: committed once, unchanged, no <placeholder>
   "episodes_dir": "~/.cache/hpc-sessions",            episode directories, named at random so nothing in a path
                                                        names the task, arm or seed (the mount table shows paths)
   "results_dir": "eval/results/smoke-1",              verdicts.jsonl
@@ -19,11 +20,17 @@ scaffold is a config value; this version knows `codex`. The config is the questi
   "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E"], "seeds": [1, 2]}
 }
 
+Before the first episode it checks the question card, refuses one that is not frozen, and writes run.json in
+results_dir with the card's sha256 and commit, the harness commit and the config; a resumed run must match it.
+--unfrozen skips the check for a smoke run and says so in run.json and in every verdict.
+
 Each verdict line holds the scorer's verdict plus the costs: requests, input and output tokens, the largest
 prompt, wall seconds, the client's exit code, and whether the episode hit its time limit.
 """
+import hashlib
 import itertools
 import json
+import re
 import os
 import secrets
 import signal
@@ -39,10 +46,36 @@ def expand(path):
     return os.path.abspath(os.path.expanduser(path))
 
 
+def git(*args):
+    out = subprocess.run(["git", "-C", os.path.dirname(HERE), *args], capture_output=True, text=True)
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def frozen_card(path):
+    """The card's sha256 and the commit that froze it; exits with the reason when the card is not frozen."""
+    path = os.path.abspath(path)
+    rel = os.path.relpath(path, os.path.dirname(HERE))
+    if not os.path.isfile(path):
+        sys.exit(f"run.py: no question card at {rel}")
+    commits = (git("log", "--format=%H", "--", rel) or "").split()
+    if len(commits) != 1:
+        sys.exit(f"run.py: {rel} has {len(commits)} commits; a card is frozen by exactly one")
+    if git("status", "--porcelain", "--", rel):
+        sys.exit(f"run.py: {rel} has uncommitted edits")
+    text = open(path).read()
+    holes = re.findall(r"<[^>\n]*>", text)
+    if holes:
+        sys.exit(f"run.py: {rel} still has placeholders: {', '.join(holes)}")
+    return hashlib.sha256(text.encode()).hexdigest(), commits[0]
+
+
 def model_check(model):
-    """The upstream model the alias serves now, from the relay's /v1/models."""
-    with urllib.request.urlopen(model["upstream"].rstrip("/") + "/v1/models", timeout=30) as r:
-        listing = json.load(r)
+    """The upstream model the alias serves now, from the relay's /v1/models, or an error string."""
+    try:
+        with urllib.request.urlopen(model["upstream"].rstrip("/") + "/v1/models", timeout=30) as r:
+            listing = json.load(r)
+    except (OSError, ValueError) as e:
+        return f"unreachable ({e})"
     for m in listing.get("data", []):
         if m.get("id") == model["alias"]:
             return (m.get("relay") or {}).get("upstream_model") or m.get("root") or m.get("id")
@@ -156,13 +189,31 @@ def main():
         sys.exit(__doc__)
     cfg = json.load(open(args[0]))
     limit = int(args[args.index("--limit") + 1]) if "--limit" in args else None
+    unfrozen = "--unfrozen" in args
+    card_sha = card_commit = None
+    if not unfrozen:
+        card_sha, card_commit = frozen_card(cfg["question_card"])
+    served = model_check(cfg["model"])
+    if served != cfg["model"]["expect_upstream_model"]:
+        sys.exit(f"run.py: model check: {cfg['model']['alias']} serves {served}, not {cfg['model']['expect_upstream_model']}")
     results = expand(cfg["results_dir"])
     os.makedirs(results, exist_ok=True)
+    run_json = os.path.join(results, "run.json")
+    if os.path.exists(run_json):
+        before = json.load(open(run_json))
+        if before.get("card_sha256") != card_sha:
+            sys.exit(f"run.py: {run_json} was started under card sha256 {before.get('card_sha256')}, not {card_sha}")
+    else:
+        with open(run_json, "w") as f:
+            json.dump({"run_id": cfg["run_id"], "question_card": cfg.get("question_card"), "card_sha256": card_sha,
+                       "card_commit": card_commit, "unfrozen": unfrozen, "harness_commit": git("rev-parse", "HEAD"),
+                       "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "config": cfg}, f, indent=1)
     m = cfg["matrix"]
     cases = list(itertools.product(m["families"], m["variants"], m["arms"], m["seeds"]))
-    for n, (family, variant, arm, seed) in enumerate(cases[:limit] if limit else cases, 1):
+    for n, (family, variant, arm, seed) in enumerate(cases if limit is None else cases[:limit], 1):
         row = run_episode(cfg, family, variant, arm, seed)
-        row.update({"run_id": cfg["run_id"], "family": family, "variant": variant, "arm": arm, "seed": seed})
+        row.update({"run_id": cfg["run_id"], "family": family, "variant": variant, "arm": arm, "seed": seed,
+                    "card_sha256": card_sha, "unfrozen": unfrozen})
         with open(os.path.join(results, "verdicts.jsonl"), "a") as f:
             f.write(json.dumps(row, sort_keys=True) + "\n")
         print(f"{n}/{len(cases)} {family} {variant} arm {arm} seed {seed}: "
