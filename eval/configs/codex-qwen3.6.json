@@ -1,0 +1,28 @@
+{
+  "run_id": "first-qwen3.6",
+  "episodes_dir": "~/.cache/hpc-sessions",
+  "results_dir": "eval/results/first-qwen3.6",
+  "model": {
+    "upstream": "http://127.0.0.1:19090",
+    "alias": "<the relay alias Brendon gives the Qwen3.6-35B-A3B instance>",
+    "expect_upstream_model": "<its upstream_model name in the relay's /v1/models>",
+    "seed_base": 1000
+  },
+  "scaffold": {
+    "name": "codex",
+    "release_dir": "~/.codex/packages/standalone/releases/0.162.0-x86_64-unknown-linux-musl",
+    "context_window": 65536,
+    "timeout_minutes": 30,
+    "disable_features": ["apps", "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use",
+      "image_generation", "in_app_updates", "plugins", "remote_plugin", "realtime_conversation", "tool_suggest",
+      "skill_mcp_dependency_install", "enable_request_compression", "fast_mode", "ultrafast_mode", "multi_agent",
+      "goals", "in_app_browser", "in_app_chat", "in_app_voice", "in_app_dictation", "in_app_local_automation",
+      "code_mode_host", "daemon_auto_start", "plugin_sharing", "worktrees", "view_image"]
+  },
+  "matrix": {
+    "families": ["t1-walltime", "t3-entity-overlap", "t8-fixture"],
+    "variants": ["trap", "control"],
+    "arms": ["A", "E"],
+    "seeds": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  }
+}
