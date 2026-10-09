@@ -32,13 +32,24 @@ args=(
   --bind "$ep/state/git/forge.sock" /run/forge/forge.sock
   --clearenv
   --setenv HOME /home/agent --setenv USER agent --setenv LOGNAME agent
-  --setenv PATH /opt/site/bin:/usr/local/bin:/usr/bin:/bin --setenv LANG C.UTF-8 --setenv TERM "${TERM:-xterm}"
+  --setenv LANG C.UTF-8 --setenv TERM "${TERM:-xterm}"
 )
+path=/opt/site/bin:/usr/local/bin:/usr/bin:/bin
 [ -e /lib64 ] && args+=(--symlink usr/lib64 /lib64)
 [ -d "$ep/sandbox/harness" ] && args+=(--ro-bind "$ep/sandbox/harness" /opt/harness4research)
 # The site's scientific Python (site-python.sh), first on PATH, as a cluster module would put it.
 site_python=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.site-venv
-[ -d "$site_python" ] && args+=(--ro-bind "$site_python" /opt/site/python --setenv PATH /opt/site/python/bin:/opt/site/bin:/usr/local/bin:/usr/bin:/bin)
+[ -d "$site_python" ] && { args+=(--ro-bind "$site_python" /opt/site/python); path=/opt/site/python/bin:$path; }
+# Extra read-only binds, one "<host path> <sandbox path>" per line, such as the agent client's binary, and the
+# directories they add to PATH, one per line, first listed first.
+if [ -f "$ep/sandbox/binds" ]; then
+  while read -r src dst; do [ -n "$src" ] && args+=(--ro-bind "$src" "$dst"); done < "$ep/sandbox/binds"
+fi
+if [ -f "$ep/sandbox/path" ]; then
+  extra=$(paste -sd: "$ep/sandbox/path")
+  [ -z "$extra" ] || path=$extra:$path
+fi
+args+=(--setenv PATH "$path")
 # Extra variables for the agent's own client, such as the model endpoint, listed one NAME=value per line.
 if [ -f "$ep/sandbox/env" ]; then
   while IFS='=' read -r name value; do

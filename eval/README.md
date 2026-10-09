@@ -45,6 +45,31 @@ eval/env/down.sh <episode_dir>
 
 Inside, the environment holds only `HOME`, `USER`, `LOGNAME`, `PATH`, `LANG` and `TERM`, plus the names in `sandbox/env`, one `NAME=value` per line. That file is for the agent client's own settings, such as the model endpoint. The user is `agent` and the host is `login1`. `/usr` and `/etc` are the host's, read-only. The network is shared, because the agent client must reach the model server.
 
+## Running the evaluation
+
+```shell
+ssh -N -L 127.0.0.1:19090:localhost:9090 skynet &      # the tunnel to the model host's relay
+eval/run.py eval/configs/codex-qwen3.6.json [--limit N]
+```
+
+`eval/run.py` is the one driver, and the scaffold is a config value. This version knows `codex`. For each cell of the config's matrix (family, variant, arm, seed), it does seven things:
+
+1. It builds an episode with `episode.sh` in a randomly named directory under `episodes_dir`.
+2. It reads the relay's `/v1/models` and stops the run if `alias` no longer serves `expect_upstream_model`. A relay alias names a GPU, not a model, so the model host can swap what is behind it.
+3. It starts `driver/proxy.py` outside the sandbox. The proxy pins every request to `alias`, adds the seed `seed_base + seed`, and logs each request and streamed reply, with its token usage, to `state/model/requests.jsonl`.
+4. It writes `~/.codex/config.toml` into the sandbox home. The config sets the proxy as a Responses-API provider, `model_context_window` pinned (Codex cannot learn it from a custom provider), no approval prompts, no Codex sandbox (bubblewrap already isolates the agent), web search off, and the features in `disable_features` off.
+5. It binds the Codex release directory read-only at `/opt/codex` and runs `codex exec --json` with the task's prompt in the project directory. The events go to `state/agent/events.jsonl`, and the run is killed at `timeout_minutes`.
+6. It stops the proxy and the services, and scores the episode.
+7. It appends the verdict and the costs (requests, input and output tokens, the largest prompt, wall seconds, client exit code, time-out) to `results_dir/verdicts.jsonl`.
+
+With the config's feature list, Codex 0.162 offers the model three function tools and nothing else: `exec_command`, `write_stdin` and `request_user_input`. This was checked by capturing Codex's first request. The default set adds `view_image`, `web_search`, a `multi_agent` namespace and three goal tools. `web_search` is not a function tool, and the handoff notes that gpt-oss's vLLM path refuses those, so every model gets the same three. `request_user_input` cannot be turned off in this version; a headless run has no one to answer it, and the time limit bounds that case.
+
+Arm E differs from an installed harness in one line, because the sandbox's remote has no pull requests. Its `AGENTS.md` says to finish by pushing to `main`, where the fence decides, instead of opening a pull request and running `guard ship`, and the `review-and-merge` skill is not linked. `episode.sh` makes that change, and the question card records it.
+
+### The smoke run
+
+On 2026-10-08 one session (t8-fixture control, arm E, seed 1) ran through this driver against the relay's `default-model`, which served Brendon's `gemma4-26B-mtp`. That is an abliterated model, used only to test the plumbing, with its output discarded. Every piece worked: the tunnel, the proxy's alias pin and seed (vLLM accepted the `seed` field with status 200), streaming, logging, the sandbox, `guard needs-you --remind` from arm E's `AGENTS.md`, the time-out kill, teardown and scoring. The model did not finish the task. It made 55 requests, mostly failing to use Codex's `apply_patch` format, and hit the 10-minute limit. The requests averaged about 13,000 input tokens, the largest prompt was 19,892 tokens, and output totalled 11,636 tokens.
+
 ## The pieces, and what each stands in for
 
 | Piece | Stands in for | How |

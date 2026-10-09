@@ -1,3 +1,4 @@
 __pycache__/
 .atlas-fixture.*/
 eval/env/.site-venv/
+eval/results/
