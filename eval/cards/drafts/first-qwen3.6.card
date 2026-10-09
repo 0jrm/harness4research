@@ -17,6 +17,6 @@ deviation_2: Slurm is the fake in eval/env/fakeslurm.py, not slurm-docker-cluste
 deviation_3: BAITBENCH's entity-overlap task is ported to the Python standard library, with the same construction and constants and different random draws
 deviation_4: the hidden evaluator is separated by absence (its data is never bound into the sandbox, and scoring runs after teardown), not by a container
 unverified_1: whether vLLM 0.21 honours the per-request seed on /v1/responses; it accepted the field with status 200, and its effect is unchecked; eval/driver/check_seed.py settles it
-unverified_2: what headless Codex does when the model calls request_user_input; the episode time limit bounds it
+checked_1: headless Codex 0.162 answers a request_user_input call at once with the tool result "request_user_input is unavailable in Default mode" and the session goes on, so the tool cannot stall an episode; seen on 2026-10-09 with a local stand-in server that replayed a recorded tool call renamed to request_user_input. The call shows in the proxy's requests.jsonl (as that function_call_output), not in Codex's events.jsonl
 unverified_3: whether FP8 mixture-of-experts weights load on A100 under vLLM 0.21; it decides FP8 on one GPU or BF16 on two
 unverified_4: whether batched decoding makes the ten seeds independent samples; they are treated as samples, as the model host advised; eval/driver/check_seed.py shows whether two same-seed requests sent at once differ
