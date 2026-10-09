@@ -217,6 +217,7 @@ Linked skills reach every agent session as instructions, so linking pstack means
 
 ## Documentation
 
+- [docs/status.md](docs/status.md): where the work stands, what runs, the next steps and the working rules, for whoever picks it up
 - [docs/autonomy.md](docs/autonomy.md): how agents review and merge their own work, the tiers and batches of `guard ship`, the needs-you queue, and where that protection stops
 - [docs/evaluation.md](docs/evaluation.md): a proposal to measure whether the harness helps agents on local models
 - [docs/why.md](docs/why.md): the problem, alternatives, costs, and limits
