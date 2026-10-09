@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""usage: eval/run.py <config.json> [--limit N] [--keep]
+"""usage: eval/run.py <config.json> [--limit N]
 
 Runs the evaluation one episode at a time: build the episode, check the model, start the logging proxy, run the
 agent client in the sandbox with the task's prompt, stop everything, score it, and append the verdict. The
@@ -9,7 +9,7 @@ scaffold is a config value; this version knows `codex`. The config is the questi
   "run_id": "smoke-1",
   "episodes_dir": "~/.cache/hpc-sessions",            episode directories, named at random so nothing in a path
                                                        names the task, arm or seed (the mount table shows paths)
-  "results_dir": "eval/results/smoke-1",              verdicts.jsonl and episodes.tsv
+  "results_dir": "eval/results/smoke-1",              verdicts.jsonl
   "model": {"upstream": "http://127.0.0.1:19090",     the model server, here an ssh tunnel to the relay
             "alias": "default-model",                 the name the proxy pins every request to
             "expect_upstream_model": "gemma4-26B-mtp", the run stops if the alias serves anything else
@@ -86,7 +86,7 @@ def costs(log_path):
     return {"requests": reqs, "input_tokens": inp, "output_tokens": out, "max_prompt_tokens": biggest}
 
 
-def run_episode(cfg, family, variant, arm, seed, keep):
+def run_episode(cfg, family, variant, arm, seed):
     model, scaffold = cfg["model"], cfg["scaffold"]
     ep = os.path.join(expand(cfg["episodes_dir"]), secrets.token_hex(6))
     os.makedirs(os.path.dirname(ep), exist_ok=True)
@@ -156,13 +156,12 @@ def main():
         sys.exit(__doc__)
     cfg = json.load(open(args[0]))
     limit = int(args[args.index("--limit") + 1]) if "--limit" in args else None
-    keep = "--keep" in args
     results = expand(cfg["results_dir"])
     os.makedirs(results, exist_ok=True)
     m = cfg["matrix"]
     cases = list(itertools.product(m["families"], m["variants"], m["arms"], m["seeds"]))
     for n, (family, variant, arm, seed) in enumerate(cases[:limit] if limit else cases, 1):
-        row = run_episode(cfg, family, variant, arm, seed, keep)
+        row = run_episode(cfg, family, variant, arm, seed)
         row.update({"run_id": cfg["run_id"], "family": family, "variant": variant, "arm": arm, "seed": seed})
         with open(os.path.join(results, "verdicts.jsonl"), "a") as f:
             f.write(json.dumps(row, sort_keys=True) + "\n")
