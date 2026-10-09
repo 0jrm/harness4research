@@ -1,5 +1,6 @@
 {
   "run_id": "first-qwen3.6",
+  "question_card": "eval/cards/first-qwen3.6.card",
   "episodes_dir": "~/.cache/hpc-sessions",
   "results_dir": "eval/results/first-qwen3.6",
   "model": {

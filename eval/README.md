@@ -66,6 +66,24 @@ With the config's feature list, Codex 0.162 offers the model three function tool
 
 Arm E differs from an installed harness in one line, because the sandbox's remote has no pull requests. Its `AGENTS.md` says to finish by pushing to `main`, where the fence decides, instead of opening a pull request and running `guard ship`, and the `review-and-merge` skill is not linked. `episode.sh` makes that change, and the question card records it.
 
+### The question card
+
+The run's question card is drafted at `eval/cards/drafts/first-qwen3.6.card`, in the harness's flat `key: value` format. It holds the question, the hypothesis, the two primary contrasts, the kill criteria, every known deviation (`deviation_1` and on) and every claim not yet checked (`unverified_1` and on). The result in the README cites the deviations, and reports each unverified claim as unmeasured until it is checked.
+
+`eval/run.py` refuses a card that is not frozen: one with more than one commit, uncommitted edits, or a `<placeholder>` left. It records the card's sha256 and commit in `results_dir/run.json`, and a resumed run must match them. `--unfrozen` is for smoke runs, and `run.json` and every verdict say so. To freeze the card once the model host sends the alias and the launch command:
+
+```bash
+# Fill the placeholders, then move the card out of drafts in one commit; that commit freezes it
+cd ~/harness4research
+git mv eval/cards/drafts/first-qwen3.6.card eval/cards/first-qwen3.6.card
+grep -n -F -e \< eval/cards/first-qwen3.6.card
+```
+
+Expected: `grep` prints nothing once every placeholder is filled. Then commit, and set `alias` and `expect_upstream_model` in `eval/configs/codex-qwen3.6.json` to the same values.
+Worrisome: `run.py: ... has 2 commits` means the card was committed before it was complete. Start a new card under a new name; never edit a frozen one.
+
+`eval/driver/check_seed.py --upstream http://127.0.0.1:19090 --alias <alias>` settles two of the card's unverified claims: whether the server honours a per-request seed, and whether two same-seed requests sent at once come back identical.
+
 ### The smoke run
 
 On 2026-10-08 one session (t8-fixture control, arm E, seed 1) ran through this driver against the relay's `default-model`, which served Brendon's `gemma4-26B-mtp`. That is an abliterated model, used only to test the plumbing, with its output discarded. Every piece worked: the tunnel, the proxy's alias pin and seed (vLLM accepted the `seed` field with status 200), streaming, logging, the sandbox, `guard needs-you --remind` from arm E's `AGENTS.md`, the time-out kill, teardown and scoring. The model did not finish the task. It made 55 requests, mostly failing to use Codex's `apply_patch` format, and hit the 10-minute limit. The requests averaged about 13,000 input tokens, the largest prompt was 19,892 tokens, and output totalled 11,636 tokens.
