@@ -32,7 +32,7 @@ failure of episode.sh, score.py or the model check, the harness's failures and n
 error or a time-out is an outcome and does not. --limit N runs at most N of the cases left.
 
 When the alias serves another model, the run submits no new episode, records the running ones as they finish, and
-exits 2. An interrupt (Ctrl-C) does the same and exits 130; a second one quits at once, leaving the running
+exits 2. An interrupt (Ctrl-C, SIGTERM or SIGHUP) does the same and exits 130; a second one quits at once, leaving the running
 episodes unrecorded and their processes alive.
 
 Each verdict line holds the scorer's verdict plus the costs: requests, input and output tokens, the largest
@@ -247,6 +247,8 @@ def main():
     print(f"skipping {len(every) - len(cases)} of {len(every)} cases, finished earlier", flush=True)
     cases = cases[:limit]
     parallel = cfg["scaffold"].get("parallel", 1)
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, signal.default_int_handler)
     todo = iter(cases)
     n = 0
     stop = interrupted = False
