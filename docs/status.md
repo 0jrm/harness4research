@@ -58,24 +58,21 @@ The serving report answers both, on the model host's word:
 
 The owner closes both with `guard needs-you done n18` and `guard needs-you done n20`.
 
+One owner decision is open, from the report's section 8: keep FP8 and treat the repeats as samples, or switch to the BF16 weights on two GPUs. The card draft keeps FP8, as recommended on 2026-10-10: it is the publisher's checkpoint, it fits one GPU, and the design already counts seeds as samples. The choice must be made before the card freezes.
+
 ## The next steps, in order
 
-1. **A slot on the GPU.** Through the owner, ask the model host to put Qwen3.6-35B-A3B-FP8 up on an alias, first for the pilot and then for the run, and to name the alias. GPU 1 keeps GPU 0 free for the model host's own work. The owner relays messages with Brendon (bgutierrez); never contact them or change their servers yourself.
+1. **A slot on the GPU.** A message was drafted for the owner on 2026-10-10. Through the owner, ask the model host to put Qwen3.6-35B-A3B-FP8 up on an alias, first for the pilot and then for the run, and to name the alias. GPU 1 keeps GPU 0 free for the model host's own work. The owner relays messages with Brendon (bgutierrez); never contact them or change their servers yourself.
 2. **The two checks.** Done on the model host's word; see "Open items in the queue". The pilot reruns `check_seed.py`.
-3. **An analysis script.** None exists yet. Write `eval/analyze.py` over `results_dir/verdicts.jsonl`:
-   - per arm and family: rates with Wilson 95% intervals;
-   - the two primary contrasts, E minus A on violation (trap episodes) and on success (control episodes), with Newcombe intervals;
-   - exploratory figures, labelled so: escalation on t8, tokens, requests, wall time, time-outs.
-   
-   Test it on a synthetic `verdicts.jsonl` before the run.
-4. **A pilot.** Run two to four episodes with a separate `run_id` and `--unfrozen` against the Qwen3.6 instance. It measures the session length (the smoke run on a different model hit its 10-minute limit) and catches scaffold failures before any frozen episode counts. 120 episodes at the 30-minute limit is up to 60 hours, so decide where the run lives, a laptop that sleeps being a risk. The environment needs bubblewrap and the Codex binary. skynet has bubblewrap but no Codex.
+3. **The analysis script.** Done, #66. `eval/analyze.py <results_dir>` prints both primary contrasts, the tolerance verdict, the kill criterion and the exploratory tables; `--json` dumps the same numbers.
+4. **A pilot.** Run four to eight episodes with a separate `run_id` and `--unfrozen` against the Qwen3.6 instance, at the config's `parallel` of 4. It measures the session length (the smoke run on a different model hit its 10-minute limit) and the time-out rate under that load, reruns `check_seed.py`, and catches scaffold failures before any frozen episode counts. Since #67, `eval/run.py` resumes without duplicates, runs the cases in a seeded shuffled order, and runs `scaffold.parallel` episodes at once, so 120 episodes at the 30-minute limit take at most about 15 hours instead of 60, if the server keeps its speed. Decide where the run lives. A laptop that sleeps stalls the tunnel and every running episode without telling the driver, while SIGTERM, SIGHUP and Ctrl-C drain cleanly. The environment needs bubblewrap and the Codex binary. skynet has bubblewrap but no Codex.
 5. **Freeze the card.**
    - Fill the last placeholder in `eval/cards/drafts/first-qwen3.6.card`, the alias, and fold in anything the pilot changes, such as the time limit.
    - Move the card to `eval/cards/first-qwen3.6.card` in one pull request.
    - Set `alias` in `eval/configs/codex-qwen3.6.json`.
    
    The README describes the procedure in "The question card".
-6. **The run.** Open the tunnel and run `eval/run.py eval/configs/codex-qwen3.6.json` on a stable, awake machine. It stops when the alias serves another model, and a resumed run must match the card's hash.
+6. **The run.** Open the tunnel and run `eval/run.py eval/configs/codex-qwen3.6.json` under tmux on a stable, awake machine. Rerun the same command after any interruption. It stops when the alias serves another model, and a resumed run must match the card's hash.
 7. **The result.** Publish it in the README next to the Status section: the numbers with their intervals, the card's four deviations, and every claim still unverified marked unmeasured. Publish it whatever it shows. The handoff's ground rules require a source for every claim.
 
 ## Roadmap after the first result
