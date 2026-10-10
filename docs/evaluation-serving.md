@@ -70,3 +70,24 @@ The evaluation's question card freezes these before the first run, so please tel
 ## How the agents reach the server
 
 The agents connect through an SSH tunnel from the agent machine (`ssh -N -L <port>:127.0.0.1:<port> skynet`). The server can keep listening on 127.0.0.1, and nothing needs to open a public port. We read the request log only to count tokens and to match requests to sessions.
+
+## The model host's reply
+
+On 2026-10-09 the model host sent a serving report, tested on 2026-10-08 and 2026-10-09. The owner keeps the PDF. These are its facts, not rechecked by us:
+
+- All four models run from official weights at the requested commits, one A100-80GB each, on vLLM 0.21.0, and pass chat, tool calls through `/v1/chat/completions` and `/v1/responses`, a tool-result round trip, a code hidden in a 64k-token prompt (alone and four at once), and the relay.
+- FP8 works on Ampere. vLLM runs `Qwen/Qwen3.6-35B-A3B-FP8` as weight-only FP8 (W8A16) through Marlin kernels. The BF16 fallback was not downloaded.
+- Gemma 4 31B is served from Google's QAT build, `google/gemma-4-31B-it-qat-w4a16-ct`, because BF16 leaves room for about one 64k request.
+- Qwen3.6-35B-A3B-FP8 does not repeat: five same-seed requests gave five outputs, and three temperature-0 requests gave three, sent one at a time. vLLM's batch-invariant mode refuses this checkpoint. The other three models repeat with a fixed seed. On gpt-oss, the first of five requests differed, which the model host puts down to the prefix cache.
+- Each server's model id is the Hugging Face repo id. Relay aliases name GPUs: `default-model` is GPU 0, and `default-model-2` to `default-model-4` are GPUs 1 to 3. GPU 0 runs the model host's own work, so an evaluation model goes up on an alias with a day's notice and boots in 3 to 6 minutes.
+- Every server runs with `--seed 0`, `--max-model-len 131072`, `--max-num-seqs 8`, no speculative decoding, reasoning on, and image and video inputs off. The Qwen models use the `qwen3_xml` tool-call parser, not `qwen3_coder` as this page asked, and pass the tool checks with it.
+- Sampling defaults come from each checkpoint's `generation_config.json`. gpt-oss-120b and Qwen3.5-9B ship none, so the model host recommends that the harness send temperature, top_p and top_k on every request. The proxy does this from the config's `sampling` values.
+
+| Model | KV pool (tokens) | 64k requests at once | 64k prompt latency, 1 / 4 at once | Default temperature / top_p / top_k |
+|---|---|---|---|---|
+| Qwen3.6-35B-A3B-FP8 | 1,904,640 | about 29 | 12 s / 24 s | 1.0 / 0.95 / 20 |
+| Gemma 4 31B QAT | 393,685 | about 6 | 70 s / 259 s | 1.0 / 0.95 / 64 |
+| gpt-oss-120b | 200,075 | about 3 | 21 s / 59-80 s | 1.0 / 1.0 / none |
+| Qwen3.5-9B | 1,737,744 | about 27 | 22 s / 32 s | 1.0 / 1.0 / none |
+
+The report's section 6 holds each launch command. The question card copies the one it runs.

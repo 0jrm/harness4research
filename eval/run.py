@@ -14,7 +14,8 @@ scaffold is a config value; this version knows `codex`. The config is the questi
   "model": {"upstream": "http://127.0.0.1:19090",     the model server, here an ssh tunnel to the relay
             "alias": "default-model",                 the name the proxy pins every request to
             "expect_upstream_model": "gemma4-26B-mtp", the run stops if the alias serves anything else
-            "seed_base": 1000},                       each episode's requests carry seed_base + its seed
+            "seed_base": 1000,                        each episode's requests carry seed_base + its seed
+            "sampling": {"temperature": 1.0}},        the proxy sets these on every request
   "scaffold": {"name": "codex", "release_dir": "~/.codex/packages/standalone/releases/<version>",
                "context_window": 65536, "timeout_minutes": 30, "disable_features": [...]},
   "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E"], "seeds": [1, 2]}
@@ -139,7 +140,8 @@ def run_episode(cfg, family, variant, arm, seed):
     log = os.path.join(ep, "state", "model", "requests.jsonl")
     proxy = subprocess.Popen([sys.executable, os.path.join(HERE, "driver", "proxy.py"), "--upstream", model["upstream"],
                               "--alias", model["alias"], "--seed", str(model["seed_base"] + seed), "--log", log,
-                              "--port-file", port_file], start_new_session=True)
+                              "--port-file", port_file, "--sampling", json.dumps(model.get("sampling", {}))],
+                             start_new_session=True)
     for _ in range(100):
         if os.path.exists(port_file) and open(port_file).read().strip():
             break

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""usage: proxy.py --upstream URL --alias NAME --log FILE --port-file FILE [--seed N]
+"""usage: proxy.py --upstream URL --alias NAME --log FILE --port-file FILE [--seed N] [--sampling JSON]
 
 A logging proxy between one episode's agent client and the model server. It runs outside the sandbox, on
 127.0.0.1 at a free port, which it writes to --port-file once it listens. For every request it:
 
 - pins the model: a JSON body's "model" becomes --alias, so the agent cannot pick another GPU or model;
 - adds a seed: with --seed, a body without "seed" gets one, as the model host asked for per-request seeds;
+- pins sampling: with --sampling '{"temperature": 1.0, ...}', every body gets those values, replacing the client's,
+  so every model runs at settings the question card chose rather than at its server's defaults;
 - streams the reply back unchanged, server-sent events included;
 - appends one JSON line to --log: the time, path, status, the request as sent upstream, the reply as received,
   and the token usage the reply reports.
@@ -65,6 +67,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     request_json["model"] = cfg.alias
                 if cfg.seed is not None and "seed" not in request_json:
                     request_json["seed"] = cfg.seed
+                request_json.update(cfg.sampling)
                 sent = json.dumps(request_json).encode()
         up = urllib.parse.urlsplit(cfg.upstream)
         headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
@@ -119,6 +122,7 @@ def main():
     ap.add_argument("--log", required=True)
     ap.add_argument("--port-file", required=True)
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--sampling", type=json.loads, default={})
     ap.add_argument("--timeout", type=float, default=600)
     cfg = ap.parse_args()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
