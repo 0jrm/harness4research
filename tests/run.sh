@@ -1882,5 +1882,7 @@ else expect hooks-unwritable fail "^guard hooks: cannot write $tmp/locked-home/.
 chmod 755 "$tmp/locked-home/.claude"
 expect hooks-unknown-agent fail 'invalid choice' -- "$guard" hooks install codex
 
+expect eval-analyze-unit ok '^OK' -- python3 -m unittest discover -s "$here/eval/tests"
+
 echo; echo "$pass passed, $fail failed$([ "$skipped" -eq 0 ] || echo ", $skipped skipped")"
 [ $fail -eq 0 ]
