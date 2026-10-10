@@ -1,6 +1,6 @@
 # Status and hand-off
 
-Written on 2026-10-09 for the agent who takes over as chief of staff. Main is at `9c3ccb6`, schema 5. Keep this page current, or replace it, as items move.
+Written on 2026-10-09 for the agent who takes over as chief of staff, and updated on 2026-10-10 with the model host's serving report. Keep this page current, or replace it, as items move.
 
 ## The big picture
 
@@ -28,8 +28,8 @@ The evaluation compares arms of the harness (A: none, through E: full) on trap t
 | 6 | evaluation environment | done, #55 (rootless, not Docker: FSU machines give no sudo); its self-test runs in CI since #57 |
 | 7 | traps 1, 3, 8 with controls | done, #58; 48 of 48 scripted verdicts matched |
 | 8 | the run driver, Codex on vLLM | done, #60 |
-| 9 | question card, frozen, hash recorded | drafted, #62; `eval/run.py` enforces the freeze; the model host's values are missing |
-| 10 | arms A and E, one model, ten seeds, published with intervals | blocked: the model host does not serve Qwen3.6 yet |
+| 9 | question card, frozen, hash recorded | drafted, #62; `eval/run.py` enforces the freeze; the serving report filled the launch command and the FP8 outcome; only the alias is missing |
+| 10 | arms A and E, one model, ten seeds, published with intervals | blocked: Qwen3.6 is tested but not up on an alias; the model host needs a day's notice |
 | 11 | pstack opt-in, canonical source, pinned | done early at the owner's request, #59 |
 | 12 | GPU TRES accounting in preflight | open. skynet's Slurm accounts no gres/gpu, so check the target cluster first |
 | 13 | short and space-separated `#SBATCH` forms | open. #56 fixed the time grammar, a related bug, not this |
@@ -43,25 +43,25 @@ The handoff says not to start items 12 to 17 before item 10's result, except as 
 
 ## What is running
 
-- Nothing of this project runs: no episode, proxy, tunnel or service. `~/.cache/hpc-sessions` is empty.
-- On skynet (read-only check, 2026-10-09 16:24 UTC):
-  - GPU 0 holds the model host's Gemma server, idle;
-  - GPUs 2 and 3 run the owner's own `hycom-emulator` training;
-  - GPU 1 was free.
-- The relay on `127.0.0.1:9090` lists only `gemma4-26B-mtp` on `default-model`. That model is abliterated and out of bounds for the evaluation.
-- The four panel models are downloaded at the commits requested, in `/unity/g1/bgutierrez/Project/vLLM-bdgr/models/`: `qwen36-35b-fp8`, `gemma4-31b-qat`, `gptoss-120b` and `qwen35-9b`. None is served. The model host asked us to stay off GPU 0 while they configure them.
+- Nothing of this project runs: no episode, proxy, tunnel or service.
+- On skynet (read-only check, 2026-10-10):
+  - GPU 0 holds the model host's `gemma4-26B-mtp` on `default-model`, idle. That model is abliterated and out of bounds for the evaluation;
+  - GPUs 1 to 3 are empty, and their aliases report `failed`.
+- The model host's serving report (2026-10-09, a PDF the owner keeps) says all four panel models boot and pass its checks, one per A100. `docs/evaluation-serving.md` summarizes it under "The model host's reply". None of them is up now. An evaluation model goes up on an alias with a day's notice.
 
 ## Open items in the queue
 
-- `n18`: does the server honour the per-request seed? Run `eval/driver/check_seed.py` once Qwen3.6 is served.
-- `n20`: does Qwen3.6 FP8 load on one A100? If not, the card's setting switches to the BF16 weights on two GPUs.
+The serving report answers both, on the model host's word:
 
-`guard needs-you` shows both, with their commands.
+- `n18`, the seed. Qwen3.6-35B-A3B-FP8 does not repeat, not even at temperature 0, so the ten seeds are samples and the proxy log is the record. The card says so in `unverified_1` and `unverified_4`. `check_seed.py` reruns in the pilot.
+- `n20`, FP8 on one A100. It loads as W8A16 through Marlin. The card says so in `checked_3`.
+
+The owner closes both with `guard needs-you done n18` and `guard needs-you done n20`.
 
 ## The next steps, in order
 
-1. **The model host's values.** Get the relay alias of the Qwen3.6 instance and its `vllm serve` command. The owner relays messages with Brendon (bgutierrez); never contact them or change their servers yourself.
-2. **The two checks.** Run n20 by reading `/v1/models` through the tunnel, and n18 with `check_seed.py`. Report the outcomes, so the owner can close the items with a note.
+1. **A slot on the GPU.** Through the owner, ask the model host to put Qwen3.6-35B-A3B-FP8 up on an alias, first for the pilot and then for the run, and to name the alias. GPU 1 keeps GPU 0 free for the model host's own work. The owner relays messages with Brendon (bgutierrez); never contact them or change their servers yourself.
+2. **The two checks.** Done on the model host's word; see "Open items in the queue". The pilot reruns `check_seed.py`.
 3. **An analysis script.** None exists yet. Write `eval/analyze.py` over `results_dir/verdicts.jsonl`:
    - per arm and family: rates with Wilson 95% intervals;
    - the two primary contrasts, E minus A on violation (trap episodes) and on success (control episodes), with Newcombe intervals;
@@ -70,10 +70,9 @@ The handoff says not to start items 12 to 17 before item 10's result, except as 
    Test it on a synthetic `verdicts.jsonl` before the run.
 4. **A pilot.** Run two to four episodes with a separate `run_id` and `--unfrozen` against the Qwen3.6 instance. It measures the session length (the smoke run on a different model hit its 10-minute limit) and catches scaffold failures before any frozen episode counts. 120 episodes at the 30-minute limit is up to 60 hours, so decide where the run lives, a laptop that sleeps being a risk. The environment needs bubblewrap and the Codex binary. skynet has bubblewrap but no Codex.
 5. **Freeze the card.**
-   - Fill the placeholders in `eval/cards/drafts/first-qwen3.6.card`: the alias, the launch command, and the FP8 or BF16 outcome from n20. `<the commit this card is frozen in>` cannot name its own commit, so replace it with a sentence saying that `run.json` records it as `card_commit`.
-   - Fold n18's outcome into `unverified_1` and `unverified_4`.
+   - Fill the last placeholder in `eval/cards/drafts/first-qwen3.6.card`, the alias, and fold in anything the pilot changes, such as the time limit.
    - Move the card to `eval/cards/first-qwen3.6.card` in one pull request.
-   - Set `alias` and `expect_upstream_model` in `eval/configs/codex-qwen3.6.json`.
+   - Set `alias` in `eval/configs/codex-qwen3.6.json`.
    
    The README describes the procedure in "The question card".
 6. **The run.** Open the tunnel and run `eval/run.py eval/configs/codex-qwen3.6.json` on a stable, awake machine. It stops when the alias serves another model, and a resumed run must match the card's hash.
@@ -81,7 +80,7 @@ The handoff says not to start items 12 to 17 before item 10's result, except as 
 
 ## Roadmap after the first result
 
-1. **Rebuild the doubts first.** Write traps 2, 4, 5, 6, 7 and 9 with their controls, the same way: a scorer validated by scripted honest and cheating agents through `eval/validate.py`. Add arms B (prose only), C (scripts only) and D (scripts and prose), then the other three models. Each needs its parser settings from the model host: Gemma 4 31B QAT, gpt-oss-120b, Qwen3.5-9B.
+1. **Rebuild the doubts first.** Write traps 2, 4, 5, 6, 7 and 9 with their controls, the same way: a scorer validated by scripted honest and cheating agents through `eval/validate.py`. Add arms B (prose only), C (scripts only) and D (scripts and prose), then the other three models. The serving report gives each one's launch command and parsers: Gemma 4 31B QAT, gpt-oss-120b, Qwen3.5-9B. Pin `sampling` in each config, because gpt-oss-120b and Qwen3.5-9B ship no defaults.
 2. **The secondary scaffold.** Run mini-swe-agent or Inspect's `react()` on one model, to check that findings are not Codex artifacts. It is also the main scaffold for the 9B model, where Codex's own prompt takes much of the context.
 3. **The capability tax.** Run ScienceAgentBench-verified or CORE-Bench v1.1 under arms A and E on two models, and report any cost beside the violation numbers.
 4. **The P2 items** 12 to 17, after the result, in the owner's order.
