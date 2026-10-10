@@ -18,8 +18,9 @@ scaffold is a config value; this version knows `codex`. The config is the questi
             "sampling": {"temperature": 1.0}},        the proxy sets these on every request
   "scaffold": {"name": "codex", "release_dir": "~/.codex/packages/standalone/releases/<version>",
                "context_window": 65536, "timeout_minutes": 30, "disable_features": [...]},
-  "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E"], "seeds": [1, 2]}
-}
+  "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E"], "seeds": [1, 2],
+             "order_seed": 20261010}                 the cases run in an order shuffled with this seed, so that
+}                                                      arm and family do not move with the time of day or the server
 
 Before the first episode it checks the question card, refuses one that is not frozen, and writes run.json in
 results_dir with the card's sha256 and commit, the harness commit and the config; a resumed run must match it.
@@ -35,8 +36,9 @@ prompt, wall seconds, the client's exit code, and whether the episode hit its ti
 import hashlib
 import itertools
 import json
-import re
 import os
+import random
+import re
 import secrets
 import signal
 import subprocess
@@ -223,6 +225,7 @@ def main():
                 latest[(r["family"], r["variant"], r["arm"], r["seed"])] = r
     m = cfg["matrix"]
     every = list(itertools.product(m["families"], m["variants"], m["arms"], m["seeds"]))
+    random.Random(m["order_seed"]).shuffle(every)
     cases = [c for c in every if c not in latest or "error" in latest[c]]
     print(f"skipping {len(every) - len(cases)} of {len(every)} cases, finished earlier", flush=True)
     cases = cases[:limit]
