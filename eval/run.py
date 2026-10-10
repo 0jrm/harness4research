@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """usage: eval/run.py <config.json> [--limit N] [--unfrozen]
 
-Runs the evaluation one episode at a time: build the episode, check the model, start the logging proxy, run the
-agent client in the sandbox with the task's prompt, stop everything, score it, and append the verdict. The
-scaffold is a config value; this version knows `codex`. The config is the question card's machine part:
+Runs the evaluation, scaffold.parallel episodes at a time (1 when absent). Each episode: build it, check the model,
+start the logging proxy, run the agent client in the sandbox with the task's prompt, stop everything, score it.
+The main thread appends each verdict as it arrives. The scaffold is a config value; this version knows `codex`.
+The config is the question card's machine part:
 
 {
   "run_id": "smoke-1",
@@ -17,7 +18,7 @@ scaffold is a config value; this version knows `codex`. The config is the questi
             "seed_base": 1000,                        each episode's requests carry seed_base + its seed
             "sampling": {"temperature": 1.0}},        the proxy sets these on every request
   "scaffold": {"name": "codex", "release_dir": "~/.codex/packages/standalone/releases/<version>",
-               "context_window": 65536, "timeout_minutes": 30, "disable_features": [...]},
+               "context_window": 65536, "timeout_minutes": 30, "parallel": 4, "disable_features": [...]},
   "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E"], "seeds": [1, 2],
              "order_seed": 20261010}                 the cases run in an order shuffled with this seed, so that
 }                                                      arm and family do not move with the time of day or the server
@@ -30,9 +31,14 @@ A rerun resumes: it skips every case whose latest verdict has no "error". A case
 failure of episode.sh, score.py or the model check, the harness's failures and not outcomes) runs again; a client
 error or a time-out is an outcome and does not. --limit N runs at most N of the cases left.
 
+When the alias serves another model, the run submits no new episode, records the running ones as they finish, and
+exits 2. An interrupt (Ctrl-C) does the same and exits 130; a second one quits at once, leaving the running
+episodes unrecorded and their processes alive.
+
 Each verdict line holds the scorer's verdict plus the costs: requests, input and output tokens, the largest
 prompt, wall seconds, the client's exit code, and whether the episode hit its time limit.
 """
+import concurrent.futures
 import hashlib
 import itertools
 import json
@@ -126,13 +132,13 @@ def costs(log_path):
     return {"requests": reqs, "input_tokens": inp, "output_tokens": out, "max_prompt_tokens": biggest}
 
 
-def run_episode(cfg, family, variant, arm, seed):
+def run_episode(cfg, ep, family, variant, arm, seed):
     model, scaffold = cfg["model"], cfg["scaffold"]
-    ep = os.path.join(expand(cfg["episodes_dir"]), secrets.token_hex(6))
     os.makedirs(os.path.dirname(ep), exist_ok=True)
     built = subprocess.run([os.path.join(HERE, "episode.sh"), family, variant, arm, ep, "--seed", str(seed)],
                            capture_output=True, text=True)
     if built.returncode:
+        subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
         return {"episode": ep, "error": "episode.sh: " + built.stderr.strip()[-300:]}
     meta = json.load(open(os.path.join(ep, "meta.json")))
     served = model_check(model)
@@ -191,6 +197,17 @@ def run_episode(cfg, family, variant, arm, seed):
     return row
 
 
+def attempt(cfg, case):
+    """run_episode in a fresh directory, with an exception kept as the case's error, so that the other episodes go
+    on and a rerun retries the case."""
+    ep = os.path.join(expand(cfg["episodes_dir"]), secrets.token_hex(6))
+    try:
+        return run_episode(cfg, ep, *case)
+    except Exception as e:
+        subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
+        return {"episode": os.path.basename(ep), "error": f"run.py: {e!r}"}
+
+
 def main():
     args = sys.argv[1:]
     if not args or args[0].startswith("-"):
@@ -229,17 +246,38 @@ def main():
     cases = [c for c in every if c not in latest or "error" in latest[c]]
     print(f"skipping {len(every) - len(cases)} of {len(every)} cases, finished earlier", flush=True)
     cases = cases[:limit]
-    for n, (family, variant, arm, seed) in enumerate(cases, 1):
-        row = run_episode(cfg, family, variant, arm, seed)
-        row.update({"run_id": cfg["run_id"], "family": family, "variant": variant, "arm": arm, "seed": seed,
-                    "card_sha256": card_sha, "unfrozen": unfrozen})
-        with open(verdicts, "a") as f:
-            f.write(json.dumps(row, sort_keys=True) + "\n")
-        print(f"{n}/{len(cases)} {family} {variant} arm {arm} seed {seed}: "
-              + (row.get("error") or f"violation={row['violation']} success={row['success']} "
-                 f"requests={row['requests']} wall={row['wall_seconds']}s"), flush=True)
-        if row.get("stop_run"):
-            sys.exit(2)
+    parallel = cfg["scaffold"].get("parallel", 1)
+    todo = iter(cases)
+    n = 0
+    stop = interrupted = False
+    with concurrent.futures.ThreadPoolExecutor(parallel) as pool:
+        running = {pool.submit(attempt, cfg, c): c for c in itertools.islice(todo, parallel)}
+        while running:
+            try:
+                done, _ = concurrent.futures.wait(running, return_when=concurrent.futures.FIRST_COMPLETED)
+            except KeyboardInterrupt:
+                if interrupted:
+                    os._exit(130)
+                interrupted = True
+                print(f"interrupted: finishing the {len(running)} running episodes; interrupt again to quit "
+                      "without them", flush=True)
+                continue
+            for fut in done:
+                family, variant, arm, seed = running.pop(fut)
+                row = fut.result()
+                row.update({"run_id": cfg["run_id"], "family": family, "variant": variant, "arm": arm,
+                            "seed": seed, "card_sha256": card_sha, "unfrozen": unfrozen})
+                with open(verdicts, "a") as f:
+                    f.write(json.dumps(row, sort_keys=True) + "\n")
+                n += 1
+                print(f"{n}/{len(cases)} {family} {variant} arm {arm} seed {seed}: "
+                      + (row.get("error") or f"violation={row['violation']} success={row['success']} "
+                         f"requests={row['requests']} wall={row['wall_seconds']}s"), flush=True)
+                stop = stop or bool(row.get("stop_run"))
+            if not (stop or interrupted):
+                running.update({pool.submit(attempt, cfg, c): c for c in itertools.islice(todo, len(done))})
+    if stop or interrupted:
+        sys.exit(2 if stop else 130)
 
 
 if __name__ == "__main__":

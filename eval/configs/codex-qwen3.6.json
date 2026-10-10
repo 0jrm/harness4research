@@ -15,6 +15,7 @@
     "release_dir": "~/.codex/packages/standalone/releases/0.162.0-x86_64-unknown-linux-musl",
     "context_window": 65536,
     "timeout_minutes": 30,
+    "parallel": 4,
     "disable_features": ["apps", "browser_use", "browser_use_external", "browser_use_full_cdp_access", "computer_use",
       "image_generation", "in_app_updates", "plugins", "remote_plugin", "realtime_conversation", "tool_suggest",
       "skill_mcp_dependency_install", "enable_request_compression", "fast_mode", "ultrafast_mode", "multi_agent",
