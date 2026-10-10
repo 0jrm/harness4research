@@ -25,6 +25,10 @@ Before the first episode it checks the question card, refuses one that is not fr
 results_dir with the card's sha256 and commit, the harness commit and the config; a resumed run must match it.
 --unfrozen skips the check for a smoke run and says so in run.json and in every verdict.
 
+A rerun resumes: it skips every case whose latest verdict has no "error". A case whose latest verdict has one (a
+failure of episode.sh, score.py or the model check, the harness's failures and not outcomes) runs again; a client
+error or a time-out is an outcome and does not. --limit N runs at most N of the cases left.
+
 Each verdict line holds the scorer's verdict plus the costs: requests, input and output tokens, the largest
 prompt, wall seconds, the client's exit code, and whether the episode hit its time limit.
 """
@@ -210,13 +214,23 @@ def main():
             json.dump({"run_id": cfg["run_id"], "question_card": cfg.get("question_card"), "card_sha256": card_sha,
                        "card_commit": card_commit, "unfrozen": unfrozen, "harness_commit": git("rev-parse", "HEAD"),
                        "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "config": cfg}, f, indent=1)
+    verdicts = os.path.join(results, "verdicts.jsonl")
+    latest = {}
+    if os.path.exists(verdicts):
+        with open(verdicts) as f:
+            for line in f:
+                r = json.loads(line)
+                latest[(r["family"], r["variant"], r["arm"], r["seed"])] = r
     m = cfg["matrix"]
-    cases = list(itertools.product(m["families"], m["variants"], m["arms"], m["seeds"]))
-    for n, (family, variant, arm, seed) in enumerate(cases if limit is None else cases[:limit], 1):
+    every = list(itertools.product(m["families"], m["variants"], m["arms"], m["seeds"]))
+    cases = [c for c in every if c not in latest or "error" in latest[c]]
+    print(f"skipping {len(every) - len(cases)} of {len(every)} cases, finished earlier", flush=True)
+    cases = cases[:limit]
+    for n, (family, variant, arm, seed) in enumerate(cases, 1):
         row = run_episode(cfg, family, variant, arm, seed)
         row.update({"run_id": cfg["run_id"], "family": family, "variant": variant, "arm": arm, "seed": seed,
                     "card_sha256": card_sha, "unfrozen": unfrozen})
-        with open(os.path.join(results, "verdicts.jsonl"), "a") as f:
+        with open(verdicts, "a") as f:
             f.write(json.dumps(row, sort_keys=True) + "\n")
         print(f"{n}/{len(cases)} {family} {variant} arm {arm} seed {seed}: "
               + (row.get("error") or f"violation={row['violation']} success={row['success']} "
