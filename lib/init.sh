@@ -44,7 +44,9 @@ from=$p_from; [ "$from" = unknown ] && from=""
 place() {
   local src=$1 dst=$2 mode=${3:-keep}
   if [ -e "$wt/$dst" ] && [ "$mode" = keep ]; then skipped+=("$dst"); return; fi
-  mkdir -p "$(dirname "$wt/$dst")"; cp -p "$src" "$wt/$dst"; added+=("$dst")
+  mkdir -p "$(dirname "$wt/$dst")"; cp "$src" "$wt/$dst"; added+=("$dst")
+  # cp -p also copies ACLs, which NFS homes such as skynet's refuse; the execute bit is the mode that matters.
+  if [ -x "$src" ]; then chmod +x "$wt/$dst"; fi
 }
 # Insert one line when its key is absent. Prefer the line after `after`, else before `before`.
 insert_line() {
