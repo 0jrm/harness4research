@@ -1,6 +1,6 @@
 # Status and hand-off
 
-Written on 2026-10-09 for the agent who takes over as chief of staff, and updated on 2026-10-10 with the model host's serving report. Keep this page current, or replace it, as items move.
+Written on 2026-10-09 for the agent who takes over as chief of staff, and updated on 2026-10-10 with the model host's serving report and on 2026-10-11 with the pipeline test on skynet. Keep this page current, or replace it, as items move.
 
 ## The big picture
 
@@ -44,9 +44,11 @@ The handoff says not to start items 12 to 17 before item 10's result, except as 
 ## What is running
 
 - Nothing of this project runs: no episode, proxy, tunnel or service.
-- On skynet (read-only check, 2026-10-10):
-  - GPU 0 holds the model host's `gemma4-26B-mtp` on `default-model`, idle. That model is abliterated and out of bounds for the evaluation;
+- On skynet (read-only check, 2026-10-11, 23:13 UTC):
+  - GPU 0 holds the model host's server on `default-model`. About 22:44 UTC they restarted it with another checkpoint, `models/artemis31b`, under the same served name `gemma4-26B-mtp`, with a context length of 262144. Neither model is in bounds for the evaluation;
   - GPUs 1 to 3 are empty, and their aliases report `failed`.
+- The relay does not load a model on request: a request naming Qwen3.6 got 404 "does not exist". A model must already run behind an alias.
+- skynet is set up to run the evaluation: the evaluation clone `~/h4r-eval` (kept apart from `~/harness4research`, which backs the owner's `guard` there), the Codex 0.162 release under `~/.codex`, and `eval/env/selftest.sh` passing 28 of 28. Results of the pipeline test, discarded, are in `~/eval-scratch`. Git on that NFS home can stall; when an `ssh` pull times out, check `git status` and reset the clone to `origin/main`.
 - The model host's serving report (2026-10-09, a PDF the owner keeps) says all four panel models boot and pass its checks, one per A100. `docs/evaluation-serving.md` summarizes it under "The model host's reply". None of them is up now. An evaluation model goes up on an alias with a day's notice.
 
 ## Open items in the queue
@@ -65,7 +67,7 @@ The report's section 8 left one choice to us: keep FP8 and treat the repeats as 
 1. **A slot on the GPU.** A message was drafted for the owner on 2026-10-10. Through the owner, ask the model host to put Qwen3.6-35B-A3B-FP8 up on an alias, first for the pilot and then for the run, and to name the alias. The report's own plan is GPU 0 (`default-model`) with a day's notice, the path the model host tested through the relay. Another GPU is the model host's call, not ours. The owner relays messages with Brendon (bgutierrez); never contact them or change their servers yourself.
 2. **The two checks.** Done on the model host's word; see "Open items in the queue". The pilot reruns `check_seed.py`.
 3. **The analysis script.** Done, #66. `eval/analyze.py <results_dir>` prints both primary contrasts, the tolerance verdict, the kill criterion and the exploratory tables; `--json` dumps the same numbers.
-4. **A pilot.** Run four to eight episodes with a separate `run_id` and `--unfrozen` against the Qwen3.6 instance, at the config's `parallel` of 4. It measures the session length (the smoke run on a different model hit its 10-minute limit) and the time-out rate under that load, reruns `check_seed.py`, and catches scaffold failures before any frozen episode counts. Since #67, `eval/run.py` resumes without duplicates, runs the cases in a seeded shuffled order, and runs `scaffold.parallel` episodes at once, so 120 episodes at the 30-minute limit take at most about 15 hours instead of 60, if the server keeps its speed. Decide where the run lives. A laptop that sleeps stalls the tunnel and every running episode without telling the driver, while SIGTERM, SIGHUP and Ctrl-C drain cleanly. The environment needs bubblewrap and the Codex binary. skynet has bubblewrap but no Codex.
+4. **A pilot.** Run four to eight episodes on skynet with a separate `run_id` and `--unfrozen` against the Qwen3.6 instance, at the config's `parallel` of 4. Leave `expect_root` out of the pilot's config: the check then records `served_root` in `run.json`, and that value becomes `expect_root` before the freeze. It measures the session length (the smoke run on a different model hit its 10-minute limit) and the time-out rate under that load, reruns `check_seed.py`, and catches scaffold failures before any frozen episode counts. Since #67, `eval/run.py` resumes without duplicates, runs the cases in a seeded shuffled order, and runs `scaffold.parallel` episodes at once, so 120 episodes at the 30-minute limit take at most about 15 hours instead of 60, if the server keeps its speed. Decide where the run lives. A laptop that sleeps stalls the tunnel and every running episode without telling the driver, while SIGTERM, SIGHUP and Ctrl-C drain cleanly. A pipeline test on 2026-10-11 against the model host's Gemma, output discarded, found and fixed three things: `guard init` failed on NFS homes (#70), the t1 scorer counted a job stopped at its allowed limit as over the cap (#71), and the model check missed a checkpoint swapped under the same served name (#72, which also reruns episodes a server outage ended).
 5. **Freeze the card.**
    - Fill the last placeholder in `eval/cards/drafts/first-qwen3.6.card`, the alias, and fold in anything the pilot changes, such as the time limit.
    - Move the card to `eval/cards/first-qwen3.6.card` in one pull request.
