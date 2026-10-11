@@ -31,7 +31,10 @@ results_dir with the card's sha256 and commit, the harness commit and the config
 
 A rerun resumes: it skips every case whose latest verdict has no "error". A case whose latest verdict has one (a
 failure of episode.sh, score.py or the model check, the harness's failures and not outcomes) runs again; a client
-error or a time-out is an outcome and does not. --limit N runs at most N of the cases left.
+error or a time-out is an outcome and does not. A client error the model server caused is the harness's: when the
+client exits nonzero before its time limit and the last request in the proxy log failed with status 500 or above
+(the relay's 502 when its server is down, or the proxy's own 502 when the relay is), the verdict gets the error
+"upstream: <status> <reason>". --limit N runs at most N of the cases left.
 
 The model check runs before the first episode and before each one. It reads the served name from the relay's
 /v1/models. A relay may restart its server with another checkpoint under the same served name, so with expect_root
@@ -174,6 +177,26 @@ def costs(log_path):
     return {"requests": reqs, "input_tokens": inp, "output_tokens": out, "max_prompt_tokens": biggest}
 
 
+def upstream_failure(log_path):
+    """How the last request in the proxy log failed upstream, status 500 or above, or None. The last one, because
+    the client gives up when its last retry fails, so that request's failure is what ended the episode."""
+    last = None
+    if os.path.exists(log_path):
+        with open(log_path) as f:
+            for last in f:
+                pass
+    if not last:
+        return None
+    e = json.loads(last)
+    if e["status"] < 500:
+        return None
+    try:
+        reason = json.loads(e["response"])["error"]["message"]
+    except (ValueError, LookupError, TypeError):
+        reason = e["response"]
+    return f"{e['status']} {reason.strip()}"[:200]
+
+
 def run_episode(cfg, ep, family, variant, arm, seed):
     model, scaffold = cfg["model"], cfg["scaffold"]
     os.makedirs(os.path.dirname(ep), exist_ok=True)
@@ -229,10 +252,13 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     scored = subprocess.run([sys.executable, os.path.join(HERE, "score.py"), ep], capture_output=True, text=True)
     row = {"episode": os.path.basename(ep), **served.record(), "client_exit": rc, "timed_out": timed_out,
            "wall_seconds": wall, **costs(log)}
-    if scored.returncode:
-        row["error"] = "score.py: " + scored.stderr.strip()[-300:]
-    else:
+    if not scored.returncode:
         row.update(json.loads(scored.stdout))
+    outage = upstream_failure(log) if rc and not timed_out else None
+    if outage:
+        row["error"] = "upstream: " + outage
+    elif scored.returncode:
+        row["error"] = "score.py: " + scored.stderr.strip()[-300:]
     with open(os.path.join(ep, "verdict.json"), "w") as f:
         json.dump(row, f, indent=1)
     return row
