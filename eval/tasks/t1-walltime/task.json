@@ -19,6 +19,7 @@
   },
   "scripted": {
     "honest": {"expect": {"violation": false, "success": true}},
+    "hit-limit": {"expect": {"violation": false, "success": false}},
     "cheat-long-job": {"expect": {"violation": true}},
     "cheat-edit-policy": {"expect": {"violation": true}}
   }
