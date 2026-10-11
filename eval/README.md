@@ -48,14 +48,13 @@ Inside, the environment holds only `HOME`, `USER`, `LOGNAME`, `PATH`, `LANG` and
 ## Running the evaluation
 
 ```shell
-ssh -N -L 127.0.0.1:19090:localhost:9090 skynet &      # the tunnel to the model host's relay
-eval/run.py eval/configs/codex-qwen3.6.json [--limit N]
+eval/run.py eval/configs/codex-qwen3.6.json [--limit N]     # on skynet, beside the relay at 127.0.0.1:9090
 ```
 
 `eval/run.py` is the one driver, and the scaffold is a config value. This version knows `codex`. For each cell of the config's matrix (family, variant, arm, seed), it does seven things:
 
 1. It builds an episode with `episode.sh` in a randomly named directory under `episodes_dir`.
-2. It reads the relay's `/v1/models` and stops the run if `alias` no longer serves `expect_upstream_model`. A relay alias names a GPU, not a model, so the model host can swap what is behind it.
+2. It reads the relay's `/v1/models` and stops the run if `alias` no longer serves `expect_upstream_model`. A relay alias names a GPU, not a model, so the model host can swap what is behind it. The served name alone can hide a swap: on 2026-10-11 the model host restarted `default-model` with another checkpoint under the same `--served-model-name`. So when the config sets `expect_root` or `expect_max_model_len`, the check also reads the alias's `base_url` from the relay's `/admin/endpoints` and `root` (the checkpoint path) and `max_model_len` from `<base_url>/models`, and stops the run if either differs or either lookup fails. `base_url` names a port on the relay's host, which is why the driver runs on skynet. `run.json` and every verdict record what the check saw, as `served`, `served_root` and `served_max_model_len`.
 3. It starts `driver/proxy.py` outside the sandbox. The proxy pins every request to `alias`, adds the seed `seed_base + seed`, sets the config's `sampling` values, and logs each request and streamed reply, with its token usage, to `state/model/requests.jsonl`.
 4. It writes `~/.codex/config.toml` into the sandbox home. The config sets the proxy as a Responses-API provider, `model_context_window` pinned (Codex cannot learn it from a custom provider), no approval prompts, no Codex sandbox (bubblewrap already isolates the agent), web search off, and the features in `disable_features` off.
 5. It binds the Codex release directory read-only at `/opt/codex` and runs `codex exec --json` with the task's prompt in the project directory. The events go to `state/agent/events.jsonl`, and the run is killed at `timeout_minutes`.
@@ -85,10 +84,10 @@ git mv eval/cards/drafts/first-qwen3.6.card eval/cards/first-qwen3.6.card
 grep -n -F -e \< eval/cards/first-qwen3.6.card
 ```
 
-Expected: `grep` prints nothing once every placeholder is filled. Then commit, and set `alias` in `eval/configs/codex-qwen3.6.json` to the same value.
+Expected: `grep` prints nothing once every placeholder is filled. Then commit, and set `alias` in `eval/configs/codex-qwen3.6.json` to the same value. Also set its `expect_root` to the `served_root` in the pilot's `run.json`. The model host's launch command loads the relative path `models/qwen36-35b-fp8` from its vLLM project folder, so only the server can say what absolute path it reports. The pilot's config leaves `expect_root` out and keeps `expect_max_model_len`, which makes the check read and record `root` without comparing it.
 Worrisome: `run.py: ... has 2 commits` means the card was committed before it was complete. Start a new card under a new name; never edit a frozen one.
 
-`eval/driver/check_seed.py --upstream http://127.0.0.1:19090 --alias <alias>` settles two of the card's unverified claims: whether the server honours a per-request seed, and whether two same-seed requests sent at once come back identical. The model host reports that Qwen3.6-35B-A3B-FP8 does not repeat even at temperature 0, so for that model the two identical lines may say no; the pilot reruns it.
+`eval/driver/check_seed.py --upstream http://127.0.0.1:9090 --alias <alias>` settles two of the card's unverified claims: whether the server honours a per-request seed, and whether two same-seed requests sent at once come back identical. The model host reports that Qwen3.6-35B-A3B-FP8 does not repeat even at temperature 0, so for that model the two identical lines may say no; the pilot reruns it.
 
 ### The smoke run
 
