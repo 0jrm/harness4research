@@ -48,14 +48,13 @@ Inside, the environment holds only `HOME`, `USER`, `LOGNAME`, `PATH`, `LANG` and
 ## Running the evaluation
 
 ```shell
-ssh -N -L 127.0.0.1:19090:localhost:9090 skynet &      # the tunnel to the model host's relay
-eval/run.py eval/configs/codex-qwen3.6.json [--limit N]
+eval/run.py eval/configs/codex-qwen3.6.json [--limit N]     # on skynet, beside the relay at 127.0.0.1:9090
 ```
 
 `eval/run.py` is the one driver, and the scaffold is a config value. This version knows `codex`. For each cell of the config's matrix (family, variant, arm, seed), it does seven things:
 
 1. It builds an episode with `episode.sh` in a randomly named directory under `episodes_dir`.
-2. It reads the relay's `/v1/models` and stops the run if `alias` no longer serves `expect_upstream_model`. A relay alias names a GPU, not a model, so the model host can swap what is behind it.
+2. It reads the relay's `/v1/models` and stops the run if `alias` no longer serves `expect_upstream_model`. A relay alias names a GPU, not a model, so the model host can swap what is behind it. The served name alone can hide a swap: on 2026-10-11 the model host restarted `default-model` with another checkpoint under the same `--served-model-name`. So when the config sets `expect_root` or `expect_max_model_len`, the check also reads the alias's `base_url` from the relay's `/admin/endpoints` and `root` (the checkpoint path) and `max_model_len` from `<base_url>/models`, and stops the run if either differs or either lookup fails. `base_url` names a port on the relay's host, which is why the driver runs on skynet. `run.json` and every verdict record what the check saw, as `served`, `served_root` and `served_max_model_len`.
 3. It starts `driver/proxy.py` outside the sandbox. The proxy pins every request to `alias`, adds the seed `seed_base + seed`, sets the config's `sampling` values, and logs each request and streamed reply, with its token usage, to `state/model/requests.jsonl`.
 4. It writes `~/.codex/config.toml` into the sandbox home. The config sets the proxy as a Responses-API provider, `model_context_window` pinned (Codex cannot learn it from a custom provider), no approval prompts, no Codex sandbox (bubblewrap already isolates the agent), web search off, and the features in `disable_features` off.
 5. It binds the Codex release directory read-only at `/opt/codex` and runs `codex exec --json` with the task's prompt in the project directory. The events go to `state/agent/events.jsonl`, and the run is killed at `timeout_minutes`.
@@ -64,7 +63,7 @@ eval/run.py eval/configs/codex-qwen3.6.json [--limit N]
 
 The cells run in an order shuffled with `random.Random(matrix.order_seed)`, so that arm and family do not move with the time of day or the state of the server. The model server is not deterministic even at temperature 0, so an episode is a sample, and a slow afternoon or a busy GPU would otherwise land on one arm. The order follows from the config, which `run.json` stores.
 
-Rerun the same command after an interruption. It skips every case whose latest line in `verdicts.jsonl` has no `error` key, and says how many. A line with `error` records a failure of the harness, not an outcome: `episode.sh` or `score.py` failed, or the model check stopped the run. Those cases run again. A client error or a time-out is an outcome, so it is not rerun. `--limit N` counts only the cases left to run.
+Rerun the same command after an interruption. It skips every case whose latest line in `verdicts.jsonl` has no `error` key, and says how many. A line with `error` records a failure of the harness, not an outcome: `episode.sh` or `score.py` failed, the model check stopped the run, or the model server ended the episode. Those cases run again. A client error or a time-out is an outcome, so it is not rerun, unless the server caused it. The driver blames the server when the client exits nonzero before its time limit and the last request in `requests.jsonl` failed with status 500 or above: the relay's 502 when the vLLM server behind it is down, or the proxy's own 502 when the relay is. The line then has `error: "upstream: <status> <reason>"`. The last request decides, because Codex retries a failed request and exits only when the final retry fails; failures it recovered from did not end the episode. `eval/analyze.py` leaves such a line out of every rate and out of the kill criterion. `--limit N` counts only the cases left to run.
 
 `scaffold.parallel` episodes run at once, 1 when the key is absent. The first run's config sets 4, half the server's `--max-num-seqs` of 8, which would cut the 60 serial hours to 15 if the server kept its speed under that load. Nobody has measured that yet. Each episode has its own directory, proxy port, sandbox, fake Slurm and git remote, so the episodes share only the model server and the harness checkout, which they read. Only the main thread writes `verdicts.jsonl` and prints progress, one line per episode as each finishes. Concurrent episodes queue at the server, so `wall_seconds` and the time-outs depend on the load. The shuffled order spreads that load over the arms. When the model check fails, the run submits no new episode, records the running ones as they finish, and exits 2. Ctrl-C, SIGTERM or a dropped terminal (SIGHUP) does the same and exits 130. A second one quits at once, leaving the running episodes unrecorded, so a rerun repeats them.
 
@@ -85,10 +84,10 @@ git mv eval/cards/drafts/first-qwen3.6.card eval/cards/first-qwen3.6.card
 grep -n -F -e \< eval/cards/first-qwen3.6.card
 ```
 
-Expected: `grep` prints nothing once every placeholder is filled. Then commit, and set `alias` in `eval/configs/codex-qwen3.6.json` to the same value.
+Expected: `grep` prints nothing once every placeholder is filled. Then commit, and set `alias` in `eval/configs/codex-qwen3.6.json` to the same value. Also set its `expect_root` to the `served_root` in the pilot's `run.json`. The model host's launch command loads the relative path `models/qwen36-35b-fp8` from its vLLM project folder, so only the server can say what absolute path it reports. The pilot's config leaves `expect_root` out and keeps `expect_max_model_len`, which makes the check read and record `root` without comparing it.
 Worrisome: `run.py: ... has 2 commits` means the card was committed before it was complete. Start a new card under a new name; never edit a frozen one.
 
-`eval/driver/check_seed.py --upstream http://127.0.0.1:19090 --alias <alias>` settles two of the card's unverified claims: whether the server honours a per-request seed, and whether two same-seed requests sent at once come back identical. The model host reports that Qwen3.6-35B-A3B-FP8 does not repeat even at temperature 0, so for that model the two identical lines may say no; the pilot reruns it.
+`eval/driver/check_seed.py --upstream http://127.0.0.1:9090 --alias <alias>` settles two of the card's unverified claims: whether the server honours a per-request seed, and whether two same-seed requests sent at once come back identical. The model host reports that Qwen3.6-35B-A3B-FP8 does not repeat even at temperature 0, so for that model the two identical lines may say no; the pilot reruns it.
 
 ### The smoke run
 

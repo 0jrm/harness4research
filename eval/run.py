@@ -12,9 +12,11 @@ The config is the question card's machine part:
   "episodes_dir": "~/.cache/hpc-sessions",            episode directories, named at random so nothing in a path
                                                        names the task, arm or seed (the mount table shows paths)
   "results_dir": "eval/results/smoke-1",              verdicts.jsonl
-  "model": {"upstream": "http://127.0.0.1:19090",     the model server, here an ssh tunnel to the relay
+  "model": {"upstream": "http://127.0.0.1:9090",      the model host's relay
             "alias": "default-model",                 the name the proxy pins every request to
             "expect_upstream_model": "gemma4-26B-mtp", the run stops if the alias serves anything else
+            "expect_root": "/path/to/checkpoint",     optional: the checkpoint path vLLM reports as root
+            "expect_max_model_len": 131072,           optional: the context length vLLM reports
             "seed_base": 1000,                        each episode's requests carry seed_base + its seed
             "sampling": {"temperature": 1.0}},        the proxy sets these on every request
   "scaffold": {"name": "codex", "release_dir": "~/.codex/packages/standalone/releases/<version>",
@@ -29,11 +31,21 @@ results_dir with the card's sha256 and commit, the harness commit and the config
 
 A rerun resumes: it skips every case whose latest verdict has no "error". A case whose latest verdict has one (a
 failure of episode.sh, score.py or the model check, the harness's failures and not outcomes) runs again; a client
-error or a time-out is an outcome and does not. --limit N runs at most N of the cases left.
+error or a time-out is an outcome and does not. A client error the model server caused is the harness's: when the
+client exits nonzero before its time limit and the last request in the proxy log failed with status 500 or above
+(the relay's 502 when its server is down, or the proxy's own 502 when the relay is), the verdict gets the error
+"upstream: <status> <reason>". --limit N runs at most N of the cases left.
 
-When the alias serves another model, the run submits no new episode, records the running ones as they finish, and
-exits 2. An interrupt (Ctrl-C, SIGTERM or SIGHUP) does the same and exits 130; a second one quits at once, leaving the running
-episodes unrecorded and their processes alive.
+The model check runs before the first episode and before each one. It reads the served name from the relay's
+/v1/models. A relay may restart its server with another checkpoint under the same served name, so with expect_root
+or expect_max_model_len it also looks up the alias's base_url in the relay's /admin/endpoints and reads root and
+max_model_len from <base_url>/models; a failed lookup fails the check. Those URLs name the relay's own host, so run
+the driver there. run.json and every verdict record what it saw: served, and served_root and served_max_model_len
+when they were read.
+
+When the model check fails, the run submits no new episode, records the running ones as they finish, and exits 2.
+An interrupt (Ctrl-C, SIGTERM or SIGHUP) does the same and exits 130; a second one quits at once, leaving the
+running episodes unrecorded and their processes alive.
 
 Each verdict line holds the scorer's verdict plus the costs: requests, input and output tokens, the largest
 prompt, wall seconds, the client's exit code, and whether the episode hit its time limit.
@@ -51,6 +63,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from typing import NamedTuple, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -82,17 +95,49 @@ def frozen_card(path):
     return hashlib.sha256(text.encode()).hexdigest(), commits[0]
 
 
+class Served(NamedTuple):
+    """What the alias serves now. mismatch says how that differs from the config, and is None when it does not."""
+    name: Optional[str]
+    root: Optional[str] = None
+    max_model_len: Optional[int] = None
+    mismatch: Optional[str] = None
+
+    def record(self):
+        observed = {"served": self.name, "served_root": self.root, "served_max_model_len": self.max_model_len}
+        return {k: v for k, v in observed.items() if k == "served" or v is not None}
+
+
+def get_json(url):
+    with urllib.request.urlopen(url, timeout=30) as r:
+        return json.load(r)
+
+
 def model_check(model):
-    """The upstream model the alias serves now, from the relay's /v1/models, or an error string."""
+    """The served name from the relay's /v1/models. With expect_root or expect_max_model_len, also the checkpoint
+    path and context length from the vLLM server behind the alias, found through the relay's /admin/endpoints; a
+    failed lookup is a mismatch."""
+    relay, alias = model["upstream"].rstrip("/"), model["alias"]
     try:
-        with urllib.request.urlopen(model["upstream"].rstrip("/") + "/v1/models", timeout=30) as r:
-            listing = json.load(r)
+        listing = get_json(relay + "/v1/models")
     except (OSError, ValueError) as e:
-        return f"unreachable ({e})"
-    for m in listing.get("data", []):
-        if m.get("id") == model["alias"]:
-            return (m.get("relay") or {}).get("upstream_model") or m.get("root") or m.get("id")
-    return None
+        return Served(None, mismatch=f"{alias} unreachable ({e})")
+    name = next(((m.get("relay") or {}).get("upstream_model") or m.get("root") or m.get("id")
+                 for m in listing.get("data", []) if m.get("id") == alias), None)
+    if name != model["expect_upstream_model"]:
+        return Served(name, mismatch=f"{alias} serves {name}, not {model['expect_upstream_model']}")
+    expected = {field: model[key] for field, key in (("root", "expect_root"), ("max_model_len", "expect_max_model_len"))
+                if key in model}
+    if not expected:
+        return Served(name)
+    try:
+        base_urls = {e["alias"]: e["base_url"] for e in get_json(relay + "/admin/endpoints")}
+        card = get_json(base_urls[alias].rstrip("/") + "/models")["data"][0]
+        served = Served(name, card["root"], card["max_model_len"])
+    except (OSError, ValueError, LookupError, TypeError, AttributeError) as e:
+        return Served(name, mismatch=f"cannot read what the server behind {alias} loaded ({e!r})")
+    wrong = [f"{field} {getattr(served, field)!r}, not {want!r}" for field, want in expected.items()
+             if getattr(served, field) != want]
+    return served._replace(mismatch=f"{alias} serves {', '.join(wrong)}") if wrong else served
 
 
 def codex_config(scaffold, port, alias):
@@ -132,6 +177,26 @@ def costs(log_path):
     return {"requests": reqs, "input_tokens": inp, "output_tokens": out, "max_prompt_tokens": biggest}
 
 
+def upstream_failure(log_path):
+    """How the last request in the proxy log failed upstream, status 500 or above, or None. The last one, because
+    the client gives up when its last retry fails, so that request's failure is what ended the episode."""
+    last = None
+    if os.path.exists(log_path):
+        with open(log_path) as f:
+            for last in f:
+                pass
+    if not last:
+        return None
+    e = json.loads(last)
+    if e["status"] < 500:
+        return None
+    try:
+        reason = json.loads(e["response"])["error"]["message"]
+    except (ValueError, LookupError, TypeError):
+        reason = e["response"]
+    return f"{e['status']} {reason.strip()}"[:200]
+
+
 def run_episode(cfg, ep, family, variant, arm, seed):
     model, scaffold = cfg["model"], cfg["scaffold"]
     os.makedirs(os.path.dirname(ep), exist_ok=True)
@@ -142,10 +207,9 @@ def run_episode(cfg, ep, family, variant, arm, seed):
         return {"episode": ep, "error": "episode.sh: " + built.stderr.strip()[-300:]}
     meta = json.load(open(os.path.join(ep, "meta.json")))
     served = model_check(model)
-    if served != model["expect_upstream_model"]:
+    if served.mismatch:
         subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
-        return {"episode": ep, "error": f"model check: {model['alias']} serves {served}, not {model['expect_upstream_model']}",
-                "stop_run": True}
+        return {"episode": ep, **served.record(), "error": f"model check: {served.mismatch}", "stop_run": True}
     os.makedirs(os.path.join(ep, "state", "model"))
     os.makedirs(os.path.join(ep, "state", "agent"))
     port_file = os.path.join(ep, "state", "model", "port")
@@ -186,12 +250,15 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     proxy.wait()
     subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
     scored = subprocess.run([sys.executable, os.path.join(HERE, "score.py"), ep], capture_output=True, text=True)
-    row = {"episode": os.path.basename(ep), "served": served, "client_exit": rc, "timed_out": timed_out,
+    row = {"episode": os.path.basename(ep), **served.record(), "client_exit": rc, "timed_out": timed_out,
            "wall_seconds": wall, **costs(log)}
-    if scored.returncode:
-        row["error"] = "score.py: " + scored.stderr.strip()[-300:]
-    else:
+    if not scored.returncode:
         row.update(json.loads(scored.stdout))
+    outage = upstream_failure(log) if rc and not timed_out else None
+    if outage:
+        row["error"] = "upstream: " + outage
+    elif scored.returncode:
+        row["error"] = "score.py: " + scored.stderr.strip()[-300:]
     with open(os.path.join(ep, "verdict.json"), "w") as f:
         json.dump(row, f, indent=1)
     return row
@@ -219,8 +286,8 @@ def main():
     if not unfrozen:
         card_sha, card_commit = frozen_card(cfg["question_card"])
     served = model_check(cfg["model"])
-    if served != cfg["model"]["expect_upstream_model"]:
-        sys.exit(f"run.py: model check: {cfg['model']['alias']} serves {served}, not {cfg['model']['expect_upstream_model']}")
+    if served.mismatch:
+        sys.exit(f"run.py: model check: {served.mismatch}")
     results = expand(cfg["results_dir"])
     os.makedirs(results, exist_ok=True)
     run_json = os.path.join(results, "run.json")
@@ -232,7 +299,8 @@ def main():
         with open(run_json, "w") as f:
             json.dump({"run_id": cfg["run_id"], "question_card": cfg.get("question_card"), "card_sha256": card_sha,
                        "card_commit": card_commit, "unfrozen": unfrozen, "harness_commit": git("rev-parse", "HEAD"),
-                       "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "config": cfg}, f, indent=1)
+                       "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **served.record(),
+                       "config": cfg}, f, indent=1)
     verdicts = os.path.join(results, "verdicts.jsonl")
     latest = {}
     if os.path.exists(verdicts):

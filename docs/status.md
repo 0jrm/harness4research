@@ -72,7 +72,7 @@ The report's section 8 left one choice to us: keep FP8 and treat the repeats as 
    - Set `alias` in `eval/configs/codex-qwen3.6.json`.
    
    The README describes the procedure in "The question card".
-6. **The run.** Open the tunnel and run `eval/run.py eval/configs/codex-qwen3.6.json` under tmux on a stable, awake machine. Rerun the same command after any interruption. It stops when the alias serves another model, and a resumed run must match the card's hash.
+6. **The run.** On skynet, in the evaluation clone `~/h4r-eval` (not `~/harness4research`, which backs the owner's `guard` there), run `eval/run.py eval/configs/codex-qwen3.6.json` under tmux. The model check reads the relay's admin listing and the server behind the alias, which only skynet can reach. Rerun the same command after any interruption. It stops when the alias serves another model, and a resumed run must match the card's hash.
 7. **The result.** Publish it in the README next to the Status section: the numbers with their intervals, the card's four deviations, and every claim still unverified marked unmeasured. Publish it whatever it shows. The handoff's ground rules require a source for every claim.
 
 ## Roadmap after the first result
