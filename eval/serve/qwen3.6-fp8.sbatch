@@ -10,8 +10,8 @@
 #SBATCH --time=3-00:00:00
 #SBATCH --output=%x-%j.log
 set -euo pipefail
-python=${VLLM_PYTHON:-$HOME/vllm-0.21.0/bin/python}
-model=${MODEL_DIR:-$HOME/models/qwen36-35b-fp8}
+python=${VLLM_PYTHON:-/conda/$USER/h4r/vllm-0.21.0/bin/python}
+model=${MODEL_DIR:-/conda/$USER/h4r/models/qwen36-35b-fp8}
 port=${PORT:-9185}
 nvidia-smi -L
 "$python" -c 'import vllm, torch; print("vllm", vllm.__version__, "torch", torch.__version__)'

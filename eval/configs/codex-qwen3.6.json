@@ -7,7 +7,7 @@
     "upstream": "http://127.0.0.1:9185",
     "alias": "Qwen/Qwen3.6-35B-A3B-FP8",
     "expect_upstream_model": "Qwen/Qwen3.6-35B-A3B-FP8",
-    "expect_root": "/unity/g2/jmiranda/models/qwen36-35b-fp8",
+    "expect_root": "/conda/jmiranda/h4r/models/qwen36-35b-fp8",
     "expect_max_model_len": 131072,
     "seed_base": 1000,
     "sampling": {"temperature": 1.0, "top_p": 0.95, "top_k": 20}
