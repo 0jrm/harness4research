@@ -48,11 +48,11 @@ Inside, the environment holds only `HOME`, `USER`, `LOGNAME`, `PATH`, `LANG` and
 ## Running the evaluation
 
 ```shell
-sbatch eval/serve/qwen3.6-fp8.sbatch                         # on skynet: our own vLLM 0.21.0 on one A100
+GPU=<uuid> eval/serve/qwen3.6-fp8.sh                        # on skynet, in tmux: our own vLLM 0.21.0 on GPU 1
 eval/run.py eval/configs/codex-qwen3.6.json [--limit N]     # on skynet, beside the server at 127.0.0.1:9185
 ```
 
-The model host suggested on 2026-10-12 that we serve the model ourselves, so the first run does. `eval/serve/qwen3.6-fp8.sbatch` is the model host's launch command from their serving report with only the model path and the port changed. It runs vLLM 0.21.0 (with torch 2.11.0+cu130) from our own environment, `/conda/$USER/h4r/vllm-0.21.0`, on a copy of the weights in `/conda/$USER/h4r/models/qwen36-35b-fp8`, checked with `eval/serve/verify_weights.py`. `/conda` is skynet's local disk; the home folder is NFS, where the same install took over 45 minutes without finishing and took minutes on `/conda`. Slurm assigns one of GPUs 1 to 3; GPU 0 is the model host's and outside Slurm. `scancel --name=h4r-vllm-qwen3.6` stops it. The job's log, `h4r-vllm-qwen3.6-<job id>.log`, prints the GPU and the vLLM and torch versions.
+The model host suggested on 2026-10-12 that we serve the model ourselves, so the first run does. `eval/serve/qwen3.6-fp8.sh` is the model host's launch command from their serving report with only the model path and the port changed. It runs vLLM 0.21.0 (with torch 2.11.0+cu130) from our own environment, `/conda/$USER/h4r/vllm-0.21.0`, on a copy of the weights in `/conda/$USER/h4r/models/qwen36-35b-fp8`, checked with `eval/serve/verify_weights.py`. `/conda` is skynet's local disk; the home folder is NFS, where the same install took over 45 minutes without finishing and took minutes on `/conda`. It runs outside Slurm on GPU 1, named by its UUID from `nvidia-smi -L`, and refuses a GPU with more than 1 GiB in use. Slurm cannot place it: skynet's gres.conf lists `/dev/nvidia1` to `/dev/nvidia3`, and `/dev/nvidia1` is nvidia-smi's GPU 0, the model host's, so a Slurm GPU job lands on it. Its caches go to `/conda` too, and it turns off FlashInfer's sampler, which needs a CUDA 13 `nvcc` that skynet lacks. It prints the GPU and the vLLM and torch versions before it starts; Ctrl-C in its tmux window stops it.
 
 `eval/run.py` is the one driver, and the scaffold is a config value. This version knows `codex`. For each cell of the config's matrix (family, variant, arm, seed), it does seven things:
 
