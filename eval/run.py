@@ -113,26 +113,29 @@ def get_json(url):
 
 
 def model_check(model):
-    """The served name from the relay's /v1/models. With expect_root or expect_max_model_len, also the checkpoint
-    path and context length from the vLLM server behind the alias, found through the relay's /admin/endpoints; a
-    failed lookup is a mismatch."""
-    relay, alias = model["upstream"].rstrip("/"), model["alias"]
+    """What the alias serves now. upstream is either the model host's relay, whose /v1/models lists aliases, or a
+    vLLM server, whose /v1/models lists the one model it loaded under its served name, which is then the alias.
+    Through a relay, expect_root or expect_max_model_len makes the check also read the vLLM server behind the
+    alias, found through the relay's /admin/endpoints; a failed lookup is a mismatch."""
+    upstream, alias = model["upstream"].rstrip("/"), model["alias"]
     try:
-        listing = get_json(relay + "/v1/models")
+        listing = get_json(upstream + "/v1/models")
     except (OSError, ValueError) as e:
         return Served(None, mismatch=f"{alias} unreachable ({e})")
-    name = next(((m.get("relay") or {}).get("upstream_model") or m.get("root") or m.get("id")
-                 for m in listing.get("data", []) if m.get("id") == alias), None)
+    entry = next((m for m in listing.get("data", []) if m.get("id") == alias), {})
+    relayed = "relay" in entry
+    name = entry["relay"].get("upstream_model") if relayed else entry.get("id")
     if name != model["expect_upstream_model"]:
         return Served(name, mismatch=f"{alias} serves {name}, not {model['expect_upstream_model']}")
     expected = {field: model[key] for field, key in (("root", "expect_root"), ("max_model_len", "expect_max_model_len"))
                 if key in model}
-    if not expected:
+    if relayed and not expected:
         return Served(name)
     try:
-        base_urls = {e["alias"]: e["base_url"] for e in get_json(relay + "/admin/endpoints")}
-        card = get_json(base_urls[alias].rstrip("/") + "/models")["data"][0]
-        served = Served(name, card["root"], card["max_model_len"])
+        if relayed:
+            base_urls = {e["alias"]: e["base_url"] for e in get_json(upstream + "/admin/endpoints")}
+            entry = get_json(base_urls[alias].rstrip("/") + "/models")["data"][0]
+        served = Served(name, entry["root"], entry["max_model_len"])
     except (OSError, ValueError, LookupError, TypeError, AttributeError) as e:
         return Served(name, mismatch=f"cannot read what the server behind {alias} loaded ({e!r})")
     wrong = [f"{field} {getattr(served, field)!r}, not {want!r}" for field, want in expected.items()
