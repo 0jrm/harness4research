@@ -4,10 +4,10 @@
   "episodes_dir": "~/.cache/hpc-sessions",
   "results_dir": "eval/results/first-qwen3.6",
   "model": {
-    "upstream": "http://127.0.0.1:9090",
-    "alias": "<the relay alias of the GPU the model host puts Qwen3.6-35B-A3B-FP8 on>",
+    "upstream": "http://127.0.0.1:9185",
+    "alias": "Qwen/Qwen3.6-35B-A3B-FP8",
     "expect_upstream_model": "Qwen/Qwen3.6-35B-A3B-FP8",
-    "expect_root": "<the root that the alias's vLLM server reports in /v1/models for models/qwen36-35b-fp8 under /unity/g1/bgutierrez/Project/vLLM-bdgr, read at the pilot>",
+    "expect_root": "/conda/jmiranda/h4r/models/qwen36-35b-fp8",
     "expect_max_model_len": 131072,
     "seed_base": 1000,
     "sampling": {"temperature": 1.0, "top_p": 0.95, "top_k": 20}
