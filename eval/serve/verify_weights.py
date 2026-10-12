@@ -46,10 +46,10 @@ def main():
             print(f"differs  {e['path']}: {got} != {want}")
             bad += 1
     listed = {e["path"] for e in files}
-    extra = sorted(os.path.relpath(os.path.join(d, n), folder) for d, _, ns in os.walk(folder) for n in ns
-                   if os.path.relpath(os.path.join(d, n), folder) not in listed)
+    local = (os.path.relpath(os.path.join(d, n), folder) for d, _, ns in os.walk(folder) for n in ns)
+    extra = sorted(p for p in local if p not in listed and not p.startswith(".cache/huggingface/"))
     if extra:
-        print(f"extra    {', '.join(extra)}")
+        print(f"extra    {', '.join(extra)} (not in the revision; the download tool's .cache/huggingface is not listed)")
     print(f"{len(files) - bad} of {len(files)} files match {repo} at {revision}")
     sys.exit(1 if bad else 0)
 
