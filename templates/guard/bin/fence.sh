@@ -11,7 +11,7 @@ git rev-parse --verify -q "$base" >/dev/null || { say FAIL refs "base $base not 
 git rev-parse --verify -q "$head" >/dev/null || { say FAIL refs "head $head not found"; exit 1; }
 mapfile -t watch < <(git show "$base:guard/watch.list" 2>/dev/null | sed 's/#.*//' | awk 'NF')
 
-g=$(git diff --name-only "$base...$head" -- guard .github/workflows | tr '\n' ' ')
+g=$(git diff --name-only "$base...$head" -- guard .github/workflows AGENTS.md CLAUDE.md | tr '\n' ' ')
 if [ -z "$g" ]; then say PASS guard-untouched ""; else say FAIL guard-untouched "a human merges changes to: $g"; fi
 
 if [ ${#watch[@]} -gt 0 ]; then

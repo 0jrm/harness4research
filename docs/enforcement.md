@@ -8,7 +8,7 @@ Rules that an agent can read are suggestions. This project puts each rule at a p
 | Speed bump | `guard/run preflight`, `guard/run ripples`, `guard/run manifest` | direct submits, edited limits, frozen-card edits, silent warning signs | an agent that calls `sbatch` directly with your credentials, or runs its own copy of the scripts (see below) |
 | Speed bump (launch host) | `guard/run launch` and its supervisor | over-cap jobs, busy GPUs, jobs past their walltime or memory, silent orphans, a restart after a resource stop that nobody recorded | an agent that runs `nohup` directly, or deletes the state dir; no memory wall exists without an administrator's `MemoryMax` on the user slice |
 | Quality check | `guard review`, `guard merge` | changes that miss the request, facts without evidence, incidents without a cause, merges while checks fail | an agent that appends to `.git/guard/reviews.tsv`, a diff that steers the reviewer, `gh pr merge` with a write token |
-| Locked door | the `guard-fence` check plus a protected default branch | merging changes to `guard/`, workflows, watched paths, question cards, or reports whose evidence rows cite no committed file | anyone who can bypass branch protection |
+| Locked door | the `guard-fence` check plus a protected default branch | merging changes to `guard/`, workflows, `AGENTS.md` and `CLAUDE.md`, watched paths, question cards, or reports whose evidence rows cite no committed file | anyone who can bypass branch protection |
 | Bank limit | a capped cluster sub-account set by the admins | spending past the cap, by anyone | nothing; the scheduler refuses |
 
 ## Who stops a job
