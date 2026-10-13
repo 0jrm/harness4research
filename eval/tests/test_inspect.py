@@ -220,5 +220,109 @@ class Work(Fixture):
         self.assertTrue(os.path.exists(canary), "git status in the clone runs it, so the canary works")
 
 
+class Runs(Fixture):
+    """A results directory around the fixture: an error row its rerun superseded, the fixture's row, a row whose
+    episode is gone, and a copy of the fixture still running for another case."""
+
+    def setUp(self):
+        super().setUp()
+        self.sessions = os.path.join(self.tmp, "sessions")
+        self.results = os.path.join(self.tmp, "results", "fixture-run")
+        os.makedirs(self.results)
+        ep = self.copy()
+        meta = index.read_json(os.path.join(ep, "meta.json"))
+        self.run = {"run_id": "fixture-run", "question_card": "eval/cards/first-qwen3.6.card", "card_sha256": None,
+                    "card_commit": None, "unfrozen": True, "harness_commit": meta["harness_commit"],
+                    "started": "2026-10-13T16:52:05Z",
+                    "config": {"scaffold": {"timeout_minutes": 30},
+                               "matrix": {"families": ["t1-walltime", "t8-fixture"], "variants": ["trap", "control"],
+                                          "arms": ["A", "E"], "seeds": [1, 5, 8]}}}
+        with open(os.path.join(self.results, "run.json"), "w") as f:
+            json.dump(self.run, f, indent=1)
+        case = {k: meta[k] for k in ("family", "variant", "arm", "seed")}
+        tag = {"run_id": "fixture-run", "card_sha256": None, "unfrozen": True}
+        rows = [{**case, **tag, "episode": "0000000000aa", "error": "episode.sh: failed"},
+                {**index.read_json(os.path.join(ep, "verdict.json")), **case, **tag},
+                {"family": "t8-fixture", "variant": "control", "arm": "A", "seed": 8, **tag, "episode": "36eeeeaa25e2",
+                 "success": True, "violation": False, "escalated": True, "signals": {}, "requests": 8,
+                 "input_tokens": 66165, "output_tokens": 1470, "wall_seconds": 62.2, "client_exit": 0,
+                 "timed_out": False}]
+        with open(os.path.join(self.results, "verdicts.jsonl"), "w") as f:
+            f.writelines(json.dumps(r, sort_keys=True) + "\n" for r in rows)
+        running = self.copy("0123456789ab")
+        os.remove(os.path.join(running, "verdict.json"))
+        with open(os.path.join(running, "meta.json"), "w") as f:
+            json.dump({**meta, "variant": "control", "seed": 1, "built": "2026-10-13T17:00:00Z"}, f)
+
+    def test_run_index(self):
+        doc = index.run_index(self.results, self.sessions)
+        cli = subprocess.run([sys.executable, os.path.join(EVAL, "analyze.py"), "--json", self.results],
+                             capture_output=True, text=True, check=True).stdout
+        self.assertEqual(json.dumps(doc["analysis"], indent=1), cli.strip())
+        self.assertEqual([(r["line"], r["superseded"]) for r in doc["rows"]], [(1, True), (2, False), (3, False)])
+        self.assertEqual([(c["line"], c["ending"]["v"]) for c in doc["cases"]], [(2, "finished"), (3, "finished")])
+        self.assertEqual(doc["progress"]["counts"], {"done": 2, "running": 1, "missing": 21})
+        self.assertEqual([(e["episode"], e["key"], e["attributed"]) for e in doc["progress"]["running"]],
+                         [("0123456789ab", ["t1-walltime", "control", "E", 1], "time")])
+        self.assertTrue(doc["card"]["label"].startswith("UNFROZEN"))
+        self.assertTrue(doc["card"]["claims"])
+        for p in index.pointers(doc):
+            self.assertTrue(index.holds(p, self.results), p["at"])
+
+    def test_build(self):
+        sys.path.insert(0, os.path.join(EVAL, "inspect"))
+        import build
+        ep = os.path.join(self.sessions, "c90ce138e1a6")
+        os.makedirs(os.path.join(ep, "hidden"))
+        with open(os.path.join(ep, "hidden", "answers.json"), "w") as f:
+            f.write('{"answer": "CANARY-from-hidden"}')
+        big = "a long prompt\n" * 1000
+        with open(os.path.join(ep, "prompt.md"), "w") as f:
+            f.write(big)
+        out = os.path.join(self.tmp, "bundle")
+        with self.assertRaises(SystemExit):
+            build.build(os.path.join(self.sessions, "bundle"), [self.results], self.sessions)
+
+        def run():
+            with tempfile.TemporaryFile("w+") as f:
+                stdout, sys.stdout = sys.stdout, f
+                try:
+                    build.build(out, [self.results], self.sessions)
+                finally:
+                    sys.stdout = stdout
+                f.seek(0)
+                return f.read()
+
+        self.assertIn("2 episodes, 2 reindexed; 1 runs", run())
+        self.assertEqual(os.stat(out).st_mode & 0o777, 0o700)
+        self.assertIn("2 episodes, 0 reindexed", run())
+        with open(os.path.join(self.sessions, "0123456789ab", index.REQUESTS), "a") as f:
+            f.write("{")
+        self.assertIn("2 episodes, 1 reindexed", run())
+
+        def data(rel, prefix):
+            text = index.read_text(os.path.join(out, rel))
+            body = text[text.index(prefix) + len(prefix):]
+            return json.loads(body[:body.rindex(";")])
+
+        runs = data("data/runs.js", "window.H4R_RUNS = ")
+        self.assertEqual([r["run_id"] for r in runs["runs"]], ["fixture-run"])
+        self.assertEqual({(s["episode"], s["state"], s["run"]) for s in runs["episodes"]},
+                         {("c90ce138e1a6", "done", "fixture-run"), ("0123456789ab", "running", "fixture-run")})
+        doc = data("data/ep/c90ce138e1a6.js", 'window.H4R_EP["c90ce138e1a6"] = ')
+        sha = doc["identity"]["prompt"]["v"]["$blob"]
+        self.assertEqual(data(f"data/blob/{sha}.js", f'window.H4R_BLOB["{sha}"] = '), big)
+        manifest = index.read_json(os.path.join(out, "manifest.json"))
+        entry = manifest["sources"][os.path.join(ep, index.REQUESTS)]
+        self.assertEqual(entry["size"], os.path.getsize(os.path.join(ep, index.REQUESTS)))
+        self.assertEqual(len(entry["sha256"]), 64)
+        for root, _, files in os.walk(out):
+            for name in files:
+                self.assertNotIn("CANARY", index.read_text(os.path.join(root, name)), name)
+        shutil.rmtree(os.path.join(self.sessions, "0123456789ab"))
+        self.assertIn("1 episodes, 0 reindexed", run())
+        self.assertEqual(os.listdir(os.path.join(out, "data", "ep")), ["c90ce138e1a6.js"])
+
+
 if __name__ == "__main__":
     unittest.main()

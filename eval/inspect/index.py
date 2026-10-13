@@ -1,5 +1,6 @@
-"""Indexes the evaluation's records for the inspector: episode_index(ep_dir) returns one JSON-serializable dict per
-episode. Every recorded value is {"v": value, "at": pointer}, and resolve() reads a pointer back to the value it names:
+"""Indexes the evaluation's records for the inspector: episode_index(ep_dir) and run_index(results_dir, episodes_dir)
+each return one JSON-serializable dict. Every recorded value is {"v": value, "at": pointer}, and resolve() reads a
+pointer back to the value it names:
 
     relpath                          the whole file: JSON parsed, any other file as text
     relpath:N                        line N, 1-based: JSONL parsed, forge.log and needs-you.tsv as rows
@@ -10,17 +11,20 @@ episode. Every recorded value is {"v": value, "at": pointer}, and resolve() read
     git:<commit>:<path>:N            line N of a harness file at that commit; repo:<path>:N in the working copy
 
 A value derived from its source adds "rule", the name of the function in RULES that turns the resolved source into
-it. A value inferred from the record it names and others before it adds "how": "inferred"; its pointer resolves to
-that record. Logged repairs add "how": "logged".
+it. A value inferred from the record it names and others before it adds "how": "inferred", and one computed from
+several records adds "how": "derived"; their pointers resolve to the main record. Logged repairs add "how": "logged".
 
-Relative pointers are relative to the episode directory. The index only reads: it never opens hidden/, and it never
-runs git with the agent's own git config, which can name commands (core.fsmonitor, filter drivers); the work tree is
-compared through the protected remote's git directory instead. Standard library only.
+Relative pointers are relative to the episode directory, or to the results directory in run_index. The index only
+reads: it never opens hidden/, and it never runs git with the agent's own git config, which can name commands
+(core.fsmonitor, filter drivers); the work tree is compared through the protected remote's git directory instead.
+Standard library only.
 """
 import bisect
+import collections
 import csv
 import datetime
 import functools
+import itertools
 import json
 import os
 import re
@@ -28,11 +32,13 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 
 EVAL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.dirname(EVAL)
-sys.path.insert(0, os.path.join(EVAL, "diagnostics"))
-from compare_runs import ending  # noqa: E402
+sys.path[:0] = [EVAL, os.path.join(EVAL, "diagnostics")]
+import analyze  # noqa: E402
+from compare_runs import ending, last_words  # noqa: E402
 
 REQUESTS = "state/model/requests.jsonl"
 EVENTS = "state/agent/events.jsonl"
@@ -243,10 +249,10 @@ def pointers(doc):
 
 
 def holds(p, root, repo=REPO):
-    """Whether a pointer reads back to its value: equal, equal through its rule, or, for a value inferred from more
-    than the record it names, present."""
+    """Whether a pointer reads back to its value: equal, equal through its rule, or, for a value inferred or derived
+    from more than the record it names, present."""
     source = resolve(p["at"], root, repo)
-    if p.get("how") == "inferred":
+    if p.get("how") in ("inferred", "derived"):
         return source is not None
     return (RULES[p["rule"]](source) if "rule" in p else source) == p["v"]
 
@@ -583,3 +589,103 @@ def episode_index(ep_dir, repo=REPO):
         "checks": checks_of(verdict, turns, calls, items),
     }
 
+
+# runs --------------------------------------------------------------------------------------------------------------
+def case_key(row):
+    return row.get("family"), row.get("variant"), row.get("arm"), row.get("seed")
+
+
+def card_of(run, repo):
+    """The question card's deviation_, unverified_ and checked_ lines, read at card_commit, or else from the working
+    copy, labelled UNFROZEN; an unfrozen card may still sit in eval/cards/drafts/."""
+    path, commit = run.get("question_card"), run.get("card_commit")
+    if not path:
+        return None
+    text = git_show(repo, commit, path) if commit else None
+    if text is not None:
+        where, label = f"git:{commit}:{path}", f"frozen at {commit}"
+    else:
+        drafts = os.path.join(os.path.dirname(path), "drafts", os.path.basename(path))
+        path = next((p for p in (path, drafts) if os.path.isfile(os.path.join(repo, p))), path)
+        text = read_text(os.path.join(repo, path)) or ""
+        where = f"repo:{path}"
+        label = f"UNFROZEN: the working copy of {path}" + (f"; card_commit {commit} is not in this checkout"
+                                                            if commit else "")
+    return {"read_from": where, "frozen": where.startswith("git:"), "label": label,
+            "claims": [P(line, f"{where}:{i}") for i, line in enumerate(text.splitlines(), 1)
+                       if CARD_CLAIM.match(line)]}
+
+
+def unscored(run, episodes_dir, now):
+    """Episodes of this run that have no verdict.json: matched by meta.json's run_id, or, for episodes built before
+    run.py wrote one, by harness commit and a build time after the run started. One idle past the client's time limit
+    plus five minutes was abandoned."""
+    out = []
+    limit = ((run.get("config") or {}).get("scaffold") or {}).get("timeout_minutes", 30) * 60 + 300
+    for name in sorted(os.listdir(episodes_dir)) if os.path.isdir(episodes_dir) else []:
+        ep = os.path.join(episodes_dir, name)
+        meta = read_json(os.path.join(ep, "meta.json"))
+        if meta is None or os.path.exists(os.path.join(ep, "verdict.json")):
+            continue
+        if meta.get("run_id"):
+            if meta["run_id"] != run.get("run_id"):
+                continue
+            attributed = "run_id"
+        elif meta.get("harness_commit") == run.get("harness_commit") \
+                and (meta.get("built") or "") >= run.get("started", "~"):
+            attributed = "time"
+        else:
+            continue
+        touched = max(os.path.getmtime(p) for p in (os.path.join(ep, "meta.json"), os.path.join(ep, REQUESTS))
+                      if os.path.exists(p))
+        out.append({"episode": name, "key": list(case_key(meta)), "attributed": attributed,
+                    "state": "abandoned" if now - touched > limit else "running", "idle_seconds": round(now - touched)})
+    return out
+
+
+def run_index(results_dir, episodes_dir, repo=REPO, tolerance=0.10, now=None):
+    """Everything the run views show for one results directory: run.json, every verdict row with its line (the last
+    row per case wins, as in analyze.py), analyze.analyze's report verbatim, the card's claims, the progress of each
+    matrix cell, and how each case ended."""
+    results_dir = os.path.abspath(results_dir)
+    run = read_json(os.path.join(results_dir, "run.json")) or {}
+    rows = jsonl(os.path.join(results_dir, "verdicts.jsonl"))
+    latest = {case_key(r): n for n, r in rows}
+    by_line = dict(rows)
+    try:
+        analysis = analyze.analyze(*analyze.load([results_dir]), tolerance)
+    except SystemExit as e:
+        analysis = {"error": str(e.code)}
+    cases = []
+    for key, n in latest.items():
+        r = by_line[n]
+        words = last_words(os.path.join(episodes_dir, r.get("episode") or ""))
+        cases.append({"key": list(key), "line": n, "episode": r.get("episode"),
+                      "ending": {"v": ending(r, words), "at": f"verdicts.jsonl:{n}", "how": "derived"}})
+    running = unscored(run, episodes_dir, time.time() if now is None else now)
+    waiting = {tuple(e["key"]): e for e in running}
+    matrix = (run.get("config") or {}).get("matrix") or {}
+    cells = []
+    for key in itertools.product(*(matrix.get(k, []) for k in ("families", "variants", "arms", "seeds"))):
+        if key in latest:
+            r = by_line[latest[key]]
+            cells.append({"key": list(key), "state": "error" if r.get("error") else "done",
+                          "episode": r.get("episode"), "line": latest[key]})
+        elif key in waiting:
+            cells.append({"key": list(key), "state": waiting[key]["state"], "episode": waiting[key]["episode"],
+                          "line": None})
+        else:
+            cells.append({"key": list(key), "state": "missing", "episode": None, "line": None})
+    return {
+        "run_id": run.get("run_id") or os.path.basename(results_dir),
+        "results_dir": results_dir,
+        "run": P(run, "run.json"),
+        "rows": [{"line": n, "row": P(r, f"verdicts.jsonl:{n}"), "superseded": latest[case_key(r)] != n}
+                 for n, r in rows],
+        "cases": cases,
+        "analysis": analysis,
+        "card": card_of(run, repo),
+        "progress": {"cells": cells, "running": running,
+                     "counts": dict(collections.Counter(c["state"] for c in cells))},
+        "endings": dict(collections.Counter(c["ending"]["v"] for c in cases)),
+    }
