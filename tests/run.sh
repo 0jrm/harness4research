@@ -181,6 +181,11 @@ expect preflight-deadline fail 'past deadline 2000-01-01 in runs/2026-09-29-late
 echo "default_run_core_hours: 10" >> guard/budget.card; git commit -q -am "default run budget"
 expect preflight-default-run-budget fail 'this job 64 core-h exceeds budget_core_hours=10' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-sketch job.sh --nodes=1 --time=00:30:00
 git reset -q --hard HEAD~1
+sed -i 's/^max_walltime_minutes: .*/max_walltime_minutes: 10/; s/^max_nodes_per_job: .*/max_nodes_per_job: 1/' guard/budget.card
+printf 'explore_max_nodes: 2\nexplore_max_walltime_minutes: 60\n' >> guard/budget.card; git commit -q -am "explore caps above the project caps"
+expect explore-walltime-bounded fail 'exceeds max_walltime_minutes=10' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-sketch job.sh --nodes=1 --time=00:30:00
+expect explore-nodes-bounded fail 'exceeds max_nodes_per_job=1' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-sketch job.sh --nodes=2 --time=00:05:00
+git reset -q --hard HEAD~1
 printf '100|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
 expect preflight-refuses-on-ripple fail '^PREFLIGHT FAIL: ripples reports job-states 100:FAILED \(diagnose, then merge runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line and the root cause for each, since ripples reads incidents from origin/main; a resource stop of a launch continues with an execution.tsv restart or resume row instead\); fix the cause' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
 expect ripples-single-entry fail '^RIPPLE	job-states	100:FAILED \(diagnose' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run ripples "$R"

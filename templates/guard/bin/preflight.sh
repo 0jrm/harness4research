@@ -94,8 +94,8 @@ wall=$(opt time "$@"); nodes=$(opt nodes "$@"); array=$(opt array "$@")
 wmin=$(to_min "$wall"); n=$(tasks "$array")
 [ -n "$wmin" ] || fail "--time=$wall is not a Slurm time (M, M:S, H:M:S, D-H, D-H:M, D-H:M:S)"
 if [ $explore = 1 ]; then
-  max_nodes=$(get explore_max_nodes); max_nodes=${max_nodes:-1}
-  max_wall=$(get explore_max_walltime_minutes); max_wall=${max_wall:-60}
+  e=$(get explore_max_nodes); max_nodes=$(( ${e:-1} < max_nodes ? ${e:-1} : max_nodes ))
+  e=$(get explore_max_walltime_minutes); max_wall=$(( ${e:-60} < max_wall ? ${e:-60} : max_wall ))
   [ "$n" -eq 1 ] || fail "explore- runs submit one task at a time; drop --array, or use a run with a question card"
 fi
 [ "$nodes" -le "$max_nodes" ] || fail "--nodes=$nodes exceeds max_nodes_per_job=$max_nodes; ask for fewer"
