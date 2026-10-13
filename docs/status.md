@@ -49,7 +49,7 @@ As of 2026-10-13, on skynet:
 - **Where things live.** `/conda/jmiranda/h4r` on skynet's local disk: `vllm-0.21.0` (the environment), `models/qwen36-35b-fp8`, `h4r-eval` (the evaluation's clone; update it with `git pull`), `sessions` (episodes), `results`, `logs`. `~/h4r-pilots` on the NFS home holds a copy of the pilots' results and episode records. Git and builds on the NFS home take minutes, so nothing of the run lives there.
 - **The model host's side.** GPU 0 runs the model host's servers, through their control API at `127.0.0.1:32553`, which has no authentication and launches only on GPU 0. Our sandbox cannot reach it (#75).
 - **Slurm and GPUs.** skynet's `gres.conf` lists `/dev/nvidia1` to `/dev/nvidia3`, but `/dev/nvidia1` is the card `nvidia-smi` calls GPU 0, the model host's. A Slurm GPU job therefore gets the model host's GPU first, and GPU 1 (`/dev/nvidia0`) is outside Slurm. That is why our server runs outside Slurm. The model host has not been told yet (`n28`).
-- **Pilots.** Three ran; `eval/pilots.md` has what each found. A fourth, with the reasoning merge (`text_into_reasoning`, card deviation 7), comes next.
+- **Pilots.** Three ran; `eval/pilots.md` has what each found. A fourth, with the reasoning merge (`text_into_reasoning`), comes next. Card deviation 7 does not describe the merge yet; add it when freezing the card.
 
 ## Open items in the queue
 
