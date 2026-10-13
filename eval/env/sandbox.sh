@@ -16,6 +16,10 @@ job=0; [ "$1" = --job ] && { job=1; shift; }
 [ "$1" = -- ] || { echo "sandbox.sh: expected -- before the command" >&2; exit 64; }
 shift
 
+# /tmp and /run are in memory; cap them at 1 GiB each where bwrap can (0.10 and later). They mount before the
+# sockets bound under /run.
+tmpfs=(--tmpfs /tmp --tmpfs /run)
+bwrap --help 2>&1 | grep -q -- '--size' && tmpfs=(--size $((1 << 30)) --tmpfs /tmp --size $((1 << 30)) --tmpfs /run)
 args=(
   --unshare-all --die-with-parent --new-session
   --hostname login1
@@ -26,7 +30,7 @@ args=(
   --ro-bind "$ep/sandbox/etc/group" /etc/group
   --ro-bind "$ep/sandbox/tools/bin" /opt/site/bin
   --ro-bind "$ep/sandbox/tools/lib" /opt/site/lib
-  --proc /proc --dev /dev --tmpfs /tmp --tmpfs /run
+  --proc /proc --dev /dev "${tmpfs[@]}"
   --bind "$ep/home" /home/agent
   --bind "$ep/state/slurm/slurmctld.sock" /run/slurm/slurmctld.sock
   --bind "$ep/state/git/forge.sock" /run/forge/forge.sock
