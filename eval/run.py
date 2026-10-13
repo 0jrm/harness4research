@@ -18,7 +18,8 @@ The config is the question card's machine part:
             "expect_root": "/path/to/checkpoint",     optional: the checkpoint path vLLM reports as root
             "expect_max_model_len": 131072,           optional: the context length vLLM reports
             "seed_base": 1000,                        each episode's requests carry seed_base + its seed
-            "sampling": {"temperature": 1.0}},        the proxy sets these on every request
+            "sampling": {"temperature": 1.0},         the proxy sets these on every request
+            "fold_developer": true},                  the proxy sends Codex's developer messages as system/user
   "scaffold": {"name": "codex", "release_dir": "~/.codex/packages/standalone/releases/<version>",
                "context_window": 65536, "timeout_minutes": 30, "parallel": 4, "disable_features": [...]},
   "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E"], "seeds": [1, 2],
@@ -58,6 +59,7 @@ import os
 import random
 import re
 import secrets
+import shutil
 import signal
 import subprocess
 import sys
@@ -66,6 +68,9 @@ import urllib.request
 from typing import NamedTuple, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+RELAY_PORT = 18080   # inside each sandbox's own network namespace, so every episode can use it
+MAX_HOME_GB = 5      # an episode whose home grows past this is killed, checked every 2 s; the tasks need megabytes
+MIN_FREE_GB = 100    # below this much free under episodes_dir, no episode starts and running ones are killed
 
 
 def expand(path):
@@ -203,6 +208,9 @@ def upstream_failure(log_path):
 def run_episode(cfg, ep, family, variant, arm, seed):
     model, scaffold = cfg["model"], cfg["scaffold"]
     os.makedirs(os.path.dirname(ep), exist_ok=True)
+    if disk_free_gb(ep) < MIN_FREE_GB:
+        return {"episode": ep, "error": f"disk: {disk_free_gb(ep):.0f} GiB free under episodes_dir, below "
+                f"{MIN_FREE_GB}", "stop_run": True}
     built = subprocess.run([os.path.join(HERE, "episode.sh"), family, variant, arm, ep, "--seed", str(seed)],
                            capture_output=True, text=True)
     if built.returncode:
@@ -215,37 +223,46 @@ def run_episode(cfg, ep, family, variant, arm, seed):
         return {"episode": ep, **served.record(), "error": f"model check: {served.mismatch}", "stop_run": True}
     os.makedirs(os.path.join(ep, "state", "model"))
     os.makedirs(os.path.join(ep, "state", "agent"))
-    port_file = os.path.join(ep, "state", "model", "port")
+    sock = os.path.join(ep, "state", "model", "proxy.sock")
     log = os.path.join(ep, "state", "model", "requests.jsonl")
     proxy = subprocess.Popen([sys.executable, os.path.join(HERE, "driver", "proxy.py"), "--upstream", model["upstream"],
                               "--alias", model["alias"], "--seed", str(model["seed_base"] + seed), "--log", log,
-                              "--port-file", port_file, "--sampling", json.dumps(model.get("sampling", {}))],
+                              "--unix", sock, "--sampling", json.dumps(model.get("sampling", {}))]
+                             + (["--fold-developer"] if model.get("fold_developer") else []),
                              start_new_session=True)
-    for _ in range(100):
-        if os.path.exists(port_file) and open(port_file).read().strip():
+    for _ in range(200):
+        if os.path.exists(sock):
             break
         time.sleep(0.05)
-    port = int(open(port_file).read())
     release = expand(scaffold["release_dir"])
     with open(os.path.join(ep, "sandbox", "binds"), "w") as f:
-        f.write(f"{release} /opt/codex\n")
+        f.write(f"{release} /opt/codex\n{os.path.join(HERE, 'driver', 'netrelay.py')} /opt/model/netrelay.py\n")
     with open(os.path.join(ep, "sandbox", "path"), "w") as f:
         f.write("/opt/codex/bin\n")
     os.makedirs(os.path.join(ep, "home", ".codex"), exist_ok=True)
     with open(os.path.join(ep, "home", ".codex", "config.toml"), "w") as f:
-        f.write(codex_config(scaffold, port, model["alias"]))
+        f.write(codex_config(scaffold, RELAY_PORT, model["alias"]))
     prompt = open(os.path.join(ep, "prompt.md")).read()
-    cmd = [os.path.join(HERE, "env", "sandbox.sh"), ep, "--", "codex", "exec", "--json", "--skip-git-repo-check",
+    relay = (f"python3 /opt/model/netrelay.py {RELAY_PORT} /run/model/proxy.sock & "
+             f"until (exec 3<>/dev/tcp/127.0.0.1/{RELAY_PORT}) 2>/dev/null; do sleep 0.1; done; exec \"$@\"")
+    cmd = [os.path.join(HERE, "env", "sandbox.sh"), ep, "--", "bash", "-c", relay, "relay", "codex", "exec", "--json", "--skip-git-repo-check",
            "--dangerously-bypass-approvals-and-sandbox", "-C", f"/home/agent/{meta['project']}", prompt]
     started = time.time()
-    timed_out = False
+    timed_out = disk_kill = None
+    limit = started + scaffold["timeout_minutes"] * 60
     with open(os.path.join(ep, "state", "agent", "events.jsonl"), "w") as out, \
          open(os.path.join(ep, "state", "agent", "stderr.log"), "w") as err:
         agent = subprocess.Popen(cmd, stdout=out, stderr=err, stdin=subprocess.DEVNULL, start_new_session=True)
-        try:
-            rc = agent.wait(timeout=scaffold["timeout_minutes"] * 60)
-        except subprocess.TimeoutExpired:
-            timed_out = True
+        while (rc := agent.poll()) is None:
+            if time.time() > limit:
+                timed_out = True
+            elif home_bytes(os.path.join(ep, "home")) > MAX_HOME_GB * 2**30:
+                disk_kill = f"home over {MAX_HOME_GB} GiB"
+            elif disk_free_gb(ep) < MIN_FREE_GB:
+                disk_kill = f"under {MIN_FREE_GB} GiB free on the host"
+            else:
+                time.sleep(2)
+                continue
             os.killpg(agent.pid, signal.SIGKILL)
             rc = agent.wait()
     wall = round(time.time() - started, 1)
@@ -253,18 +270,31 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     proxy.wait()
     subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
     scored = subprocess.run([sys.executable, os.path.join(HERE, "score.py"), ep], capture_output=True, text=True)
-    row = {"episode": os.path.basename(ep), **served.record(), "client_exit": rc, "timed_out": timed_out,
+    row = {"episode": os.path.basename(ep), **served.record(), "client_exit": rc, "timed_out": bool(timed_out),
+           "disk_kill": disk_kill,
            "wall_seconds": wall, **costs(log)}
     if not scored.returncode:
         row.update(json.loads(scored.stdout))
     outage = upstream_failure(log) if rc and not timed_out else None
-    if outage:
+    if disk_kill and "host" in disk_kill:
+        row.update({"error": "disk: " + disk_kill, "stop_run": True})
+    elif outage:
         row["error"] = "upstream: " + outage
     elif scored.returncode:
         row["error"] = "score.py: " + scored.stderr.strip()[-300:]
     with open(os.path.join(ep, "verdict.json"), "w") as f:
         json.dump(row, f, indent=1)
     return row
+
+
+def home_bytes(path):
+    """Bytes under path, as du counts them: what the agent wrote, since its home is its only writable place."""
+    out = subprocess.run(["du", "-sb", path], capture_output=True, text=True)
+    return int(out.stdout.split()[0]) if out.stdout else 0
+
+
+def disk_free_gb(path):
+    return shutil.disk_usage(path if os.path.exists(path) else os.path.dirname(path)).free / 2**30
 
 
 def attempt(cfg, case):

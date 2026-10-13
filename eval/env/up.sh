@@ -86,7 +86,7 @@ echo $! > "$ep/state/slurm/pid"
 FORGE_LOG=$ep/state/git/forge.log nohup setsid python3 "$here/gitsock.py" serve \
   "$ep/state/git/protected.git" "$ep/state/git/forge.sock" > "$ep/state/git/daemon.log" 2>&1 &
 echo $! > "$ep/state/git/pid"
-for _ in $(seq 50); do
+for _ in $(seq 300); do  # up to 30 s: four builds at once on an NFS home took more than 5
   [ -S "$ep/state/slurm/slurmctld.sock" ] && [ -S "$ep/state/git/forge.sock" ] && break
   sleep 0.1
 done
