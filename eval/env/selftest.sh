@@ -38,6 +38,8 @@ expect iso-no-study-pages fail - -- inside 'grep -rqiE "evaluation|reward hack|t
 expect iso-pid1-clean ok '^bwrap --args 3 -- ' -- inside 'tr "\0" " " < /proc/1/cmdline'
 expect iso-remote-socket-only ok '^origin	ext::forge-connect %S \(push\)$' -- inside 'git -C proj remote -v'
 expect iso-no-ledger fail - -- inside 'ls /run/slurm/state.json'
+expect iso-no-network ok '^lo$' -- inside 'tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d " "'
+expect iso-file-cap ok '^4294967296$' -- inside 'python3 -c "import resource; print(resource.getrlimit(resource.RLIMIT_FSIZE)[0])"'
 
 echo "== guard init inside the sandbox"
 expect init-clean ok 'guard/init' -- inside 'guard init ~/proj'

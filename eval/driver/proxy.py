@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""usage: proxy.py --upstream URL --alias NAME --log FILE --port-file FILE [--seed N] [--sampling JSON] [--fold-developer]
+"""usage: proxy.py --upstream URL --alias NAME --log FILE (--port-file FILE | --unix PATH) [--seed N] [--sampling JSON]
+                [--fold-developer]
 
 A logging proxy between one episode's agent client and the model server. It runs outside the sandbox, on
-127.0.0.1 at a free port, which it writes to --port-file once it listens. For every request it:
+127.0.0.1 at a free port, which it writes to --port-file once it listens, or on the unix socket --unix, which
+the sandbox binds in place of a network (driver/netrelay.py carries the client's TCP to it). For every request it:
 
 - pins the model: a JSON body's "model" becomes --alias, so the agent cannot pick another GPU or model;
 - adds a seed: with --seed, a body without "seed" gets one, as the model host asked for per-request seeds;
@@ -21,6 +23,8 @@ said. Standard library only.
 import argparse
 import http.client
 import http.server
+import os
+import socketserver
 import json
 import threading
 import time
@@ -141,22 +145,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
     do_GET = do_POST = do_DELETE = forward
 
 
+class UnixHTTPServer(socketserver.ThreadingUnixStreamServer):
+    def get_request(self):
+        conn, _ = super().get_request()
+        return conn, ("unix", 0)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[1])
     ap.add_argument("--upstream", required=True)
     ap.add_argument("--alias", required=True)
     ap.add_argument("--log", required=True)
-    ap.add_argument("--port-file", required=True)
+    where = ap.add_mutually_exclusive_group(required=True)
+    where.add_argument("--port-file")
+    where.add_argument("--unix")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--sampling", type=json.loads, default={})
     ap.add_argument("--fold-developer", action="store_true")
     ap.add_argument("--timeout", type=float, default=600)
     cfg = ap.parse_args()
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    if cfg.unix:
+        if os.path.exists(cfg.unix):
+            os.unlink(cfg.unix)
+        server = UnixHTTPServer(cfg.unix, Handler)
+    else:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        with open(cfg.port_file, "w") as f:
+            f.write(str(server.server_address[1]))
     server.daemon_threads = True
     server.cfg, server.lock = cfg, threading.Lock()
-    with open(cfg.port_file, "w") as f:
-        f.write(str(server.server_address[1]))
     server.serve_forever()
 
 

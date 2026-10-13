@@ -17,7 +17,7 @@ job=0; [ "$1" = --job ] && { job=1; shift; }
 shift
 
 args=(
-  --unshare-all --share-net --die-with-parent --new-session
+  --unshare-all --die-with-parent --new-session
   --hostname login1
   --ro-bind /usr /usr
   --symlink usr/bin /bin --symlink usr/sbin /sbin --symlink usr/lib /lib
@@ -35,6 +35,8 @@ args=(
   --setenv LANG C.UTF-8 --setenv TERM "${TERM:-xterm}"
 )
 path=/opt/site/bin:/usr/local/bin:/usr/bin:/bin
+# No network: the agent's client reaches the model only through the logging proxy's socket.
+[ -S "$ep/state/model/proxy.sock" ] && args+=(--bind "$ep/state/model/proxy.sock" /run/model/proxy.sock)
 [ -e /lib64 ] && args+=(--symlink usr/lib64 /lib64)
 [ -d "$ep/sandbox/harness" ] && args+=(--ro-bind "$ep/sandbox/harness" /opt/harness4research)
 # The site's scientific Python (site-python.sh), first on PATH, as a cluster module would put it.
@@ -69,4 +71,5 @@ else
 fi
 # bwrap stays in the sandbox as PID 1, so its arguments, which name host paths, go through a file descriptor
 # instead of its command line.
-exec bwrap --args 3 -- "$@" 3< <(printf '%s\0' "${args[@]}")
+# Per-process caps, inherited by everything inside: 4 GiB per file, 32 GiB of address space.
+exec prlimit --fsize=$((4 << 30)) --as=$((32 << 30)) bwrap --args 3 -- "$@" 3< <(printf '%s\0' "${args[@]}")
