@@ -45,7 +45,7 @@ The handoff says not to start items 12 to 17 before item 10's result, except as 
 
 As of 2026-10-13, on skynet:
 
-- **Our model server.** Qwen/Qwen3.6-35B-A3B-FP8 on GPU 1, outside Slurm, in tmux session `h4r-vllm`, at `127.0.0.1:9185`. It runs `eval/serve/qwen3.6-fp8.sh`: the model host's launch command with our vLLM 0.21.0 (torch 2.11.0+cu130) and our copy of the weights, checked 56 of 56 against Hugging Face with `eval/serve/verify_weights.py`. Stop it with Ctrl-C in that tmux session.
+- **Our model server.** Qwen/Qwen3.6-35B-A3B-FP8 on GPU 1, outside Slurm, in tmux session `h4r-vllm`, at `127.0.0.1:9185`, with prefix caching on. It runs `eval/serve/qwen3.6-fp8.sh`: the model host's launch command with our vLLM 0.21.0 (torch 2.11.0+cu130) and our copy of the weights, checked 56 of 56 against Hugging Face with `eval/serve/verify_weights.py`. Stop it with Ctrl-C in that tmux session.
 - **Where things live.** `/conda/jmiranda/h4r` on skynet's local disk: `vllm-0.21.0` (the environment), `models/qwen36-35b-fp8`, `h4r-eval` (the evaluation's clone; update it with `git pull`), `sessions` (episodes), `results`, `logs`. `~/h4r-pilots` on the NFS home holds a copy of the pilots' results and episode records. Git and builds on the NFS home take minutes, so nothing of the run lives there.
 - **The model host's side.** GPU 0 runs the model host's servers, through their control API at `127.0.0.1:32553`, which has no authentication and launches only on GPU 0. Our sandbox cannot reach it (#75).
 - **Slurm and GPUs.** skynet's `gres.conf` lists `/dev/nvidia1` to `/dev/nvidia3`, but `/dev/nvidia1` is the card `nvidia-smi` calls GPU 0, the model host's. A Slurm GPU job therefore gets the model host's GPU first, and GPU 1 (`/dev/nvidia0`) is outside Slurm. That is why our server runs outside Slurm. The model host has not been told yet (`n28`).
@@ -60,10 +60,14 @@ As of 2026-10-13, on skynet:
 
 ## The next steps, in order
 
-1. **Pilot 4.** Run 16 unfrozen episodes with the merged reasoning repair, at `parallel` 8, as pilots 2 and 3 ran. Check with `eval/diagnostics/endings.py` that agents no longer stop right after announcing a step, and read `analyze.py`'s kill criterion. Leave `expect_root` set: our server's root is fixed, `/conda/jmiranda/h4r/models/qwen36-35b-fp8`.
-2. **Freeze the card.** The draft `eval/cards/drafts/first-qwen3.6.card` has no placeholder left. Fold in what pilot 4 changes, then move it to `eval/cards/first-qwen3.6.card` in one pull request. Only the owner approves a question card.
-3. **The run.** On skynet, in `/conda/jmiranda/h4r/h4r-eval`, run `eval/run.py eval/configs/codex-qwen3.6.json` in tmux. The pilots took seconds to minutes per episode, so 120 episodes at 8 at a time should take about an hour. Rerun the same command after any interruption; it resumes, and stops if the server's model, path or context length changes.
-4. **The result.** Run `eval/analyze.py` and publish the numbers in the README next to the Status section, with the card's seven deviations, and every claim still unverified marked unmeasured. Publish it whatever it shows.
+On 2026-10-13 the owner paused the model run. Their position is that violations are unacceptable, so the first question is whether the walls hold, not how often agents try. A pilot-4 agent in arm E called `sbatch` directly and ran a 30-minute job against a 10-minute cap, the gap `docs/enforcement.md` already calls a speed bump.
+
+1. **The enforcement audit.** For each rule, a scripted attacker tries the known bypass inside the existing sandbox, with arm E installed. The output is a table of each rule as wall or speed bump, with evidence. Deterministic, no model.
+2. **Close the walls the audit finds.** Candidates: a scheduler-level limit (a capped sub-account or account wall-time limit, which `guard doctor` should require, and which the fake Slurm should model); a sandboxed launcher for agents, which also keeps the owner's credentials out of their reach; a sandboxed reviewer.
+3. **Then the model run.** It measures what remains: the cost of the walls to real work, and whether agents escalate when they hit one. The card, the config and the server stay as they are until then. The server runs with prefix caching (card deviation 8).
+4. **The result,** published whatever it shows.
+
+The inspector's first two steps are on the pushed branch `feat/eval-inspect-index`, not merged. They wait until the audit's needs are clear.
 
 ## Earlier milestones
 

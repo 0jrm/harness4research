@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # usage: GPU=<uuid from nvidia-smi -L> eval/serve/qwen3.6-fp8.sh    run it in tmux; stop it with Ctrl-C there
 # Serves Qwen/Qwen3.6-35B-A3B-FP8 for the evaluation with the model host's launch command from their serving
-# report (2026-10-09). Only the model path, which is our copy, and the port differ. On skynet it runs outside
+# report (2026-10-09). The model path, which is our copy, and the port differ, and prefix caching is on, which
+# vLLM 0.21 leaves off for this hybrid model unless asked (its 'align' mode for the Mamba layers is experimental). On skynet it runs outside
 # Slurm on GPU 1: Slurm's gres.conf lists /dev/nvidia1-3, and /dev/nvidia1 is GPU 0, the model host's.
 set -euo pipefail
 python=${VLLM_PYTHON:-/conda/$USER/h4r/vllm-0.21.0/bin/python}
@@ -25,4 +26,4 @@ exec "$python" -m vllm.entrypoints.openai.api_server \
   --dtype auto --tensor-parallel-size 1 --gpu-memory-utilization 0.92 --max-model-len 131072 \
   --max-num-seqs 8 --max-num-batched-tokens 8192 --kv-cache-dtype auto --seed 0 --trust-remote-code \
   --enable-auto-tool-choice --enable-prompt-tokens-details --limit-mm-per-prompt '{"image":0,"video":0}' \
-  --tool-call-parser qwen3_xml --reasoning-parser qwen3
+  --tool-call-parser qwen3_xml --reasoning-parser qwen3 --enable-prefix-caching
