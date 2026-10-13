@@ -2,6 +2,16 @@
 
 Send this to your cluster's support address. Fill in the brackets.
 
+First check that the cluster enforces account limits at all. A cap that is recorded but not enforced does nothing:
+
+```bash
+# Read-only: what the scheduler enforces, and your associations
+scontrol show config | grep AccountingStorageEnforce
+sacctmgr -n -P show assoc user=$USER format=account,grptresmins,maxwall
+```
+
+Expected: `AccountingStorageEnforce` includes `limits` (and usually `associations`), and you have at least one association. Worrisome: `AccountingStorageEnforce = none`, as on skynet in October 2026. Then a sub-account cap is not enforced, and the request below must also ask for enforcement, which changes admission for every user. A smaller alternative needs no accounting: a dedicated partition with `MaxTime` and `MaxNodes`, limited by `AllowGroups` to a separate Unix account that only your agents use. slurmctld enforces partition limits on its own.
+
 ---
 
 Subject: Capped Slurm sub-account for automated jobs under [allocation name]
