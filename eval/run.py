@@ -19,7 +19,8 @@ The config is the question card's machine part:
             "expect_max_model_len": 131072,           optional: the context length vLLM reports
             "seed_base": 1000,                        each episode's requests carry seed_base + its seed
             "sampling": {"temperature": 1.0},         the proxy sets these on every request
-            "fold_developer": true},                  the proxy sends Codex's developer messages as system/user
+            "fold_developer": true,                   the proxy sends Codex's developer messages as system/user
+            "text_into_reasoning": true},             and the agent's past text inside its reasoning
   "scaffold": {"name": "codex", "release_dir": "~/.codex/packages/standalone/releases/<version>",
                "context_window": 65536, "timeout_minutes": 30, "parallel": 4, "disable_features": [...]},
   "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E"], "seeds": [1, 2],
@@ -228,7 +229,8 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     proxy = subprocess.Popen([sys.executable, os.path.join(HERE, "driver", "proxy.py"), "--upstream", model["upstream"],
                               "--alias", model["alias"], "--seed", str(model["seed_base"] + seed), "--log", log,
                               "--unix", sock, "--sampling", json.dumps(model.get("sampling", {}))]
-                             + (["--fold-developer"] if model.get("fold_developer") else []),
+                             + (["--fold-developer"] if model.get("fold_developer") else [])
+                             + (["--text-into-reasoning"] if model.get("text_into_reasoning") else []),
                              start_new_session=True)
     for _ in range(200):
         if os.path.exists(sock):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """usage: proxy.py --upstream URL --alias NAME --log FILE (--port-file FILE | --unix PATH) [--seed N] [--sampling JSON]
-                [--fold-developer]
+                [--fold-developer] [--text-into-reasoning]
 
 A logging proxy between one episode's agent client and the model server. It runs outside the sandbox, on
 127.0.0.1 at a free port, which it writes to --port-file once it listens, or on the unix socket --unix, which
@@ -13,6 +13,10 @@ the sandbox binds in place of a network (driver/netrelay.py carries the client's
 - folds the developer role: with --fold-developer, the leading developer and system messages of a Responses
   request become one system message, and a later developer message becomes a user message, for chat templates
   such as Qwen's that refuse the developer role and a system message anywhere but first;
+- moves the agent's own past text into its reasoning: with --text-into-reasoning, an assistant message that follows
+  a reasoning item in a Responses request is appended to that reasoning. vLLM 0.21 turns every Responses item into
+  its own assistant turn, so a model turn of reasoning, a sentence and tool calls reached the model as separate
+  turns, some ending in plain text, and Qwen learned to end its turns with a sentence and no tool call;
 - streams the reply back unchanged, server-sent events included;
 - appends one JSON line to --log: the time, path, status, the request as sent upstream, the reply as received,
   and the token usage the reply reports.
@@ -72,6 +76,26 @@ def fold_developer(items):
     return folded
 
 
+def text_into_reasoning(items):
+    """Responses input items with each assistant message that follows a reasoning item appended to that item's text,
+    where vLLM reads it (content[0], else summary[0]); other assistant messages stay as they are."""
+    out = []
+    for item in items:
+        prev = out[-1] if out else None
+        if item.get("type", "message") == "message" and item.get("role") == "assistant" \
+                and prev is not None and prev.get("type") == "reasoning" and (prev.get("content") or prev.get("summary")):
+            content = item.get("content")
+            text = (content if isinstance(content, str) else "".join(c.get("text", "") for c in content or [])).strip()
+            if text:
+                prev = json.loads(json.dumps(prev))
+                part = (prev.get("content") or prev.get("summary"))[0]
+                part["text"] = part.get("text", "") + "\n\n" + text
+                out[-1] = prev
+            continue
+        out.append(item)
+    return out
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -98,6 +122,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 request_json.update(cfg.sampling)
                 if cfg.fold_developer and isinstance(request_json.get("input"), list):
                     request_json["input"] = fold_developer(request_json["input"])
+                if cfg.text_into_reasoning and isinstance(request_json.get("input"), list):
+                    request_json["input"] = text_into_reasoning(request_json["input"])
                 sent = json.dumps(request_json).encode()
         up = urllib.parse.urlsplit(cfg.upstream)
         headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
@@ -162,6 +188,7 @@ def main():
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--sampling", type=json.loads, default={})
     ap.add_argument("--fold-developer", action="store_true")
+    ap.add_argument("--text-into-reasoning", action="store_true")
     ap.add_argument("--timeout", type=float, default=600)
     cfg = ap.parse_args()
     if cfg.unix:
