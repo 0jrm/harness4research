@@ -69,8 +69,7 @@ from typing import NamedTuple, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RELAY_PORT = 18080   # inside each sandbox's own network namespace, so every episode can use it
-MAX_HOME_GB = 5      # an episode whose home grows past this is killed; the tasks need megabytes
-MIN_FREE_GB = 50     # no episode starts with less free space under episodes_dir
+MIN_FREE_GB = 50     # no episode image is made when less would be left free under episodes_dir
 
 
 def expand(path):
@@ -208,10 +207,6 @@ def upstream_failure(log_path):
 def run_episode(cfg, ep, family, variant, arm, seed):
     model, scaffold = cfg["model"], cfg["scaffold"]
     os.makedirs(os.path.dirname(ep), exist_ok=True)
-    free_gb = shutil.disk_usage(os.path.dirname(ep)).free / 2**30
-    if free_gb < MIN_FREE_GB:
-        return {"episode": ep, "error": f"disk: {free_gb:.0f} GiB free under episodes_dir, below {MIN_FREE_GB}",
-                "stop_run": True}
     built = subprocess.run([os.path.join(HERE, "episode.sh"), family, variant, arm, ep, "--seed", str(seed)],
                            capture_output=True, text=True)
     if built.returncode:
@@ -249,7 +244,7 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     cmd = [os.path.join(HERE, "env", "sandbox.sh"), ep, "--", "bash", "-c", relay, "relay", "codex", "exec", "--json", "--skip-git-repo-check",
            "--dangerously-bypass-approvals-and-sandbox", "-C", f"/home/agent/{meta['project']}", prompt]
     started = time.time()
-    timed_out = home_over = False
+    timed_out = False
     limit = started + scaffold["timeout_minutes"] * 60
     with open(os.path.join(ep, "state", "agent", "events.jsonl"), "w") as out, \
          open(os.path.join(ep, "state", "agent", "stderr.log"), "w") as err:
@@ -257,8 +252,6 @@ def run_episode(cfg, ep, family, variant, arm, seed):
         while (rc := agent.poll()) is None:
             if time.time() > limit:
                 timed_out = True
-            elif home_bytes(os.path.join(ep, "home")) > MAX_HOME_GB * 2**30:
-                home_over = True
             else:
                 time.sleep(10)
                 continue
@@ -270,7 +263,7 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
     scored = subprocess.run([sys.executable, os.path.join(HERE, "score.py"), ep], capture_output=True, text=True)
     row = {"episode": os.path.basename(ep), **served.record(), "client_exit": rc, "timed_out": timed_out,
-           "home_over_limit": home_over,
+           "disk_used_bytes": shutil.disk_usage(ep).used,
            "wall_seconds": wall, **costs(log)}
     if not scored.returncode:
         row.update(json.loads(scored.stdout))
@@ -284,21 +277,59 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     return row
 
 
-def home_bytes(path):
-    """Bytes under path, as du counts them; what the agent wrote, since its home is its only writable place."""
-    out = subprocess.run(["du", "-sb", path], capture_output=True, text=True)
-    return int(out.stdout.split()[0]) if out.stdout else 0
+def mount_disk(root, gb):
+    """A fresh ext4 image of gb GiB at root.img, mounted at root through FUSE, without root. The episode lives in
+    root/e, so a full disk fails that episode's writes and nothing else on the host."""
+    image = root + ".img"
+    os.makedirs(root)
+    with open(image, "wb") as f:
+        f.truncate(gb * 2**30)
+    subprocess.run(["mkfs.ext4", "-q", "-F", "-m", "0", "-E", f"root_owner={os.getuid()}:{os.getgid()}", image],
+                   check=True, capture_output=True)
+    subprocess.run(["fuse2fs", image, root, "-o", "rw"], check=True, capture_output=True)
+    return os.path.join(root, "e")
+
+
+def unmount_disk(root):
+    """Copies the episode's logs and verdict beside the image, then unmounts it; fuse2fs can be busy for a moment
+    after the last process exits."""
+    ep = os.path.join(root, "e")
+    for part in ("state/model", "state/agent", "verdict.json", "meta.json"):
+        src = os.path.join(ep, part)
+        dst = os.path.join(root + ".records", part)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        elif os.path.isfile(src):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy(src, dst)
+    for _ in range(30):
+        if subprocess.run(["fusermount3", "-u", root], capture_output=True).returncode == 0:
+            return
+        time.sleep(1)
+    subprocess.run(["fusermount3", "-u", "-z", root], capture_output=True)
 
 
 def attempt(cfg, case):
     """run_episode in a fresh directory, with an exception kept as the case's error, so that the other episodes go
-    on and a rerun retries the case."""
-    ep = os.path.join(expand(cfg["episodes_dir"]), secrets.token_hex(6))
+    on and a rerun retries the case. With scaffold.episode_disk_gb, the directory is its own disk image of that
+    size; its logs land in <name>.records beside it."""
+    root = os.path.join(expand(cfg["episodes_dir"]), secrets.token_hex(6))
+    gb = cfg["scaffold"].get("episode_disk_gb")
+    ep = root
     try:
+        if gb:
+            free_gb = shutil.disk_usage(os.path.dirname(root)).free / 2**30
+            if free_gb < MIN_FREE_GB + gb:
+                return {"episode": os.path.basename(root), "stop_run": True,
+                        "error": f"disk: {free_gb:.0f} GiB free under episodes_dir, below {MIN_FREE_GB + gb}"}
+            ep = mount_disk(root, gb)
         return run_episode(cfg, ep, *case)
     except Exception as e:
         subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
-        return {"episode": os.path.basename(ep), "error": f"run.py: {e!r}"}
+        return {"episode": os.path.basename(root), "error": f"run.py: {e!r}"}
+    finally:
+        if gb and os.path.ismount(root):
+            unmount_disk(root)
 
 
 def main():
