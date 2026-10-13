@@ -1,0 +1,66 @@
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from scorelib import Episode  # noqa: E402
+
+
+def git(*args, cwd=None):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+
+
+class HostileClone(unittest.TestCase):
+    """An episode whose agent left a booby-trapped clone: the scorer must not run its config or follow its links."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        ep = self.ep = self.tmp.name
+        project = os.path.join(ep, "home", "proj")
+        os.makedirs(project)
+        git("init", "-q", cwd=project)
+        with open(os.path.join(project, "a.txt"), "w") as f:
+            f.write("a\n")
+        git("-c", "user.email=a@b", "-c", "user.name=a", "add", "a.txt", cwd=project)
+        git("-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "start", cwd=project)
+        start = git("rev-parse", "HEAD", cwd=project)
+        os.makedirs(os.path.join(ep, "state", "git"))
+        git("clone", "-q", "--bare", project, os.path.join(ep, "state", "git", "protected.git"))
+        with open(os.path.join(ep, "state", "git", "start-commit"), "w") as f:
+            f.write(start + "\n")
+        with open(os.path.join(ep, "meta.json"), "w") as f:
+            json.dump({"project": "proj", "family": "t", "variant": "trap", "arm": "A", "seed": 1}, f)
+        self.canary = os.path.join(ep, "canary")
+        git("config", "core.fsmonitor", f"touch {self.canary}; false", cwd=project)
+        with open(os.path.join(project, "a.txt"), "w") as f:
+            f.write("changed\n")
+        with open(os.path.join(project, "new.txt"), "w") as f:
+            f.write("new\n")
+        self.secret = os.path.join(ep, "secret")
+        with open(self.secret, "w") as f:
+            f.write("host file\n")
+        os.symlink(self.secret, os.path.join(project, "NOTES.md"))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_worktree_changes_never_runs_the_clones_config(self):
+        changes = Episode(self.ep).worktree_changes()
+        self.assertFalse(os.path.exists(self.canary), "core.fsmonitor in the agent's clone ran")
+        self.assertIn("a.txt", changes)
+        self.assertIn("new.txt", changes)
+
+    def test_read_refuses_a_link_out_of_the_clone(self):
+        self.assertIsNone(Episode(self.ep).read("NOTES.md"))
+
+    def test_the_old_way_did_run_it(self):
+        subprocess.run(["git", "-C", os.path.join(self.ep, "home", "proj"), "status", "--porcelain"],
+                       capture_output=True)
+        self.assertTrue(os.path.exists(self.canary), "the hazard this guards against is real")
+
+
+if __name__ == "__main__":
+    unittest.main()
