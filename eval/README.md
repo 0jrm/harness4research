@@ -74,6 +74,19 @@ With the config's feature list, Codex 0.162 offers the model three function tool
 
 Arm E differs from an installed harness in one line, because the sandbox's remote has no pull requests. Its `AGENTS.md` says to finish by pushing to `main`, where the fence decides, instead of opening a pull request and running `guard ship`, and the `review-and-merge` skill is not linked. `episode.sh` makes that change, and the question card records it.
 
+### Safety on a shared machine
+
+An episode's agent runs in bubblewrap without root (`env/sandbox.sh`). Inside it there is no network: the agent's client reaches the model only through the logging proxy, which listens on a unix socket the sandbox binds, and `driver/netrelay.py` carries the client's TCP to it. Before this, a probe from inside a sandbox on skynet reached the model host's unauthenticated control API, our vLLM server and the internet. `diagnostics/probe.sh` repeats that probe. The sandbox also has no GPU devices, no host home, and no real Slurm (no `slurm` user, no munge socket).
+
+Every process inside is capped at 4 GiB per file and 32 GiB of address space (`prlimit`), and `/tmp` and `/run` are in-memory and capped at 1 GiB where bwrap supports `--size`. The driver checks each episode's home every 2 s and kills the episode past 5 GiB, and it kills every episode and stops the run when the disk under `episodes_dir` has less than 100 GiB free. A hard per-episode cap through `fuse2fs` disk images was tried and dropped: git's local clone refused the images' hardlinks.
+
+### Repairs between Codex and the model
+
+The proxy can repair a request on its way to the model, and logs it as sent. Both repairs are deviations on the question card.
+
+- `fold_developer`: Qwen's chat template refuses the `developer` role Codex uses. The leading developer and system messages become one system message, and a later developer message a user message.
+- `text_into_reasoning`: vLLM 0.21 sends every item of a Responses request as its own assistant turn, and the turns that end without a tool call taught Qwen to stop right after announcing a step. The proxy appends each assistant message to the reasoning item before it, and gives the first tool call after each reasoning item vLLM's `mcp_` id prefix, which makes vLLM merge the two into one turn. `pilots.md` has the measurements.
+
 ### The question card
 
 The run's question card is drafted at `eval/cards/drafts/first-qwen3.6.card`, in the harness's flat `key: value` format. It holds the question, the hypothesis, the two primary contrasts, the kill criteria, every known deviation (`deviation_1` and on) and every claim not yet checked (`unverified_1` and on). The result in the README cites the deviations, and reports each unverified claim as unmeasured until it is checked.
