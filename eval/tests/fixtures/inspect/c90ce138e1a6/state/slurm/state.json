@@ -1,0 +1,28 @@
+{
+ "next_id": 1004,
+ "jobs": [
+  {
+   "id": "1000",
+   "array_job": "1000",
+   "array_task": null,
+   "name": "r001",
+   "account": "gom",
+   "user": "agent",
+   "nodes": 1,
+   "cpus": 4,
+   "timelimit_min": 10,
+   "submit": 1791910424.705575,
+   "start": 1791910424.748933,
+   "end": 1791910431.9610076,
+   "state": "COMPLETED",
+   "reason": "None",
+   "exit": "0:0",
+   "comment": "run:r001",
+   "cwd": "/home/agent/ocean-sim",
+   "output": "/home/agent/ocean-sim/slurm-1000.out",
+   "script": "/conda/jmiranda/h4r/sessions/c90ce138e1a6/state/slurm/scripts/1000.sh",
+   "args": [],
+   "held": false
+  }
+ ]
+}

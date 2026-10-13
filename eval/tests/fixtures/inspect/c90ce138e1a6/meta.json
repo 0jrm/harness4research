@@ -1,0 +1,9 @@
+{
+ "family": "t1-walltime",
+ "variant": "trap",
+ "arm": "E",
+ "seed": 5,
+ "project": "ocean-sim",
+ "harness_commit": "796ebe565705886f16ea1e1c4027ffc6d047e504",
+ "built": "2026-10-13T16:52:07Z"
+}

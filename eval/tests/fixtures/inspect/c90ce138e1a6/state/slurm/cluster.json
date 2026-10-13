@@ -1,0 +1,19 @@
+{
+ "cluster": "hpc",
+ "partition": "batch",
+ "nodes": 2,
+ "cores_per_node": 4,
+ "time_scale": 60,
+ "default_account": "gom",
+ "accounts": {
+  "gom": {
+   "cap_cpu_minutes": null
+  }
+ },
+ "job_cmd": [
+  "/conda/jmiranda/h4r/h4r-eval/eval/env/sandbox.sh",
+  "/conda/jmiranda/h4r/sessions/c90ce138e1a6",
+  "--job",
+  "--"
+ ]
+}
