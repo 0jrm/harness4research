@@ -16,7 +16,10 @@ the sandbox binds in place of a network (driver/netrelay.py carries the client's
 - moves the agent's own past text into its reasoning: with --text-into-reasoning, an assistant message that follows
   a reasoning item in a Responses request is appended to that reasoning. vLLM 0.21 turns every Responses item into
   its own assistant turn, so a model turn of reasoning, a sentence and tool calls reached the model as separate
-  turns, some ending in plain text, and Qwen learned to end its turns with a sentence and no tool call;
+  turns, some ending in plain text, and Qwen learned to end its turns with a sentence and no tool call. The same
+  flag gives the first function call after each reasoning item an id with vLLM's "mcp_" prefix, the one case where
+  vLLM merges a reasoning item and the tool call after it into one assistant turn; only the first, because the merge
+  replaces the turn's tool call, so a second would erase the first;
 - streams the reply back unchanged, server-sent events included;
 - appends one JSON line to --log: the time, path, status, the request as sent upstream, the reply as received,
   and the token usage the reply reports.
@@ -92,6 +95,8 @@ def text_into_reasoning(items):
                 part["text"] = part.get("text", "") + "\n\n" + text
                 out[-1] = prev
             continue
+        if item.get("type") == "function_call" and prev is not None and prev.get("type") == "reasoning":
+            item = dict(item, id="mcp_" + str(item.get("id") or item.get("call_id")))
         out.append(item)
     return out
 
