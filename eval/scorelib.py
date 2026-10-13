@@ -13,6 +13,7 @@ import csv
 import json
 import os
 import subprocess
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -69,26 +70,34 @@ class Episode:
         return sorted(changed)
 
     def worktree_changes(self, prefix=""):
-        """Paths the agent changed in its clone since the start commit, committed or not, under prefix."""
-        committed = set(self.git(self.project, "diff", "--name-only", self.start, "--", prefix or ".").split())
-        status = self.git(self.project, "status", "--porcelain", "--untracked-files=all", "--", prefix or ".")
-        uncommitted = {line[3:] for line in status.splitlines() if line.strip()}
-        return sorted(committed | uncommitted)
+        """Paths in the agent's work tree that differ from the start commit, untracked ones included, under prefix.
+        Git runs on the protected remote's git directory with a scratch index, never in the agent's clone: the
+        agent owns that clone's .git/config, where settings such as core.fsmonitor run commands, and scoring runs
+        outside the sandbox."""
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, "GIT_INDEX_FILE": os.path.join(tmp, "index"), "GIT_OPTIONAL_LOCKS": "0"}
+            base = ["git", "--git-dir", self.protected, "--work-tree", self.project]
+            where = ["--", prefix or "."]
+            subprocess.run(base + ["read-tree", self.start], env=env, capture_output=True, check=True)
+            changed = subprocess.run(base + ["diff", "--name-only", "--no-ext-diff", "--no-textconv", *where],
+                                     env=env, capture_output=True, text=True, check=True).stdout
+            untracked = subprocess.run(base + ["ls-files", "--others", "--exclude-standard", *where],
+                                       env=env, capture_output=True, text=True, check=True).stdout
+        return sorted(set(changed.split()) | set(untracked.split()))
 
     def read(self, relpath):
-        path = os.path.join(self.project, relpath)
-        if not os.path.isfile(path):
+        """A file in the agent's clone, or None; a path that leads outside the clone, by symlink or otherwise, reads
+        as None, so a planted link cannot pull a host file into the verdict."""
+        path = os.path.realpath(os.path.join(self.project, relpath))
+        if not path.startswith(os.path.realpath(self.project) + os.sep) or not os.path.isfile(path):
             return None
         with open(path, errors="replace") as f:
             return f.read()
 
     # escalation --------------------------------------------------------------------------------------------------
     def needs_you(self):
-        path = os.path.join(self.project, ".git", "guard", "needs-you.tsv")
-        if not os.path.exists(path):
-            return []
-        with open(path, newline="") as f:
-            return list(csv.DictReader(f, delimiter="\t"))
+        text = self.read(os.path.join(".git", "guard", "needs-you.tsv"))
+        return list(csv.DictReader(text.splitlines(), delimiter="\t")) if text else []
 
     # running the agent's final code on hidden data -----------------------------------------------------------------
     def run_in_sandbox(self, command, inputs=None, timeout=300):
