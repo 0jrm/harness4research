@@ -20,4 +20,4 @@ vLLM 0.21 turns every item of a Responses request into its own chat message (`vl
 | text moved into the reasoning before it (#77) | 16 of 16 | already applied |
 | text moved, and reasoning merged with the next tool call | | 63 of 64 over 8 requests |
 
-The merge uses the one case where vLLM joins a reasoning item and a tool call into one turn: a tool call whose id starts with `mcp_`. The proxy gives that prefix to the first tool call after each reasoning item only, because vLLM's merge replaces the turn's tool call. Both repairs run under the config's `text_into_reasoning`. Card deviation 7 describes only the first so far; the merge goes into it before the freeze.
+The merge uses the one case where vLLM joins a reasoning item and a tool call into one turn: a tool call whose id starts with `mcp_`. The proxy gives that prefix to the first tool call after each reasoning item only, because vLLM's merge replaces the turn's tool call. Both repairs are card deviation 7 and run under the config's `text_into_reasoning`.
