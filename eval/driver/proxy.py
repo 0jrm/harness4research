@@ -22,7 +22,7 @@ the sandbox binds in place of a network (driver/netrelay.py carries the client's
   replaces the turn's tool call, so a second would erase the first;
 - streams the reply back unchanged, server-sent events included;
 - appends one JSON line to --log: the time, path, status, the request as sent upstream, the reply as received,
-  and the token usage the reply reports.
+  the token usage the reply reports, and the repairs it made to that request, with counts.
 
 The model host keeps no request bodies for shared traffic, so this log is the record of what the model saw and
 said. Standard library only.
@@ -114,6 +114,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b""
         sent = body
         request_json = None
+        repairs = {}
         if body and "json" in (self.headers.get("Content-Type") or ""):
             try:
                 request_json = json.loads(body)
@@ -125,10 +126,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if cfg.seed is not None and "seed" not in request_json:
                     request_json["seed"] = cfg.seed
                 request_json.update(cfg.sampling)
-                if cfg.fold_developer and isinstance(request_json.get("input"), list):
-                    request_json["input"] = fold_developer(request_json["input"])
-                if cfg.text_into_reasoning and isinstance(request_json.get("input"), list):
-                    request_json["input"] = text_into_reasoning(request_json["input"])
+                items = request_json.get("input")
+                if cfg.fold_developer and isinstance(items, list):
+                    folded = fold_developer(items)
+                    repairs["fold_developer"] = sum(1 for i in items if i.get("type", "message") == "message"
+                                                    and i.get("role") == "developer")
+                    items = request_json["input"] = folded
+                if cfg.text_into_reasoning and isinstance(items, list):
+                    moved = text_into_reasoning(items)
+                    repairs["text_into_reasoning"] = len(items) - len(moved)
+                    repairs["mcp_merge"] = sum(1 for i in moved if str(i.get("id", "")).startswith("mcp_")) \
+                        - sum(1 for i in items if str(i.get("id", "")).startswith("mcp_"))
+                    request_json["input"] = moved
                 sent = json.dumps(request_json).encode()
         up = urllib.parse.urlsplit(cfg.upstream)
         headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
@@ -168,7 +177,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             entry = {"ts": started, "seconds": round(time.time() - started, 3), "method": self.command,
                      "path": self.path, "status": status,
                      "request": request_json if request_json is not None else body.decode(errors="replace"),
-                     "response": text, "usage": usage_of(text)}
+                     "response": text, "usage": usage_of(text), "repairs": repairs}
             with self.server.lock:
                 with open(cfg.log, "a") as f:
                     f.write(json.dumps(entry) + "\n")

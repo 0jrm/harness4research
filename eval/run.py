@@ -218,6 +218,9 @@ def run_episode(cfg, ep, family, variant, arm, seed):
         subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
         return {"episode": ep, "error": "episode.sh: " + built.stderr.strip()[-300:]}
     meta = json.load(open(os.path.join(ep, "meta.json")))
+    meta["run_id"] = cfg["run_id"]
+    with open(os.path.join(ep, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=1)
     served = model_check(model)
     if served.mismatch:
         subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
