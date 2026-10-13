@@ -718,6 +718,15 @@ expect fence-watched fail 'FAIL.watched-paths.*tests/t' -- guard/run fence origi
 git push -q origin pr/clean:refs/heads/pr-clean; git switch -q -c pr/card origin/pr-clean
 echo "metric: moved" >> runs/r1/question.card; git commit -q -am x
 expect fence-card fail 'FAIL.question-cards-frozen.*runs/r1/question.card' -- guard/run fence origin/pr-clean HEAD
+git switch -q -c pr/card-twice origin/main; mkdir -p runs/r2; cp runs/_template/question.card runs/r2/; git add -A; git commit -q -m "run: r2"
+git merge -q --no-edit origin/pr-clean
+expect fence-card-added-merged ok 'PASS.question-cards-frozen' -- guard/run fence origin/main HEAD
+echo "metric: moved" >> runs/r2/question.card; git commit -q -am x
+expect fence-card-one-push fail 'FAIL.question-cards-frozen.*runs/r2/question.card' -- guard/run fence origin/main HEAD
+git reset -q --hard HEAD~1; git switch -q -c side origin/main; echo x > side.txt; git add -A; git commit -q -m side
+git switch -q pr/card-twice; git merge -q --no-commit side; echo "metric: moved" >> runs/r2/question.card
+git add -A; git commit -q -m "merge with an edit"
+expect fence-card-merge-edit fail 'FAIL.question-cards-frozen.*runs/r2/question.card' -- guard/run fence origin/main HEAD
 
 git switch -q -c pr/no-setting origin/main; mkdir -p runs/ns; cp runs/_template/question.card runs/ns/
 sed -i '/^setting:/d' runs/ns/question.card
@@ -740,7 +749,7 @@ git push -q origin pr/lineage:refs/heads/pr-lineage
 sed -i 's/^supersedes: .*/supersedes: none/' runs/lin-054/question.card
 sed -i 's/^spawned_from: .*/spawned_from: lin-054/' runs/lin-054b/question.card
 sed -i '/^supersedes:/d; /^spawned_from:/d' runs/lin-053-phys2/question.card
-git commit -q -am x
+git commit -q -a --amend --no-edit
 expect fence-lineage-none ok - -- no_lineage 'lin-054 extends'
 expect fence-lineage-set ok - -- no_lineage 'lin-054b extends'
 expect fence-lineage-missing-keys ok 'lin-053-phys2 extends lin-053$' -- lineage
