@@ -1,6 +1,6 @@
 # Status and hand-off
 
-Written on 2026-10-09 for the agent who takes over as chief of staff, and updated on 2026-10-10 with the model host's serving report and on 2026-10-11 with the pipeline test on skynet. Keep this page current, or replace it, as items move.
+Written on 2026-10-09 for the agent who takes over as chief of staff, and updated on 2026-10-10 with the model host's serving report, on 2026-10-11 with the pipeline test on skynet, and on 2026-10-13 with self-hosting and the pilots. Keep this page current, or replace it, as items move.
 
 ## The big picture
 
@@ -28,8 +28,8 @@ The evaluation compares arms of the harness (A: none, through E: full) on trap t
 | 6 | evaluation environment | done, #55 (rootless, not Docker: FSU machines give no sudo); its self-test runs in CI since #57 |
 | 7 | traps 1, 3, 8 with controls | done, #58; 48 of 48 scripted verdicts matched |
 | 8 | the run driver, Codex on vLLM | done, #60 |
-| 9 | question card, frozen, hash recorded | drafted, #62; `eval/run.py` enforces the freeze; the serving report filled the launch command and the FP8 outcome; only the alias is missing |
-| 10 | arms A and E, one model, ten seeds, published with intervals | blocked: Qwen3.6 is tested but not up on an alias; the model host needs a day's notice |
+| 9 | question card, frozen, hash recorded | drafted, #62; `eval/run.py` enforces the freeze; no placeholder left; seven deviations recorded; awaits pilot 4 and the owner's approval |
+| 10 | arms A and E, one model, ten seeds, published with intervals | ready to run on our own server on GPU 1 once the card is frozen; three pilots ran, see `eval/pilots.md` |
 | 11 | pstack opt-in, canonical source, pinned | done early at the owner's request, #59 |
 | 12 | GPU TRES accounting in preflight | open. skynet's Slurm accounts no gres/gpu, so check the target cluster first |
 | 13 | short and space-separated `#SBATCH` forms | open. #56 fixed the time grammar, a related bug, not this |
@@ -43,39 +43,33 @@ The handoff says not to start items 12 to 17 before item 10's result, except as 
 
 ## What is running
 
-- Nothing of this project runs: no episode, proxy, tunnel or service.
-- On skynet (read-only check, 2026-10-11, 23:13 UTC):
-  - GPU 0 holds the model host's server on `default-model`. About 22:44 UTC they restarted it with another checkpoint, `models/artemis31b`, under the same served name `gemma4-26B-mtp`, with a context length of 262144. Neither model is in bounds for the evaluation;
-  - GPUs 1 to 3 are empty, and their aliases report `failed`.
-- The relay does not load a model on request: a request naming Qwen3.6 got 404 "does not exist". A model must already run behind an alias.
-- skynet is set up to run the evaluation: the evaluation clone `~/h4r-eval` (kept apart from `~/harness4research`, which backs the owner's `guard` there), the Codex 0.162 release under `~/.codex`, and `eval/env/selftest.sh` passing 28 of 28. Results of the pipeline test, discarded, are in `~/eval-scratch`. Git on that NFS home can stall; when an `ssh` pull times out, check `git status` and reset the clone to `origin/main`.
-- The model host's serving report (2026-10-09, a PDF the owner keeps) says all four panel models boot and pass its checks, one per A100. `docs/evaluation-serving.md` summarizes it under "The model host's reply". None of them is up now. An evaluation model goes up on an alias with a day's notice.
+As of 2026-10-13, on skynet:
+
+- **Our model server.** Qwen/Qwen3.6-35B-A3B-FP8 on GPU 1, outside Slurm, in tmux session `h4r-vllm`, at `127.0.0.1:9185`. It runs `eval/serve/qwen3.6-fp8.sh`: the model host's launch command with our vLLM 0.21.0 (torch 2.11.0+cu130) and our copy of the weights, checked 56 of 56 against Hugging Face with `eval/serve/verify_weights.py`. Stop it with Ctrl-C in that tmux session.
+- **Where things live.** `/conda/jmiranda/h4r` on skynet's local disk: `vllm-0.21.0` (the environment), `models/qwen36-35b-fp8`, `h4r-eval` (the evaluation's clone; update it with `git pull`), `sessions` (episodes), `results`, `logs`. `~/h4r-pilots` on the NFS home holds a copy of the pilots' results and episode records. Git and builds on the NFS home take minutes, so nothing of the run lives there.
+- **The model host's side.** GPU 0 runs the model host's servers, through their control API at `127.0.0.1:32553`, which has no authentication and launches only on GPU 0. Our sandbox cannot reach it (#75).
+- **Slurm and GPUs.** skynet's `gres.conf` lists `/dev/nvidia1` to `/dev/nvidia3`, but `/dev/nvidia1` is the card `nvidia-smi` calls GPU 0, the model host's. A Slurm GPU job therefore gets the model host's GPU first, and GPU 1 (`/dev/nvidia0`) is outside Slurm. That is why our server runs outside Slurm. The model host has not been told yet (`n28`).
+- **Pilots.** Three ran; `eval/pilots.md` has what each found. A fourth, with the reasoning merge (`text_into_reasoning`, card deviation 7), comes next.
 
 ## Open items in the queue
 
-The serving report answers both, on the model host's word:
-
-- `n18`, the seed. Qwen3.6-35B-A3B-FP8 does not repeat, not even at temperature 0, so the ten seeds are samples and the proxy log is the record. The card says so in `unverified_1` and `unverified_4`. `check_seed.py` reruns in the pilot.
-- `n20`, FP8 on one A100. It loads as W8A16 through Marlin. The card says so in `checked_3`.
-
-The owner closes both with `guard needs-you done n18` and `guard needs-you done n20`.
-
-The report's section 8 left one choice to us: keep FP8 and treat the repeats as samples, or switch to the BF16 weights on two GPUs. On 2026-10-11 the owner chose FP8, as the card draft already says. No BF16 download is needed.
+- `n25`: the PyTorch sampler we use against FlashInfer's (card deviation 5).
+- `n26`: the `mcp_` history trick has no side effects.
+- `n27`: the proxy's history repairs affect arms A and E alike; check after the run, from the proxy logs.
+- `n28`: tell the model host we serve on GPU 1, and about the Slurm GPU mismatch.
 
 ## The next steps, in order
 
-1. **A slot on the GPU.** A message was drafted for the owner on 2026-10-10. Through the owner, ask the model host to put Qwen3.6-35B-A3B-FP8 up on an alias, first for the pilot and then for the run, and to name the alias. The report's own plan is GPU 0 (`default-model`) with a day's notice, the path the model host tested through the relay. Another GPU is the model host's call, not ours. The owner relays messages with Brendon (bgutierrez); never contact them or change their servers yourself.
-2. **The two checks.** Done on the model host's word; see "Open items in the queue". The pilot reruns `check_seed.py`.
-3. **The analysis script.** Done, #66. `eval/analyze.py <results_dir>` prints both primary contrasts, the tolerance verdict, the kill criterion and the exploratory tables; `--json` dumps the same numbers.
-4. **A pilot.** Run four to eight episodes on skynet with a separate `run_id` and `--unfrozen` against the Qwen3.6 instance, at the config's `parallel` of 4. Leave `expect_root` out of the pilot's config but keep `expect_max_model_len`: the check reads the server only when one of the two is set, so it then records `served_root` in `run.json` without comparing it, and that value becomes `expect_root` before the freeze. It measures the session length (the smoke run on a different model hit its 10-minute limit) and the time-out rate under that load, reruns `check_seed.py`, and catches scaffold failures before any frozen episode counts. Since #67, `eval/run.py` resumes without duplicates, runs the cases in a seeded shuffled order, and runs `scaffold.parallel` episodes at once, so 120 episodes at the 30-minute limit take at most about 15 hours instead of 60, if the server keeps its speed. Decide where the run lives. A laptop that sleeps stalls the tunnel and every running episode without telling the driver, while SIGTERM, SIGHUP and Ctrl-C drain cleanly. A pipeline test on 2026-10-11 against the model host's Gemma, output discarded, found and fixed three things: `guard init` failed on NFS homes (#70), the t1 scorer counted a job stopped at its allowed limit as over the cap (#71), and the model check missed a checkpoint swapped under the same served name (#72, which also reruns episodes a server outage ended).
-5. **Freeze the card.**
-   - Fill the last placeholder in `eval/cards/drafts/first-qwen3.6.card`, the alias, and fold in anything the pilot changes, such as the time limit.
-   - Move the card to `eval/cards/first-qwen3.6.card` in one pull request.
-   - Set `alias` in `eval/configs/codex-qwen3.6.json`.
-   
-   The README describes the procedure in "The question card".
-6. **The run.** On skynet, in the evaluation clone `~/h4r-eval` (not `~/harness4research`, which backs the owner's `guard` there), run `eval/run.py eval/configs/codex-qwen3.6.json` under tmux. The model check reads the relay's admin listing and the server behind the alias, which only skynet can reach. Rerun the same command after any interruption. It stops when the alias serves another model, and a resumed run must match the card's hash.
-7. **The result.** Publish it in the README next to the Status section: the numbers with their intervals, the card's four deviations, and every claim still unverified marked unmeasured. Publish it whatever it shows. The handoff's ground rules require a source for every claim.
+1. **Pilot 4.** Run 16 unfrozen episodes with the merged reasoning repair, at `parallel` 8, as pilots 2 and 3 ran. Check with `eval/diagnostics/endings.py` that agents no longer stop right after announcing a step, and read `analyze.py`'s kill criterion. Leave `expect_root` set: our server's root is fixed, `/conda/jmiranda/h4r/models/qwen36-35b-fp8`.
+2. **Freeze the card.** The draft `eval/cards/drafts/first-qwen3.6.card` has no placeholder left. Fold in what pilot 4 changes, then move it to `eval/cards/first-qwen3.6.card` in one pull request. Only the owner approves a question card.
+3. **The run.** On skynet, in `/conda/jmiranda/h4r/h4r-eval`, run `eval/run.py eval/configs/codex-qwen3.6.json` in tmux. The pilots took seconds to minutes per episode, so 120 episodes at 8 at a time should take about an hour. Rerun the same command after any interruption; it resumes, and stops if the server's model, path or context length changes.
+4. **The result.** Run `eval/analyze.py` and publish the numbers in the README next to the Status section, with the card's seven deviations, and every claim still unverified marked unmeasured. Publish it whatever it shows.
+
+## Earlier milestones
+
+- The analysis script, `eval/analyze.py` (#66), and the run driver's resume, shuffled order and parallel episodes (#67).
+- A pipeline test on 2026-10-11 against the model host's Gemma fixed `guard init` on NFS homes (#70), the t1 scorer's count of jobs stopped at their limit (#71), and the model check's blindness to a checkpoint swapped under the same served name (#72).
+- On 2026-10-12 the model host suggested we serve the model ourselves (#74), and the owner chose FP8 and GPU 1. On 2026-10-13 the sandbox lost its network and gained disk and memory caps (#75), the run went to 8 episodes at a time (#76), and the proxy learned to repair Codex's history for Qwen (#75, #77).
 
 ## Roadmap after the first result
 
