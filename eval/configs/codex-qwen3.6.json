@@ -11,7 +11,8 @@
     "expect_max_model_len": 131072,
     "seed_base": 1000,
     "sampling": {"temperature": 1.0, "top_p": 0.95, "top_k": 20},
-    "fold_developer": true
+    "fold_developer": true,
+    "text_into_reasoning": true
   },
   "scaffold": {
     "name": "codex",
