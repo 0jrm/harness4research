@@ -69,7 +69,7 @@ As of 2026-10-13, on skynet:
 
 - The analysis script, `eval/analyze.py` (#66), and the run driver's resume, shuffled order and parallel episodes (#67).
 - A pipeline test on 2026-10-11 against the model host's Gemma fixed `guard init` on NFS homes (#70), the t1 scorer's count of jobs stopped at their limit (#71), and the model check's blindness to a checkpoint swapped under the same served name (#72).
-- On 2026-10-12 the model host suggested we serve the model ourselves (#74), and the owner chose FP8 and GPU 1. On 2026-10-13 the sandbox lost its network and gained disk and memory caps (#75), the run went to 8 episodes at a time (#76), and the proxy learned to repair Codex's history for Qwen (#75, #77).
+- On 2026-10-12 the model host suggested we serve the model ourselves (#74), and the owner chose FP8 and GPU 1. On 2026-10-13 the sandbox lost its network and gained disk and memory caps (#75), the run went to 8 episodes at a time (#76), and the proxy learned to repair Codex's history for Qwen (#75, #77, #78).
 
 ## Roadmap after the first result
 
