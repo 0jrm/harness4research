@@ -41,19 +41,49 @@ to_min() {
   else m=$a; fi
   echo $(( 10#$d*1440 + 10#$h*60 + 10#$m + (10#$s > 0) ))
 }
-# opt <short> <long>: the last value sbatch takes for -<short> or --<long> from sbopts, in each form it accepts
-# (--long=V, --long V, -sV, -s V). Prints nothing when the option is absent; fails when it ends sbopts without a value.
-opt() {
-  local s=$1 l=$2 v="" i=0
-  while [ $i -lt ${#sbopts[@]} ]; do
-    case ${sbopts[i]} in
-      --$l=*) v=${sbopts[i]#*=} ;;
-      --$l|-$s) i=$((i + 1)); [ $i -lt ${#sbopts[@]} ] || return 1; v=${sbopts[i]} ;;
-      -$s?*) v=${sbopts[i]#-$s} ;;
+# sbatch's options in Slurm 24.05, from its --help and --usage: long ones that take a value, may take one with =, or
+# take none, and short ones that take a value or none. -I, --immediate, is missing from the help.
+long_val=' account array bb bbf begin chdir cluster-constraint clusters comment constraint core-spec cores-per-socket
+  cpu-freq cpus-per-gpu cpus-per-task deadline delay-boot dependency distribution error exclude export-file
+  extra-node-info gid gpu-bind gpu-freq gpus gpus-per-node gpus-per-socket gpus-per-task gres gres-flags input job-name
+  licenses mail-type mail-user mcs-label mem mem-bind mem-per-cpu mem-per-gpu mincpus network nodefile nodelist nodes
+  ntasks ntasks-per-core ntasks-per-node ntasks-per-socket output partition power priority profile qos reservation
+  signal sockets-per-node switches thread-spec threads-per-core time time-min tmp tres-bind tres-per-task uid wckey '
+long_other=' exclusive export nice propagate wrap container container-id contiguous get-user-env help hold ignore-pbs
+  no-kill no-requeue overcommit oversubscribe parsable quiet reboot requeue resv-ports spread-job usage use-min-nodes
+  verbose version wait '
+short_val=ABCDFGJLMNSabcdeimnopqtwx
+# read_sbopts <word...>: sets wall, nodes and array to the last value sbatch takes for them from the words, in the
+# forms --long=V, --long V, -sV and -s V. It refuses a word it cannot map to exactly one option: a shortened long
+# option, short options bundled after one that takes no value, and a word that is neither an option nor its value.
+read_sbopts() {
+  local w name v c o
+  while [ $# -gt 0 ]; do
+    w=$1; shift; name=""
+    case $w in
+      --) fail "-- ends sbatch's options early; drop it" ;;
+      --?*)
+        name=${w#--}; name=${name%%=*}
+        [ -n "$name" ] || fail "'$w' is not an sbatch option"
+        if [[ $long_val$long_other != *[[:space:]]"$name"[[:space:]]* ]]; then
+          c=""; for o in $long_val$long_other; do [[ $o != "$name"* ]] || c="$c --$o"; done
+          [ -z "$c" ] || fail "${w%%=*} shortens$c; write the option in full"
+          continue
+        fi
+        [[ $long_val == *[[:space:]]"$name"[[:space:]]* ]] || continue
+        if [[ $w == *=* ]]; then v=${w#*=}; else [ $# -gt 0 ] || fail "$w has no value"; v=$1; shift; fi ;;
+      -?*)
+        name=${w:1:1}
+        if [[ $short_val != *"$name"* ]]; then [ ${#w} -eq 2 ] || fail "split $w into separate options"; continue; fi
+        if [ ${#w} -gt 2 ]; then v=${w:2}; else [ $# -gt 0 ] || fail "$w has no value"; v=$1; shift; fi ;;
+      *) fail "'$w' is not an sbatch option; preflight takes the job script as its second argument" ;;
     esac
-    i=$((i + 1))
+    case $name in
+      t|time) wall=$v ;;
+      N|nodes) nodes=$v ;;
+      a|array) array=$v ;;
+    esac
   done
-  echo "$v"
 }
 tasks() {
   local spec=${1%%\%*} n=0 part lo hi step parts
@@ -99,13 +129,12 @@ max_wall=$(whole max_walltime_minutes); max_conc=$(whole max_concurrent_jobs)
 sbin=$(get slurm_bin); sbin=${sbin:-/usr/bin}
 [ -x "$sbin/squeue" ] && [ -x "$sbin/sacct" ] || fail "no squeue and sacct in slurm_bin=$sbin; a human sets slurm_bin in guard/budget.card on the protected branch to the directory that holds them"
 
-# sbopts: the options sbatch reads, in its order: #SBATCH lines up to the script's first command, then the command line.
-mapfile -t sbopts < <(awk '/^#SBATCH/ { sub(/^#SBATCH/, ""); sub(/#.*/, ""); for (i = 1; i <= NF; i++) print $i; next }
-  /^[[:space:]]*(#|$)/ { next } { exit }' "$job")
-sbopts+=("$@")
-wall=$(opt t time) || fail "--time ends the options without a value"
-nodes=$(opt N nodes) || fail "--nodes ends the options without a value"
-array=$(opt a array) || fail "--array ends the options without a value"
+# The options sbatch reads, in its order: each #SBATCH line up to the script's first command, then the command line.
+wall=""; nodes=""; array=""
+while IFS= read -r line; do
+  read -ra w <<<"$line"; read_sbopts ${w[@]+"${w[@]}"}
+done < <(awk '/^#SBATCH/ { sub(/^#SBATCH/, ""); sub(/#.*/, ""); print; next } /^[[:space:]]*(#|$)/ { next } { exit }' "$job")
+read_sbopts "$@"
 [ -n "$wall" ] || fail "state --time=... explicitly"
 [[ $nodes =~ ^[0-9]+$ ]] || fail "state --nodes=N explicitly as one integer (got '${nodes}')"
 idx='[0-9]+(-[0-9]+(:[0-9]+)?)?'
@@ -138,9 +167,10 @@ if [[ $run_max =~ ^[0-9]+$ ]] && [ "$run_max" -gt 0 ]; then
 fi
 live=$("$sbin/squeue" -A "$acct" -u "$USER" -h | wc -l)
 [ $(( live + n )) -le "$max_conc" ] || fail "$live live + $n new jobs exceeds max_concurrent_jobs=$max_conc; wait for running jobs to finish"
-# The checked time, nodes and array follow the caller's options, so sbatch takes them over any other form or variable.
+# The checked time, nodes and array follow the caller's options, so sbatch takes them over any other form or variable,
+# and --ignore-pbs keeps sbatch from reading an array or a walltime from #PBS lines, which preflight does not read.
 # The --comment before them is spare: a last caller option that wants a value takes it, and the rest stand.
-set -- "$@" --comment="run:$run_id" --time="$wall" --nodes="$nodes" ${array:+--array="$array"}
+set -- "$@" --comment="run:$run_id" --ignore-pbs --time="$wall" --nodes="$nodes" ${array:+--array="$array"}
 unset SBATCH_ARRAY_INX
 
 echo "PREFLIGHT OK: $run_id nodes=$nodes time=${wmin}m tasks=$n projected=$proj spent=$spent queued=$queued available=$avail" >&2

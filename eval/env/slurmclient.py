@@ -10,7 +10,7 @@ SOCKET = os.environ.get("SLURM_CONF_SOCKET", "/run/slurm/slurmctld.sock")
 
 SBATCH_SHORT = {"-t": "time", "-N": "nodes", "-n": "ntasks", "-J": "job-name", "-A": "account", "-a": "array",
                 "-o": "output", "-e": "error", "-p": "partition", "-c": "cpus-per-task", "-D": "chdir"}
-SBATCH_FLAGS = {"parsable", "wait", "exclusive", "requeue", "no-requeue", "hold"}
+SBATCH_FLAGS = {"parsable", "wait", "exclusive", "requeue", "no-requeue", "hold", "ignore-pbs"}
 
 
 def parse_sbatch_args(args):

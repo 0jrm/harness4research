@@ -142,17 +142,17 @@ expect preflight-time-h-m-s ok 'PREFLIGHT OK: .* time=120m ' -- guard/run prefli
 expect preflight-time-days-hours fail 'PREFLIGHT FAIL: --time=1-12 \(2160 min\) exceeds max_walltime_minutes=720' -- guard/run preflight "$R" job.sh --time=1-12
 expect preflight-time-days-h-m ok 'PREFLIGHT OK: .* time=90m ' -- guard/run preflight "$R" job.sh --time=0-1:30
 expect preflight-time-malformed fail 'PREFLIGHT FAIL: --time=1h is not a Slurm time' -- guard/run preflight "$R" job.sh --time=1h
-expect preflight-forces-checked ok '^SBATCH --comment=run:2026-09-29-demo --time=04:00:00 --nodes=2 --account=gom ' -- guard/run preflight "$R" job.sh
+expect preflight-forces-checked ok '^SBATCH --comment=run:2026-09-29-demo --ignore-pbs --time=04:00:00 --nodes=2 --account=gom ' -- guard/run preflight "$R" job.sh
 expect preflight-cli-space-time fail 'PREFLIGHT FAIL: --time=1-12 \(2160 min\) exceeds' -- guard/run preflight "$R" job.sh --time 1-12
 expect preflight-cli-short-time fail 'PREFLIGHT FAIL: --time=1-12 \(2160 min\) exceeds' -- guard/run preflight "$R" job.sh -t 1-12
-expect preflight-cli-short-attached ok '^SBATCH -t30 --comment=run:2026-09-29-demo --time=30 --nodes=2 ' -- guard/run preflight "$R" job.sh -t30
+expect preflight-cli-short-attached ok '^SBATCH -t30 --comment=run:2026-09-29-demo --ignore-pbs --time=30 --nodes=2 ' -- guard/run preflight "$R" job.sh -t30
 expect preflight-cli-short-equals fail 'PREFLIGHT FAIL: --time==30 is not a Slurm time' -- guard/run preflight "$R" job.sh -t=30
-expect preflight-cli-dangling fail 'PREFLIGHT FAIL: --time ends the options without a value' -- guard/run preflight "$R" job.sh --time
+expect preflight-cli-dangling fail 'PREFLIGHT FAIL: --time has no value' -- guard/run preflight "$R" job.sh --time
 expect preflight-cli-space-nodes fail 'PREFLIGHT FAIL: --nodes=8 exceeds max_nodes_per_job=4' -- guard/run preflight "$R" job.sh --nodes 8
 expect preflight-cli-short-nodes fail 'PREFLIGHT FAIL: --nodes=8 exceeds max_nodes_per_job=4' -- guard/run preflight "$R" job.sh -N8
-expect preflight-cli-space-array ok '^SBATCH -a 0-1 --comment=run:2026-09-29-demo --time=04:00:00 --nodes=2 --array=0-1 --account=gom ' -- guard/run preflight "$R" job.sh -a 0-1
+expect preflight-cli-space-array ok '^SBATCH -a 0-1 --comment=run:2026-09-29-demo --ignore-pbs --time=04:00:00 --nodes=2 --array=0-1 --account=gom ' -- guard/run preflight "$R" job.sh -a 0-1
 expect preflight-cli-space-array-counted ok 'PREFLIGHT OK: .* tasks=2 ' -- guard/run preflight "$R" job.sh -a 0-1
-expect preflight-dangling-option ok '^time=04:00:00 account=gom$' -- bash -c 'env SBATCH_TIMELIMIT=9999 guard/run preflight "$1" job.sh -A other -J 2>/dev/null \
+expect preflight-dangling-option ok '^time=04:00:00 account=gom$' -- bash -c 'env SBATCH_TIMELIMIT=9999 guard/run preflight "$1" job.sh -A other --from-a-newer-slurm 2>/dev/null \
   | python3 -c "import sys; sys.path.insert(0, sys.argv[1]); from slurmclient import parse_sbatch_args as p; o = p(sys.stdin.read().split()[1:])[0]; print(\"time=\" + o[\"time\"], \"account=\" + o[\"account\"])" "$2/eval/env"' _ "$R" "$here"
 expect preflight-array-malformed fail 'PREFLIGHT FAIL: --array=x is not an index list' -- guard/run preflight "$R" job.sh --array x
 printf '#!/bin/bash\n#SBATCH --time=04:00:00 --nodes=2 # four hours\n#SBATCH -t 1-12\n#SBATCH -N 8\nguard/run manifest "$1" "$0"\n' > job-short.sh
@@ -161,6 +161,22 @@ expect preflight-script-short-nodes fail 'PREFLIGHT FAIL: --nodes=8 exceeds max_
 printf '#!/bin/bash\n#SBATCH --time=04:00:00\n\n#SBATCH --nodes=2\nhostname\n#SBATCH -t 1-12\n' > job-late.sh
 expect preflight-script-stops-at-command ok 'PREFLIGHT OK: .* nodes=2 time=240m ' -- guard/run preflight "$R" job-late.sh
 rm job-short.sh job-late.sh
+expect preflight-cli-long-prefix fail '^PREFLIGHT FAIL: --arr shortens --array; write the option in full$' -- guard/run preflight "$R" job.sh --arr=0-999
+expect preflight-cli-long-prefix-space fail '^PREFLIGHT FAIL: --arra shortens --array; write the option in full$' -- guard/run preflight "$R" job.sh --arra 0-999
+expect preflight-cli-long-prefix-ambiguous fail '^PREFLIGHT FAIL: --ti shortens --time --time-min; write the option in full$' -- guard/run preflight "$R" job.sh --ti=30
+expect preflight-cli-bundle fail '^PREFLIGHT FAIL: split -Ha0-999 into separate options$' -- guard/run preflight "$R" job.sh -Ha0-999
+expect preflight-cli-bare-word fail "^PREFLIGHT FAIL: 'other.sh' is not an sbatch option; preflight takes the job script as its second argument$" -- guard/run preflight "$R" job.sh other.sh
+expect preflight-cli-double-dash fail "^PREFLIGHT FAIL: -- ends sbatch's options early; drop it$" -- guard/run preflight "$R" job.sh -- other.sh
+expect preflight-cli-ordinary-values ok '^SBATCH -J my-job --hold -H -p gpu --exclusive --export=ALL -t30 --comment=' -- guard/run preflight "$R" job.sh -J my-job --hold -H -p gpu --exclusive --export=ALL -t30
+for d in '--arr=0-999' '--arra 0-999' '-Ha0-999'; do
+  printf '#!/bin/bash\n#SBATCH --time=04:00:00 --nodes=2\n#SBATCH %s\nhostname\n' "$d" > "job-${d//[^a-z0-9]/}.sh"
+done
+expect preflight-script-long-prefix fail '^PREFLIGHT FAIL: --arr shortens --array; write the option in full$' -- guard/run preflight "$R" job-arr0999.sh
+expect preflight-script-long-prefix-space fail '^PREFLIGHT FAIL: --arra shortens --array; write the option in full$' -- guard/run preflight "$R" job-arra0999.sh
+expect preflight-script-bundle fail '^PREFLIGHT FAIL: split -Ha0-999 into separate options$' -- guard/run preflight "$R" job-a0999.sh
+printf '#!/bin/bash\n#SBATCH --time=04:00:00 --nodes=2 -J my-job -p gpu\n#SBATCH -t\nhostname\n' > job-cut.sh
+expect preflight-script-value-per-line fail '^PREFLIGHT FAIL: -t has no value$' -- guard/run preflight "$R" job-cut.sh
+rm job-arr0999.sh job-arra0999.sh job-a0999.sh job-cut.sh
 mkdir -p "$tmp/planted"; printf '#!/bin/sh\n' > "$tmp/planted/squeue"; cp "$tmp/planted/squeue" "$tmp/planted/sacct"; chmod +x "$tmp/planted/"*
 expect preflight-ignores-path-squeue ok 'PREFLIGHT OK: .* spent=30 queued=3072 ' -- env PATH="$tmp/planted:$PATH" guard/run preflight "$R" job.sh
 sed -i "s|^slurm_bin: .*|slurm_bin: $tmp/no-slurm|" guard/budget.card; git commit -q -am "slurm_bin without slurm"
