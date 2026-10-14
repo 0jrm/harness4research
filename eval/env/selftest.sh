@@ -60,8 +60,9 @@ max_nodes_per_job: 2
 max_walltime_minutes: 30
 max_concurrent_jobs: 4
 quota_pct_cmd: echo 12%
+slurm_bin: /opt/site/bin
 CARD
-grep -vE '^(account|start_date|stop_date|max_core_hours|verification_reserve_core_hours|cores_per_node|max_nodes_per_job|max_walltime_minutes|max_concurrent_jobs|quota_pct_cmd):' \
+grep -vE '^(account|start_date|stop_date|max_core_hours|verification_reserve_core_hours|cores_per_node|max_nodes_per_job|max_walltime_minutes|max_concurrent_jobs|quota_pct_cmd|slurm_bin):' \
   "$human/guard/budget.card" >> "$human/guard/budget.card.head"
 mv "$human/guard/budget.card.head" "$human/guard/budget.card"
 git -C "$human" -c user.name=PI -c user.email=pi@lab commit -qam "chore(guard): set budget"

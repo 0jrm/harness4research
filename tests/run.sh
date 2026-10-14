@@ -120,6 +120,7 @@ max_nodes_per_job: 4
 max_walltime_minutes: 720
 max_concurrent_jobs: 10
 quota_pct_cmd: echo 42%
+slurm_bin: $here/tests/mock-bin
 CARD
 printf 'runs/*/checks/*\ntests\n' > guard/watch.list
 git commit -q -am "chore(guard): set budget"; git push -q origin guard/init:main; git fetch -q origin
@@ -158,6 +159,14 @@ expect preflight-script-short-nodes fail 'PREFLIGHT FAIL: --nodes=8 exceeds max_
 printf '#!/bin/bash\n#SBATCH --time=04:00:00\n\n#SBATCH --nodes=2\nhostname\n#SBATCH -t 1-12\n' > job-late.sh
 expect preflight-script-stops-at-command ok 'PREFLIGHT OK: .* nodes=2 time=240m ' -- guard/run preflight "$R" job-late.sh
 rm job-short.sh job-late.sh
+mkdir -p "$tmp/planted"; printf '#!/bin/sh\n' > "$tmp/planted/squeue"; cp "$tmp/planted/squeue" "$tmp/planted/sacct"; chmod +x "$tmp/planted/"*
+expect preflight-ignores-path-squeue ok 'PREFLIGHT OK: .* spent=30 queued=3072 ' -- env PATH="$tmp/planted:$PATH" guard/run preflight "$R" job.sh
+sed -i "s|^slurm_bin: .*|slurm_bin: $tmp/no-slurm|" guard/budget.card; git commit -q -am "slurm_bin without slurm"
+expect preflight-slurm-bin-missing fail "^PREFLIGHT FAIL: no squeue and sacct in slurm_bin=$tmp/no-slurm; a human sets slurm_bin" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+sed -i '/^slurm_bin:/d' guard/budget.card; git commit -q -am "no slurm_bin"
+if [ -x /usr/bin/squeue ]; then skip preflight-slurm-bin-default "this host has /usr/bin/squeue"
+else expect preflight-slurm-bin-default fail '^PREFLIGHT FAIL: no squeue and sacct in slurm_bin=/usr/bin; ' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh; fi
+git reset -q --hard HEAD~2
 expect preflight-queued-m-s ok 'PREFLIGHT OK: .* queued=10 ' -- env MOCK_SQUEUE_PENDING='128 5:00' guard/run preflight "$R" job.sh
 expect preflight-queued-unlimited ok 'PREFLIGHT OK: .* queued=0 ' -- env MOCK_SQUEUE_PENDING='128 UNLIMITED' guard/run preflight "$R" job.sh
 expect preflight-walltime fail 'exceeds max_walltime' -- guard/run preflight "$R" job.sh --time=1-00:00:00

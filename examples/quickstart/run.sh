@@ -49,6 +49,7 @@ max_concurrent_jobs: 10
 quota_pct_cmd: echo 42%
 CARD
 printf 'runs/*/checks/*\n' > guard/watch.list
+echo "slurm_bin: $harness/tests/mock-bin" >> guard/budget.card
 git commit -q -am "chore(guard): set budget"
 git push -q origin guard/init:main
 echo "guard/ merged to main. The human owns it from now on."

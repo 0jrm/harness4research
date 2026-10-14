@@ -125,6 +125,7 @@ max_nodes_per_job: 0
 max_walltime_minutes: 0
 max_concurrent_jobs: 0
 quota_pct_cmd: <site command that prints percent used>
+slurm_bin: /usr/bin
 max_handled_failures: 2
 launch_hosts: none
 max_gpu_hours: 0

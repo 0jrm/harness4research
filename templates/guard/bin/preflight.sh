@@ -95,6 +95,9 @@ acct=$(need account); start=$(need start_date); max_ch=$(whole max_core_hours)
 reserve=0; [ -z "$(get verification_reserve_core_hours)" ] || reserve=$(whole verification_reserve_core_hours)
 cpn=$(whole cores_per_node); max_nodes=$(whole max_nodes_per_job)
 max_wall=$(whole max_walltime_minutes); max_conc=$(whole max_concurrent_jobs)
+# squeue and sacct come from the card on the protected branch, never from PATH, which the caller sets.
+sbin=$(get slurm_bin); sbin=${sbin:-/usr/bin}
+[ -x "$sbin/squeue" ] && [ -x "$sbin/sacct" ] || fail "no squeue and sacct in slurm_bin=$sbin; a human sets slurm_bin in guard/budget.card on the protected branch to the directory that holds them"
 
 # sbopts: the options sbatch reads, in its order: #SBATCH lines up to the script's first command, then the command line.
 mapfile -t sbopts < <(awk '/^#SBATCH/ { sub(/^#SBATCH/, ""); sub(/#.*/, ""); for (i = 1; i <= NF; i++) print $i; next }
@@ -117,8 +120,8 @@ fi
 [ "$nodes" -le "$max_nodes" ] || fail "--nodes=$nodes exceeds max_nodes_per_job=$max_nodes; ask for fewer"
 [ "$wmin" -le "$max_wall" ] || fail "--time=$wall ($wmin min) exceeds max_walltime_minutes=$max_wall; ask for less, and checkpoint to resume"
 
-spent=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW | awk '{s+=$1} END{printf "%d", s/3600}')
-queued=$(squeue -A "$acct" -u "$USER" -h -t PENDING -o "%C %l" | while read -r c l; do echo "$c $(to_min "$l")"; done \
+spent=$("$sbin/sacct" -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW | awk '{s+=$1} END{printf "%d", s/3600}')
+queued=$("$sbin/squeue" -A "$acct" -u "$USER" -h -t PENDING -o "%C %l" | while read -r c l; do echo "$c $(to_min "$l")"; done \
   | awk '{s+=$1*$2} END{printf "%d", s/60}')
 proj=$(( nodes * cpn * wmin * n / 60 ))
 if [ "${HPC_SPEND_RESERVE:-0}" = 1 ]; then held=0; else held=$reserve; fi
@@ -130,10 +133,10 @@ deadline=$(qget deadline)
 [ -z "$deadline" ] || [[ ! $(date +%F) > $deadline ]] || fail "past deadline $deadline in $run_dir/question.card; a human decides whether a new run continues it"
 run_max=$(qget budget_core_hours); run_max=${run_max:-$(get default_run_core_hours)}
 if [[ $run_max =~ ^[0-9]+$ ]] && [ "$run_max" -gt 0 ]; then
-  run_spent=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobName,CPUTimeRAW | awk -F'|' -v r="$run_id" '$1==r {s+=$2} END{printf "%d", s/3600}')
+  run_spent=$("$sbin/sacct" -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobName,CPUTimeRAW | awk -F'|' -v r="$run_id" '$1==r {s+=$2} END{printf "%d", s/3600}')
   [ $(( run_spent + proj )) -le "$run_max" ] || fail "this run spent $run_spent + this job $proj core-h exceeds budget_core_hours=$run_max; a human decides whether a new run continues it"
 fi
-live=$(squeue -A "$acct" -u "$USER" -h | wc -l)
+live=$("$sbin/squeue" -A "$acct" -u "$USER" -h | wc -l)
 [ $(( live + n )) -le "$max_conc" ] || fail "$live live + $n new jobs exceeds max_concurrent_jobs=$max_conc; wait for running jobs to finish"
 # The checked time, nodes and array follow the caller's options, so sbatch takes them over any other form or variable.
 set -- "$@" --time="$wall" --nodes="$nodes" ${array:+--array="$array"}

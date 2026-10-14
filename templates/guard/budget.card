@@ -8,6 +8,7 @@ max_nodes_per_job: <nodes>
 max_walltime_minutes: <minutes>
 max_concurrent_jobs: <jobs>
 quota_pct_cmd: <command that prints percent of your scratch quota used>
+slurm_bin: /usr/bin
 explore_max_nodes: 1
 explore_max_walltime_minutes: 60
 max_handled_failures: 2
