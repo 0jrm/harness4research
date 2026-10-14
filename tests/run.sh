@@ -888,6 +888,10 @@ expect fence-ledger-added ok 'PASS.execution-ledger' -- guard/run fence origin/m
 expect fence-history-no-report ok 'PASS.execution-history' -- guard/run fence origin/main HEAD
 cp runs/_template/report.md runs/lg/report.md; git add -A; git commit -q -m x
 expect fence-history-placeholder fail 'FAIL.execution-history.*runs/lg/report.md' -- guard/run fence origin/main HEAD
+sed -i '/^## Execution history$/,/^<one line per/d' runs/lg/report.md; git commit -q -am x
+expect fence-history-no-section fail "FAIL.execution-history.*runs/lg/report.md \\(no ## Execution history section; harness4research's templates/runs/_template/report.md has it, and guard init --update adds it to runs/_template/report.md\\)$" -- guard/run fence origin/main HEAD
+git checkout -q HEAD~1 -- runs/lg/report.md; git commit -q -am x
+expect fence-history-uncited-ids fail 'FAIL.execution-history.*runs/lg/report.md \(uncited: x1\)$' -- guard/run fence origin/main HEAD
 sed -i 's/^<one line per execution.tsv row.*/`x1` ran on skynet/' runs/lg/report.md; git commit -q -am x
 expect fence-history-cited ok 'PASS.execution-history' -- guard/run fence origin/main HEAD
 git push -q origin pr/ledger:refs/heads/pr-ledger
@@ -967,6 +971,10 @@ expect path-not-harness-copy fail - -- bash -c '"$1" fence origin/main HEAD | gr
 git init -q "$tmp/plain"
 expect path-refuses-unguarded fail 'runs inside a guarded project' -- bash -c 'cd "$1" && "$2" ripples runs/x' _ "$tmp/plain" "$guard"
 expect update-from-old ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt7"
+expect update-adds-section ok '^  runs/_template/report.md: ## Execution history$' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt9" --branch guard/sections
+expect update-section-placed ok '^## Deviations from the question card ## Execution history <one line per execution.tsv row, citing its id, .*> ## Spend $' -- \
+  bash -c 'awk "/^## Deviations/,/^## Spend/" "$1" | grep . | tr "\n" " "' _ "$tmp/wt9/runs/_template/report.md"
+expect update-section-keeps-edit ok '^Question: our wording$' -- grep '^Question:' "$tmp/wt9/runs/_template/report.md"
 expect update-reports-edit ok '^  guard/bin/fence.sh$' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt8" --branch guard/again
 expect update-merged-new-rule ok 'hypothesis-line' -- cat "$tmp/wt7/guard/bin/fence.sh"
 expect update-kept-site-edit ok '-le 200 \]' -- cat "$tmp/wt7/guard/bin/fence.sh"
