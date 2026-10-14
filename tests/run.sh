@@ -624,6 +624,9 @@ expect launch-no-card fail 'runs/2026-10-02-nocard/question.card is not committe
 echo "metric: changed" >> "$R2/question.card"; git commit -q -am "edit card"
 expect launch-card-frozen fail 'edited after its first commit' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
 git reset -q --hard HEAD~1
+git switch -q --detach HEAD; sed -i '/^checks: /d' guard/budget.card; git commit -q -am "no project waiver"
+expect launch-no-checks fail "^LAUNCH FAIL: no executable domain check in $R2/checks/ on HEAD; a verifier writes them" -- env HPC_GUARD_REF=HEAD HPC_SPEND_RESERVE=1 guard/run launch "$R2" --time=1 --gpus=none --mem=0.01 -- true
+git switch -q -
 sed -i 's/^max_gpu_hours: .*/max_gpu_hours: 999/' guard/budget.card; git commit -q -am "raise"
 expect launch-guard-touched fail 'guard/ differs' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
 same_refusal() {  # same_refusal <name> <preflight args...> -- <launch args...>: the text after the two prefixes is identical
