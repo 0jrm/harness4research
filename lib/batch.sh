@@ -9,6 +9,7 @@
 # for all it refuses.
 # ship runs review and then merge once the batch is due: review_batch_max pull requests wait, or the oldest waiting
 # one is ship_interval_hours old. Until then it only refreshes the question card digest. --now runs it at once.
+# When no reviewer can run, review and ship record and queue nothing for the pull requests left unreviewed, and exit 2.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=lib/merge.sh
@@ -25,7 +26,7 @@ cards_title="Approve question cards"
 refused_title="Merge approved pull requests"
 batch_wt=$state/review-worktrees/batch
 
-prs=() notes=() review_ran=0
+prs=() notes=() review_ran=0 reviewer_down=""
 declare -A title_of ref_of head_of base_of created_of tier_of verdict_of merged refused
 
 # load_prs: sets prs, the open pull requests of origin by number, and for each title_of, ref_of, head_of, base_of,
@@ -88,7 +89,7 @@ refresh_card_digest() {
 
 # review_session <base> <pr>...: one reviewer session judges the pull requests from a detached checkout of the base,
 # whose changes are discarded. Records for each the verdict of its own VERDICT line at the end of the reply, or
-# escalate, and queues every verdict but approve.
+# escalate, and queues every verdict but approve. When no reviewer can run, it records nothing and sets reviewer_down.
 review_session() {
   local b=$1 log lines line n v r; shift
   resolve_reviewer || refuse "$reviewer_problem. $reviewer_fix"
@@ -110,11 +111,16 @@ review_session() {
   if [ "$(git -C "$batch_wt" rev-parse HEAD)" != "$(git -C "$top" rev-parse "origin/$b")" ] || git -C "$batch_wt" status --porcelain | grep -q .; then
     echo "note: the reviewer changed the checkout of $b, and the change is discarded." >&2
   fi
+  if [ -n "$unavailable" ]; then
+    reviewer_down=$unavailable
+    for n in "$@"; do verdict_of[$n]="not reviewed; $unavailable"; done
+    git -C "$top" worktree remove --force "$batch_wt" 2>/dev/null || rm -rf "$batch_wt"
+    return
+  fi
   lines=$(reply_lines "$log" | awk '{ l[NR] = $0 } END { for (i = NR; i > 0 && l[i] ~ /^VERDICT/; i--) print l[i] }')
   for n in "$@"; do
     line=$(grep "^VERDICT #$n:" <<<"$lines" || true)
-    if [ $rc -ne 0 ]; then v=escalate r="the reviewer command exited $rc${err:+: ${err:0:160}}"
-    elif [[ $line != *$'\n'* && $line =~ ^VERDICT\ \#$n:\ (approve|changes|escalate)\ -\ (.*[^[:space:]].*)$ ]]; then
+    if [[ $line != *$'\n'* && $line =~ ^VERDICT\ \#$n:\ (approve|changes|escalate)\ -\ (.*[^[:space:]].*)$ ]]; then
       v=${BASH_REMATCH[1]} r=${BASH_REMATCH[2]}
     else v=escalate r="the reviewer's reply does not end with one VERDICT line for #$n"; fi
     r=$(one_line "$r")
@@ -123,6 +129,13 @@ review_session() {
     [ "$v" = approve ] || queue_verdict "$n" "$v" "$r" "$log" "$(brief_path "${ref_of[$n]}")"
   done
   git -C "$top" worktree remove --force "$batch_wt" 2>/dev/null || rm -rf "$batch_wt"
+}
+
+# review_or_skip <base> <pr>...: a review session, unless an earlier one found no reviewer that can run.
+review_or_skip() {
+  local n b=$1; shift
+  if [ -z "$reviewer_down" ]; then review_session "$b" "$@"; return; fi
+  for n in "$@"; do verdict_of[$n]="not reviewed; the reviewer is unavailable"; done
 }
 
 # review_small <pr>...: review sessions of at most review_batch_max pull requests that share a base branch.
@@ -135,9 +148,9 @@ review_small() {
     for n in "$@"; do
       [ "${base_of[$n]}" = "$b" ] || continue
       chunk+=("$n")
-      [ ${#chunk[@]} -lt "$max" ] || { review_session "$b" "${chunk[@]}"; chunk=(); }
+      [ ${#chunk[@]} -lt "$max" ] || { review_or_skip "$b" "${chunk[@]}"; chunk=(); }
     done
-    [ ${#chunk[@]} -eq 0 ] || review_session "$b" "${chunk[@]}"
+    [ ${#chunk[@]} -eq 0 ] || review_or_skip "$b" "${chunk[@]}"
   done
 }
 
@@ -164,6 +177,7 @@ review_batch() {
   done
   review_small "${small[@]}"
   for n in "${large[@]}"; do
+    if [ -n "$reviewer_down" ]; then verdict_of[$n]="not reviewed; the reviewer is unavailable"; continue; fi
     echo; rc=0; bash "$here/lib/review.sh" "$n" || rc=$?
     if [ $rc -eq 2 ]; then notes+=("#$n is large, and guard review $n refused to start; its message is above."); continue; fi
     IFS=$'\t' read -r at v r <<<"$(last_review "$n")"
@@ -229,11 +243,12 @@ ship() {
   review_batch
   merge_batch
   summary
+  [ -z "$reviewer_down" ] || exit 2
 }
 
 trap 'git -C "$top" worktree remove --force "$batch_wt" 2>/dev/null || rm -rf "$batch_wt"' EXIT
 case $mode in
-  review) load_prs; review_batch; summary ;;
+  review) load_prs; review_batch; summary; [ -z "$reviewer_down" ] || exit 2 ;;
   merge) load_prs; merge_batch; summary ;;
   ship) ship "$@" ;;
 esac

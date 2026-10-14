@@ -60,6 +60,8 @@ A round that adds commits is followed by another round, up to `review_rounds` (d
 
 `guard review` appends each verdict to `.git/guard/reviews.tsv` and comments it on the pull request.
 
+A reviewer that exits nonzero or replies nothing gives no verdict. Without a configured command, the next default reviewer on `PATH` takes the round. When none can run, `guard review` prints `reviewer unavailable:` with the first error line of the reviewer's stderr and the path of its `.err` file, then exits 2. It records nothing and queues nothing, because the fault is on the host, not in the pull request. `guard review --batch` and `guard ship` do the same for every pull request they could not review, skip the remaining reviews, and exit 2 after their summary.
+
 ## What `guard merge` checks
 
 `guard merge <pr>` prints one `pass` or `FAIL` line per item, in the style of `guard doctor`. It merges only when every item passes:
