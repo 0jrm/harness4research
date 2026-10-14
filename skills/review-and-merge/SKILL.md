@@ -45,7 +45,7 @@ The agent that wrote a change does not review it and does not merge it by hand. 
 4. Run `guard ship`.
    - When the batch is not due, it says which pull requests wait and when the batch runs. Tell the user, and stop. The merge can wait up to a day.
    - When the batch runs, it ends with a summary: the count per tier, each verdict, and each merged pull request with its merge commit. Relay the summary and every 🩺 block it printed, then stop.
-   - Exit 2 means it refused to start. Do what its message says, then rerun.
+   - Exit 2 means it refused to start, or that no reviewer could run (`reviewer unavailable:`). Do what its message says, then rerun. An unavailable reviewer is this host's problem, and `guard doctor` names it; tell the user.
    - Run `guard ship --now` only when the user asks for the batch now.
 
 ## Urgent work
@@ -55,7 +55,7 @@ When the user says the change cannot wait for the batch, review and merge its on
 1. Run `guard review <pr>`.
    - Exit 0 is approve. Pull the branch first if the reviewer pushed fixes, then go to step 2.
    - Exit 1 is `changes` or `escalate`. `guard review` queued an item for the human. Relay its block and stop. If the user then asks you to address the review, fix it, push, and run `guard review` again.
-   - Exit 2 means it refused to start. Do what its message says, such as writing the brief, then rerun.
+   - Exit 2 means it refused to start, or that no reviewer could run. Do what its message says, such as writing the brief, then rerun. A `reviewer unavailable:` message is a problem on this host, such as no network, no login, or too little memory, and `guard doctor` names it. Tell the user; it is not a verdict on the pull request.
 2. Run `guard merge <pr>`.
    - Exit 0 means it merged.
    - Exit 2 means it refused and queued the merge for a human. Relay the block and stop. Under `merge_policy: semi-manual` this is the expected end. The review is done, and the merge belongs to the human.

@@ -50,8 +50,9 @@ added_cards() {
 # GITHUB_TOKEN or SSH_AUTH_SOCK, and with an empty GH_CONFIG_DIR, because without a token gh and git's gh credential
 # helper fall back to the login stored on this machine, which is often the repository owner's. Its pushes to origin or
 # anywhere on GitHub fail; pushes the project's own tests
-# make to local repositories still work. Sets candidate, the command that ran last, rc, its exit status, and err, its
-# last line.
+# make to local repositories still work. A command that exits nonzero or replies nothing could not review, and the next
+# one gets the round. Sets candidate, the command that ran last, rc, its exit status, err, the first error line of its
+# stderr or else of its reply, and unavailable, empty when it replied and otherwise why it could not.
 run_reviewer() {
   local wt=$1 log=$2 ask=$3 label=$4 before i n prefix no_push=(GIT_CONFIG_COUNT=4) ghdir
   ghdir=$(mktemp -d)
@@ -66,12 +67,24 @@ run_reviewer() {
     rc=0
     (cd "$wt" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK GH_CONFIG_DIR="$ghdir" "${no_push[@]}" \
       bash -c "$candidate \"\$@\"" reviewer "$ask") < /dev/null > "$log" 2> "$log.err" || rc=$?
-    err=$(cat "$log.err" "$log" | grep -v '^[[:space:]]*$' | tail -n 1 | tr -d '\r' || true)
-    [ $rc -ne 0 ] && [ $((i + 1)) -lt ${#reviewer_cmds[@]} ] || break
+    err=$(first_error "$log.err"); [ -n "$err" ] || err=$(first_error "$log")
+    if [ $rc -ne 0 ]; then unavailable="reviewer unavailable: ${err:+${err%.}. }${candidate%% *} exited $rc; its stderr is in $log.err"
+    elif [ -z "$(reply_lines "$log")" ]; then unavailable="reviewer unavailable: ${err:+${err%.}. }${candidate%% *} exited 0 with an empty reply${err:+; its stderr is in $log.err}."
+    else unavailable=""; fi
+    [ -n "$unavailable" ] && [ $((i + 1)) -lt ${#reviewer_cmds[@]} ] || break
     echo "guard review: ${candidate%% *} failed (${err:-exit $rc}); trying ${reviewer_cmds[i + 1]%% *}" >&2
     git -C "$wt" reset -q --hard "$before"; git -C "$wt" clean -qfdx -e .guard-review
   done
   rm -rf "$ghdir"
+}
+
+# first_error <file>: prints the file's first line that reads as an error, or else its first nonblank line. Node, for one,
+# ends a crash with its version line, after the error.
+first_error() {
+  local lines
+  lines=$(grep -v '^[[:space:]]*$' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' || true)
+  { grep -m 1 -iE 'error|fatal|fail|denied|refused|unable|cannot|can.t|not found|out of memory|required|timed out|unauthori' <<<"$lines" \
+    || head -n 1 <<<"$lines"; } | cut -c 1-160
 }
 
 # reply_lines <log>: prints the reviewer's reply without blank lines, code fences, carriage returns or trailing spaces.

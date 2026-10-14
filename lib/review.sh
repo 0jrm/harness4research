@@ -3,10 +3,13 @@
 # Runs the configured reviewer on a pull request in a fresh worktree, for up to review_rounds rounds. The reviewer may
 # commit small fixes and never pushes; this script pushes them, and a round that added commits is followed by another.
 # Approve is recorded only for a round that added no commits. The verdict goes to reviews.tsv and, without the brief,
-# to a pull request comment. Without a configured command, a reviewer that exits nonzero hands the round, from its
-# starting commit, to the next default reviewer on PATH. --batch reviews every open pull request by its tier
-# (lib/batch.sh).
-# Exit 0 on approve, 1 on changes or escalate, 2 when it refuses to start.
+# to a pull request comment. Without a configured command, a reviewer that exits nonzero or replies nothing hands the
+# round, from its starting commit, to the next default reviewer on PATH. When none can, the review stops with no
+# verdict: a reviewer that cannot run is the host's problem, not the pull request's. --batch reviews every open pull
+# request by its tier (lib/batch.sh).
+# Exit 0 on approve, 1 on changes or escalate, 2 when it refuses to start or no reviewer can run.
+# HPC_REVIEW_UNAVAILABLE_FILE, when set, names a file that gets the reason when no reviewer can run, so that the batch
+# tells that from a refusal.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 [ "$*" != --batch ] || exec bash "$here/lib/batch.sh" review
@@ -55,10 +58,12 @@ for ((round = 1; round <= rounds; round++)); do
   } > "$wt/.guard-review/prompt.md"
   log=$state/reviews/$pr-${before:0:12}-r$round.txt
   run_reviewer "$wt" "$log" "$ask" "pull request #$pr, round $round of $rounds at ${before:0:7}"
+  if [ -n "$unavailable" ]; then
+    [ -z "${HPC_REVIEW_UNAVAILABLE_FILE:-}" ] || echo "$unavailable" > "$HPC_REVIEW_UNAVAILABLE_FILE"
+    refuse "$unavailable"
+  fi
   last=$(reply_lines "$log" | tail -n 1)
-  if [ $rc -ne 0 ]; then
-    verdict=escalate reason="the reviewer command exited $rc${err:+: ${err:0:160}}"
-  elif [[ $last =~ ^VERDICT:\ (approve|changes|escalate)\ -\ (.*[^[:space:]].*)$ ]]; then
+  if [[ $last =~ ^VERDICT:\ (approve|changes|escalate)\ -\ (.*[^[:space:]].*)$ ]]; then
     verdict=${BASH_REMATCH[1]} reason=${BASH_REMATCH[2]}
   else verdict=escalate reason="the reviewer's last line is not a VERDICT line"; fi
   reason=$(one_line "$reason")
