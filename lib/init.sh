@@ -108,6 +108,7 @@ if [ $update = 0 ]; then
   place "$t/github/workflows/guard-fence.yml" .github/workflows/guard-fence.yml
   place "$t/runs/_template/question.card" runs/_template/question.card
   place "$t/runs/_template/report.md" runs/_template/report.md
+  place "$t/runs/_template/execution.tsv" runs/_template/execution.tsv
   place "$t/FACTS.md" FACTS.md
   if [ -e "$wt/AGENTS.md" ]; then place "$t/AGENTS.md" guard/AGENTS.proposed.md; skipped+=("AGENTS.md (proposal in guard/AGENTS.proposed.md)")
     agents_note=$'\n'"     Merge $wt/guard/AGENTS.proposed.md into your AGENTS.md, or delete it."
@@ -122,6 +123,7 @@ else
   add_keys guard/budget.card guard/budget.card 0
   add_keys runs/_template/question.card runs/_template/question.card 1
   add_keys runs/_template/report.md runs/_template/report.md 1
+  [ -e "$wt/runs/_template/execution.tsv" ] || place "$t/runs/_template/execution.tsv" runs/_template/execution.tsv
 fi
 # set_merge_policy: guard merge refuses every merge without a ruleset, so a card whose repository GitHub offers no
 # rulesets gets merge_policy: semi-manual. Sets policy_note to say so, or to say that gh could not tell.

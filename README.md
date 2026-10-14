@@ -147,6 +147,7 @@ The walls are only as strong as the gap between your credentials and the agent's
 | `guard/run ripples <run_dir>` | cluster | warning signs |
 | `guard/run manifest <run_dir> "$0" "$@"` | inside a job | provenance record |
 | `guard/run fence [base] [head]` | anywhere, CI | merge inspector |
+| `guard/run fence --ledger <runs/<id>/execution.tsv>` | anywhere | checks one execution ledger by the fence's rules before you commit it |
 | `guard/run code <repo> <commit>` | cluster | absolute path of a clean worktree at that commit |
 | `guard/run launch <run_dir> --time=T --gpus=I,J\|none --mem=GB -- <cmd>` | a host in `launch_hosts` | run a job under a supervisor, or refuse |
 | `guard/run launch --stop <job_id> [--reason=<text>]` | that host | stop a launched job gently; `--list [run_dir]` shows them |
