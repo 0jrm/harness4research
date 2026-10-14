@@ -96,7 +96,7 @@ def evidence_rows(block):
 LEDGER = ("id", "ts", "field", "value", "why", "evidence")
 
 def ledger(text):
-    lines = [l.split("\t") for l in (text or "").splitlines() if l.strip()]
+    lines = [l.split("\t") for l in (text or "").splitlines() if l.strip() and not l.startswith("#")]
     header_ok = bool(lines) and tuple(lines[0]) == LEDGER
     rows = [dict(zip(LEDGER, l + [""] * len(LEDGER))) for l in lines[1:]] if header_ok else []
     return header_ok, rows
