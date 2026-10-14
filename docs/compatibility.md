@@ -68,7 +68,7 @@ Releases are annotated tags `vS.N`, where S is the schema. `v1.0` is the oldest 
 `guard init` writes `guard/VERSION` in the project:
 
 ```text
-schema: 5
+schema: 6
 installer: <full commit of the harness that wrote this file>
 release: <git describe of that commit>
 pstack: <commit>
