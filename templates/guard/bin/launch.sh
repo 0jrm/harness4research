@@ -706,6 +706,9 @@ gate_static() {
     git ls-files --error-unmatch "$q" >/dev/null 2>&1 || fail "$q is not committed; commit it first"
     git diff --quiet HEAD -- "$q" || fail "$q has uncommitted edits; revert them with git checkout HEAD -- $q, or start a new run id for a new design"
     [ "$(git log --format=%H -- "$q" | wc -l)" -le 1 ] || fail "$q was edited after its first commit; start a new run id instead"
+    if [ "$(card_or_default card_on_main no)" = yes ] && [ "$(git rev-parse -q --verify "$base:$q" || true)" != "$(git rev-parse "HEAD:$q")" ]; then
+      fail "card_on_main is yes in guard/budget.card, and $q is not on $base as committed here; open a pull request with the card, wait for a person to merge it, then submit"
+    fi
     load_qcard "$run_dir"
   fi
   stop=$(need stop_date) || exit $?

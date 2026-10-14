@@ -22,7 +22,7 @@ Stable means additions only. Nothing on this list is renamed or removed.
 
 Free to change: the detail column, message wording after the fixed prefixes, internal code, and template comments.
 
-Optional budget keys, each with a working default the scripts share: `explore_max_nodes`, `explore_max_walltime_minutes`, `max_handled_failures`, `merge_policy`, `slurm_bin` (default `/usr/bin`, the directory preflight runs `squeue` and `sacct` from), and the launch and envelope keys below.
+Optional budget keys, each with a working default the scripts share: `explore_max_nodes`, `explore_max_walltime_minutes`, `max_handled_failures`, `merge_policy`, `slurm_bin` (default `/usr/bin`, the directory preflight runs `squeue` and `sacct` from), `card_on_main` (default `no`; `yes` makes preflight refuse a run other than `explore-*` until its question card is on the protected branch, as committed on the submitting branch, which only a person merges), and the launch and envelope keys below.
 
 ## Launch hosts
 
