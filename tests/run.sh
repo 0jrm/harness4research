@@ -1092,7 +1092,7 @@ git -C "$D" update-ref refs/remotes/origin/main guard/init
 git -C "$D" remote set-url origin https://github.com/lab/proj.git
 mkdir -p "$tmp/home/.agents/skills" "$tmp/home-bare"
 for s in "$here"/skills/*/; do ln -s "${s%/}" "$tmp/home/.agents/skills/"; done
-printf '#!/bin/sh\n' > "$tmp/doctor-reviewer"; chmod +x "$tmp/doctor-reviewer"
+printf '#!/bin/sh\necho ready\n' > "$tmp/doctor-reviewer"; chmod +x "$tmp/doctor-reviewer"
 mkdir -p "$tmp/xdg-doctor/guard"; echo "reviewer_cmd_proprietary: $tmp/doctor-reviewer -p" > "$tmp/xdg-doctor/guard/config"
 setup=(XDG_CONFIG_HOME="$tmp/xdg-doctor" MOCK_GH_TOKEN=github_pat_agent MOCK_GH_ADMIN=false MOCK_GH_RULES=$'pull_request\ncheck fence'
   "MOCK_GH_RUNS=success 2026-10-01T12:00:00Z https://github.com/lab/proj/actions/runs/1" MOCK_SACCTMGR_ASSOC='|cpu=600000')
@@ -1103,7 +1103,7 @@ expect doctor-remedy-links-readme fail '^      Replace each <placeholder> .*: ht
 git -C "$tmp/proj" show "$good:guard/budget.card" > "$D.wt/guard/budget.card"
 git -C "$D.wt" commit -q -am "chore(guard): set budget"; git -C "$D" update-ref refs/remotes/origin/main guard/init
 expect doctor-clean-card ok '^pass  guard/budget.card on origin/main has no placeholders$' -- doctor
-expect doctor-all-pass ok '^14 passed, 0 failed, 0 cannot check from here$' -- doctor
+expect doctor-all-pass ok '^15 passed, 0 failed, 0 cannot check from here$' -- doctor
 expect doctor-version ok '^pass  guard schema [0-9]+ \(release .*\) against harness schema [0-9]+ .*: current$' -- doctor
 expect doctor-version-once ok - -- bash -c '! grep -E "\(release ([^ )]+)\1\)" <<<"$1"' _ "$(doctor)"
 expect doctor-workflow ok '^pass  .github/workflows/guard-fence.yml on origin/main defines guard-fence / fence$' -- doctor
@@ -1112,7 +1112,7 @@ expect onboard-names-real-doctor-lines ok - -- bash -c 'grep -o "\`pass  [^\`]*\
   while IFS= read -r line; do grep -qE "^$line" "$2" || { echo "not in doctor output: $line"; exit 1; }; done' _ "$here/skills/guard-onboard/SKILL.md" "$tmp/doctor-out"
 expect doctor-no-colour-in-pipe fail - -- grep -q $'\e' "$tmp/doctor-out"
 expect doctor-no-gh ok '^cannot check from here  whether guard-fence / fence has run on GitHub: gh is not on PATH$' -- doctor PATH="$(path_without gh)"
-expect doctor-cannot-is-not-pass ok '^12 passed, 0 failed, 2 cannot check from here$' -- doctor PATH="$(path_without gh)"
+expect doctor-cannot-is-not-pass ok '^13 passed, 0 failed, 2 cannot check from here$' -- doctor PATH="$(path_without gh)"
 expect doctor-gh-logged-out ok '^cannot check from here  whether main has an active ruleset requiring guard-fence / fence: gh is not logged in$' -- doctor MOCK_GH_TOKEN=
 expect doctor-not-github ok '^cannot check from here  .*: origin is not a github.com remote$' -- \
   doctor GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0="$D.git"
@@ -1157,9 +1157,32 @@ doctor >/dev/null; doctor MOCK_GH_TOKEN= SSH_AUTH_SOCK=/x >/dev/null; doctor PAT
 expect doctor-writes-nothing ok '^$' -- find "$D" "$D.wt" "$tmp/home" -newer "$tmp/doctor-before"
 expect doctor-status-unchanged ok '^$' -- bash -c 'git -C "$1" status --porcelain | diff - "$2"' _ "$D" "$tmp/doctor-status"
 expect doctor-reviewer ok "^pass  reviewer is proprietary: $tmp/doctor-reviewer -p, and $tmp/doctor-reviewer is an executable file$" -- doctor
+expect doctor-reviewer-answers ok "^pass  the reviewer $tmp/doctor-reviewer starts and answers on skynet$" -- doctor
 xdg() {  # xdg <name> <config line>...: prints a fresh XDG_CONFIG_HOME whose guard config holds the lines
   mkdir -p "$tmp/xdg-$1/guard"; printf '%s\n' "${@:2}" > "$tmp/xdg-$1/guard/config"; echo "$tmp/xdg-$1"
 }
+mkdir -p "$tmp/probe"
+stand_in() {  # stand_in <name> <script body>: prints an XDG_CONFIG_HOME whose reviewer is a stand-in running the body
+  printf '#!/bin/bash\n%s\n' "$2" > "$tmp/probe/$1"; chmod +x "$tmp/probe/$1"; xdg "probe-$1" "reviewer_cmd_proprietary: $tmp/probe/$1 -p"
+}
+expect doctor-probe-login fail '^FAIL  no reviewer answers on skynet: login is not logged in \(Error: Authentication required\)$' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in login 'echo "Error: Authentication required" >&2; exit 1')"
+expect doctor-probe-login-fix fail '^      Log in to login\. A CLI on a host without internet access can say this too, so check that first$' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in login 'echo "Error: Authentication required" >&2; exit 1')"
+expect doctor-probe-memory fail '^FAIL  no reviewer answers on skynet: oom ran out of memory \(RangeError: WebAssembly\.instantiate\(\): Out of memory\) under a soft ulimit -v of ' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in oom 'printf "/opt/a.js:2\n  ^\n\nRangeError: WebAssembly.instantiate(): Out of memory\n\nNode.js v24.5.0\n" >&2; exit 1')"
+expect doctor-probe-memory-fix fail '^      Raise the soft limit in the shell that runs guard review and guard ship, with ulimit -v unlimited; the hard limit here is ' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in oom 'echo "RangeError: Out of memory" >&2; exit 1')"
+expect doctor-probe-network fail '^FAIL  no reviewer answers on skynet: offline cannot reach its service \(Error: getaddrinfo ENOTFOUND api\.example\.com\)$' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in offline 'echo "Error: getaddrinfo ENOTFOUND api.example.com" >&2; exit 1')"
+expect doctor-probe-timeout fail '^FAIL  no reviewer answers on skynet: slow did not answer within 1 seconds$' -- \
+  doctor HPC_REVIEWER_PROBE_SECONDS=1 XDG_CONFIG_HOME="$(stand_in slow 'sleep 10')"
+expect doctor-probe-silent fail '^FAIL  no reviewer answers on skynet: silent exited 0 with an empty reply$' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in silent 'true')"
+mkdir -p "$tmp/probe-chain"; printf '#!/bin/bash\n[ "$*" = "auth status" ] && exit 0; echo "Failed to authenticate. API Error: 401" >&2; exit 1\n' > "$tmp/probe-chain/claude"
+chmod +x "$tmp/probe-chain/claude"; ln -sf "$tmp/doctor-reviewer" "$tmp/probe-chain/cursor-agent"
+expect doctor-probe-fallback ok '^pass  the reviewer cursor-agent starts and answers on skynet; claude is not logged in \(Failed to authenticate\. API Error: 401\); so reviews fall back to it$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/probe-chain:$PATH"
 mkdir -p "$tmp/claude-bin"; ln -s "$tmp/doctor-reviewer" "$tmp/claude-bin/claude"
 expect doctor-reviewer-default ok '^pass  reviewer is proprietary: claude -p --permission-mode acceptEdits --strict-mcp-config --setting-sources project --disable-slash-commands --tools=Bash,Read,Edit,Grep,Glob --allowedTools=Bash, and claude is on PATH$' -- \
   doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-bin:$PATH"
@@ -1169,7 +1192,7 @@ expect doctor-reviewer-missing-hint fail "^      Install Claude Code or Cursor's
 mkdir -p "$tmp/cursor-bin" "$tmp/claude-auth"; ln -s "$tmp/doctor-reviewer" "$tmp/cursor-bin/cursor-agent"
 cat > "$tmp/claude-auth/claude" <<'FAKE'
 #!/bin/sh
-[ "$*" = "auth status" ] && printf '{\n  "loggedIn": %s,\n  "authMethod": "none"\n}\n' "$MOCK_CLAUDE_LOGGED_IN"
+if [ "$*" = "auth status" ]; then printf '{\n  "loggedIn": %s,\n  "authMethod": "none"\n}\n' "$MOCK_CLAUDE_LOGGED_IN"; else echo ready; fi
 FAKE
 chmod +x "$tmp/claude-auth/claude"
 expect doctor-reviewer-chain ok '^pass  reviewer is proprietary: claude, then cursor-agent, and claude is on PATH$' -- \

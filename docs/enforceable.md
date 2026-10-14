@@ -33,15 +33,16 @@ FAIL  the GitHub login in this shell administers lab/proj, so an agent here can 
 cannot check from here  whether Slurm caps account gom-agents: sacctmgr is not on this host
       Run guard doctor on a cluster login node: https://github.com/0jrm/harness4research/blob/main/docs/enforceable.md#6-cap-the-cluster-account
 pass  reviewer is proprietary: claude -p --permission-mode acceptEdits --strict-mcp-config --setting-sources project --disable-slash-commands --tools=Bash,Read,Edit,Grep,Glob --allowedTools=Bash, and claude is on PATH
+pass  the reviewer claude starts and answers on login1
 pass  merge_policy is autonomous in guard/budget.card on origin/main, so guard merge also needs the ruleset and non-admin login items above to pass
 FAIL  Claude Code does not show open needs-you items: neither ~/.claude/settings.json nor /home/you/proj/.claude/settings.json runs guard needs-you --remind on SessionStart and UserPromptSubmit
       Run guard hooks install claude
 pass  no open needs-you items
 
-9 passed, 6 failed, 1 cannot check from here
+10 passed, 6 failed, 1 cannot check from here
 ```
 
-Each `FAIL` line names what is open and links the step below that fixes it. The last four items cover `guard review` and `guard merge`. They report which reviewer runs, where `merge_policy` is read from, whether Claude Code shows the needs-you queue, and how many items in it are open. Their remedies are commands to run. The hook item appears only where Claude Code is installed, and the open-items count never fails. A `cannot check from here` line is never a pass. It means this host cannot see the answer, so run `guard doctor` again where it can: on a cluster login node for the account cap, or where `gh` can read the repository for the GitHub items. `guard doctor` writes nothing. It exits 1 while any item fails, and 0 otherwise.
+Each `FAIL` line names what is open and links the step below that fixes it. The last five items cover `guard review` and `guard merge`. They report which reviewer runs, whether it starts and answers on this host, where `merge_policy` is read from, whether Claude Code shows the needs-you queue, and how many items in it are open. Their remedies are commands to run. The hook item appears only where Claude Code is installed, and the open-items count never fails. A `cannot check from here` line is never a pass. It means this host cannot see the answer, so run `guard doctor` again where it can: on a cluster login node for the account cap, or where `gh` can read the repository for the GitHub items. To check the reviewer, `guard doctor` starts it once with a one-word task in an empty temporary directory, as `guard review` would on this host, and waits up to `HPC_REVIEWER_PROBE_SECONDS` (default 120). When it cannot answer, the item says why: not logged in, out of memory under a low soft `ulimit -v`, no network, or no answer in time. Otherwise `guard doctor` writes nothing. It exits 1 while any item fails, and 0 otherwise.
 
 GitHub offers rulesets on a private repository only on a paid plan or in an organization. On a free personal account, `guard doctor` reports that GitHub offers no rulesets for the repository. Until you make the repository public or move it, nothing protects its default branch.
 
