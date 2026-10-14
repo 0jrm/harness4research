@@ -4,7 +4,7 @@ Written on 2026-10-09 for the agent who takes over as chief of staff, and update
 
 ## Start here, as of 2026-10-14
 
-[plan-2026-10-14.md](plan-2026-10-14.md) is the current plan. It covers the field report from the first HPC install (rolled back by the owner), the small audit fixes in progress, the sandboxed-agent design waiting on the owner, and the paused evaluation. The sections below record the state before it. Its section "Where workstream 1 stands" lists the pull requests that answer the field report: all merged except #89, which waits on the owner's decision n33.
+[plan-2026-10-14.md](plan-2026-10-14.md) is the current plan. It covers the field report from the first HPC install (rolled back by the owner), the small audit fixes in progress, the sandboxed-agent design waiting on the owner, and the paused evaluation. The sections below record the state before it. Its section "Where workstream 1 stands" lists the pull requests that answer the field report: all merged.
 
 ## The big picture
 
