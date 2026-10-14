@@ -1,0 +1,4 @@
+id	ts	field	value	why	evidence
+# Execution facts only, one row each, ids x1, x2, ... in order, and append-only once committed.
+# Fields: host gpus start concurrency workers staging mem_stop_gb stage_minutes resume restart, and void <id> to retract a wrong row.
+# Job outcomes (finished, failed, a score) go in report.md, not here. Check before you commit: guard fence --ledger runs/<id>/execution.tsv
