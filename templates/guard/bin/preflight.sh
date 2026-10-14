@@ -173,6 +173,13 @@ avail=$(( max_ch - held ))
 [ $(( spent + queued + proj )) -le "$avail" ] \
   || fail "spent $spent + queued $queued + this job $proj core-h exceeds $avail available (max $max_ch, reserve held $held); ask for less, wait for queued jobs, or a human raises max_core_hours"
 qget() { [ $explore = 1 ] || awk -F': *' -v k="$1" '$1==k && $2 !~ /</ {print $2; exit}' <<<"$(git show "HEAD:$run_dir/question.card")"; }
+# A full run needs domain checks that a person merged, so the implementer cannot grade its own results. The question
+# card waives them for one run and the budget card for the project, each with `checks: waived <reason>`.
+if [ $explore = 0 ]; then
+  waiver=$(qget checks); [ -n "$waiver" ] || waiver=$(get checks)
+  [[ $waiver =~ ^waived[[:space:]]+[^[:space:]\<] ]] || [ -n "$(git ls-tree -r "$base" -- "$run_dir/checks/" | awk '$1 == "100755"')" ] \
+    || fail "no executable domain check in $run_dir/checks/ on $base; a verifier writes them in a pull request that changes only $run_dir/checks/, a person merges it, then submit; or the question card says checks: waived <reason>"
+fi
 deadline=$(qget deadline)
 [ -z "$deadline" ] || [[ ! $(date +%F) > $deadline ]] || fail "past deadline $deadline in $run_dir/question.card; a human decides whether a new run continues it"
 run_max=$(qget budget_core_hours); run_max=${run_max:-$(get default_run_core_hours)}
