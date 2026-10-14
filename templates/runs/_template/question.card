@@ -14,3 +14,4 @@ deadline: <YYYY-MM-DD after which no job for this run starts; leave the placehol
 kill_criteria: <stop if ...>
 negative_result_means: <what we conclude and write down>
 out_of_scope: <what this run will not try>
+checks: <keep this placeholder, or write waived and the reason no domain check can apply; preflight refuses a full run without merged checks or a waiver>

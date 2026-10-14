@@ -695,7 +695,7 @@ parse_launch_args() {
 
 # gate_static: the cheap refusals, in preflight's order and words where preflight has the same gate.
 gate_static() {
-  local changed q stop max_wall
+  local changed q stop max_wall waiver
   on_launch_host || fail "$host is not in launch_hosts ($(launch_hosts)) on $base; compute here needs a human to opt in"
   changed=$( { git diff --name-only "$base"...HEAD -- guard; git status --porcelain --untracked-files=all -- guard; } | sort -u)
   [ -z "$changed" ] || fail "guard/ differs from $base: $(echo $changed); restore it with git restore --source=$base --staged --worktree -- guard, commit, and remove any untracked file under guard/"
@@ -707,6 +707,9 @@ gate_static() {
     git diff --quiet HEAD -- "$q" || fail "$q has uncommitted edits; revert them with git checkout HEAD -- $q, or start a new run id for a new design"
     [ "$(git log --format=%H -- "$q" | wc -l)" -le 1 ] || fail "$q was edited after its first commit; start a new run id instead"
     load_qcard "$run_dir"
+    waiver=$(qval checks); [ -n "$waiver" ] || waiver=$(card_or_default checks "")
+    [[ $waiver =~ ^waived[[:space:]]+[^[:space:]] ]] || [ -n "$(git ls-tree -r "$base" -- "$run_dir/checks/" | awk '$1 == "100755"')" ] \
+      || fail "no executable domain check in $run_dir/checks/ on $base; a verifier writes them in a pull request that changes only $run_dir/checks/, a person merges it, then submit; or the question card says checks: waived <reason>"
   fi
   stop=$(need stop_date) || exit $?
   [[ ! $(date +%F) > $stop ]] || fail "past stop_date $stop; a human extends stop_date in guard/budget.card on the protected branch"
