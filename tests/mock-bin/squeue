@@ -1,3 +1,5 @@
 #!/usr/bin/env bash
-# Mock: MOCK_SQUEUE_PENDING replaces the one pending row, "<cpus> <time limit>".
-if [[ "$*" == *PENDING* ]]; then echo "${MOCK_SQUEUE_PENDING:-128 1-00:00:00}"; else printf 'j1\nj2\n'; fi
+# Mock: MOCK_SQUEUE_PENDING replaces the one pending row, "<cpus> <time limit>", and set but empty lists none.
+# MOCK_SQUEUE_EXIT makes every query fail with that code.
+[ -z "${MOCK_SQUEUE_EXIT:-}" ] || { echo "slurm_load_jobs error: Unable to contact slurm controller (connect failure)" >&2; exit "$MOCK_SQUEUE_EXIT"; }
+if [[ "$*" == *PENDING* ]]; then [ -z "${MOCK_SQUEUE_PENDING-x}" ] || echo "${MOCK_SQUEUE_PENDING:-128 1-00:00:00}"; else printf 'j1\nj2\n'; fi
