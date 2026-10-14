@@ -121,6 +121,7 @@ max_walltime_minutes: 720
 max_concurrent_jobs: 10
 quota_pct_cmd: echo 42%
 slurm_bin: $here/tests/mock-bin
+checks: waived the suite tests preflight, not results
 CARD
 printf 'runs/*/checks/*\ntests\n' > guard/watch.list
 git commit -q -am "chore(guard): set budget"; git push -q origin guard/init:main; git fetch -q origin
@@ -202,6 +203,24 @@ sed -i 's/^verification_reserve_core_hours: .*/verification_reserve_core_hours: 
 git commit -q -am "unit in cores_per_node"
 expect preflight-budget-not-integer fail "^PREFLIGHT FAIL: budget card 'cores_per_node' must be a whole number: 128 cores; a human fixes it in guard/budget.card on the protected branch$" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~2
+expect preflight-budget-waiver ok 'PREFLIGHT OK' -- guard/run preflight "$R" job.sh
+sed -i '/^checks: /d' guard/budget.card; git commit -q -am "no project waiver"
+expect preflight-no-checks fail "^PREFLIGHT FAIL: no executable domain check in $R/checks/ on HEAD; a verifier writes them in a pull request that changes only $R/checks/, a person merges it, then submit; or the question card says checks: waived <reason>$" -- \
+  env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+mkdir -p "$R/checks"; printf '#!/bin/bash\necho fine\n' > "$R/checks/bounds.sh"; git add -A; git commit -q -m "checks, not executable"
+expect preflight-checks-not-executable fail '^PREFLIGHT FAIL: no executable domain check' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+chmod +x "$R/checks/bounds.sh"; git commit -q -am "checks, executable"
+expect preflight-checks-merged ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+expect preflight-checks-only-on-base fail '^PREFLIGHT FAIL: no executable domain check' -- env HPC_GUARD_REF=HEAD~2 HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
+git reset -q --hard HEAD~2
+R8=runs/2026-10-14-timing; mkdir -p "$R8"; sed 's/^checks: .*/checks: waived a timing benchmark with no domain output/' runs/_template/question.card > "$R8/question.card"
+git add -A; git commit -q -m "run: a waived card"
+expect preflight-card-waiver ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R8" job.sh
+R9=runs/2026-10-14-bare-waiver; mkdir -p "$R9"; sed 's/^checks: .*/checks: waived/' runs/_template/question.card > "$R9/question.card"
+git add -A; git commit -q -m "run: a waiver without a reason"
+expect preflight-waiver-needs-reason fail '^PREFLIGHT FAIL: no executable domain check' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R9" job.sh
+expect preflight-explore-no-checks ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-b8 job.sh --time=30 --nodes=1
+git reset -q --hard HEAD~3
 sed -i 's/^stop_date: .*/stop_date: 2000-01-01/' guard/budget.card; git commit -q -am "past stop date"
 expect preflight-past-stop fail '^PREFLIGHT FAIL: past stop_date 2000-01-01; a human extends stop_date in guard/budget.card on the protected branch$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
@@ -278,7 +297,7 @@ expect ripples-clean ok 'PASS.budget.30 of 10000' -- guard/run ripples "$R"
 expect ripples-no-sacct ok 'UNCHECKED.job-states.*UNCHECKED.walltime-headroom.*UNCHECKED.retries.*UNCHECKED.budget.*PASS.quota.42%' -- \
   env PATH="$(path_without sacct)" bash -c 'set -o pipefail; guard/run ripples "$1" 2>&1 | tr "\n" " "' _ "$R"
 expect ripples-unchecked-remedy ok '^UNCHECKED	budget	sacct not found on PATH on this host; run ripples on the cluster login node to check$' -- env PATH="$(path_without sacct)" guard/run ripples "$R"
-expect ripples-domain-remedy ok '^UNCHECKED	domain-checks	no executable runs/2026-09-29-demo/checks/\*; add a script there that exits non-zero when a result looks wrong$' -- guard/run ripples "$R"
+expect ripples-domain-remedy ok '^UNCHECKED	domain-checks	no executable runs/2026-09-29-demo/checks/\*; a verifier, not the implementer, adds scripts there that exit non-zero when a result looks wrong, in a pull request that changes only that directory, which a person merges before the first full submission$' -- guard/run ripples "$R"
 expect ripples-tty-unchecked ok '^UNCHECKED  budget {21}sacct not found on PATH on this host; run ripples' -- on_tty env NO_COLOR=1 PATH="$(path_without sacct)" guard/run ripples "$R"
 # Off the cluster sacct can exist yet list nothing and exit 0, and the quota path can be missing: no verdict, so no PASS.
 R4=runs/2026-10-05-no-jobs; mkdir -p "$R4"; cp runs/_template/question.card "$R4/question.card"; git add -A; git commit -q -m "run: a run with no jobs"
