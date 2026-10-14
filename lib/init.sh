@@ -4,12 +4,15 @@
 # Never touches the repo's checked-out tree, never overwrites a file, never pushes.
 # --update three-way merges each installer-owned file, with the template this project was installed from
 # as the base, so a human's edits survive and an overlap becomes conflict markers. It adds template keys
-# that are new since that install and changes no other line of a human-owned file. It refuses when this
+# that are new since that install and changes no other line of a human-owned file, except merge_policy: when GitHub
+# offers the repository no rulesets, init and --update set it to semi-manual and say why. It refuses when this
 # harness is older than the one that installed the project, unless --force.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=lib/version.sh
 . "$here/lib/version.sh"
+# shellcheck source=lib/github.sh
+. "$here/lib/github.sh"
 repo=""; branch=guard/init; wt=""; update=0; force=0; agents_note=""
 while [ $# -gt 0 ]; do
   case $1 in
@@ -120,6 +123,26 @@ else
   add_keys runs/_template/question.card runs/_template/question.card 1
   add_keys runs/_template/report.md runs/_template/report.md 1
 fi
+# set_merge_policy: guard merge refuses every merge without a ruleset, so a card whose repository GitHub offers no
+# rulesets gets merge_policy: semi-manual. Sets policy_note to say so, or to say that gh could not tell.
+policy_note=""
+set_merge_policy() {
+  local card=$wt/guard/budget.card slug out
+  [ -f "$card" ] && [ "$(awk -F': *' '$1 == "merge_policy" { print $2; exit }' "$card")" != semi-manual ] || return 0
+  slug=$(github_slug "$repo")
+  [ -n "$slug" ] && command -v gh >/dev/null || return 0
+  if out=$(ruleset_missing "$slug" "${base#origin/}" 0); then return 0; fi
+  if [[ $out != *"Upgrade to GitHub Pro"* ]]; then
+    policy_note="Could not tell whether GitHub offers rulesets on $slug ($(why "$out")), so merge_policy stays autonomous. guard doctor $repo checks it."
+    return 0
+  fi
+  if grep -q '^merge_policy:' "$card"; then sed -i 's/^merge_policy:.*/merge_policy: semi-manual/' "$card"
+  else echo "merge_policy: semi-manual" >> "$card"; fi
+  [[ " ${added[*]} " == *" guard/budget.card "* ]] || added+=(guard/budget.card)
+  policy_note="merge_policy is semi-manual in guard/budget.card, because GitHub offers no rulesets on $slug ($(why "$out")). guard merge refuses every merge without a ruleset, so a person merges each pull request. Set it to autonomous once $slug can have a ruleset."
+}
+set_merge_policy
+
 {
   echo "schema: $h_schema"
   echo "installer: $(git -C "$here" rev-parse HEAD 2>/dev/null || echo unknown)"
@@ -146,6 +169,7 @@ list "Your edits were kept in:" "${edited[@]}"
 list "Keys added from the templates:" "${keys[@]}"
 list "Optional keys you may set:" "${optional[@]}"
 list "No recorded install commit, so these were merged as whole files:" "${unbased[@]}"
+[ -z "$policy_note" ] || { echo; echo "$policy_note"; }
 if [ $update = 1 ]; then
   [[ " ${added[*]} " == *" .github/workflows/"* ]] && { echo; echo "Pushing a change under .github/workflows needs a token with the workflow scope: gh auth refresh -s workflow"; }
   [ -n "$from" ] && ! git -C "$here" diff --quiet "$from" HEAD -- templates/AGENTS.md \

@@ -1003,6 +1003,38 @@ expect contract-names-every-key ok - -- bash -c 'for k in $(cut -d: -f1 "$1/temp
 expect envelope-vocabulary-pinned ok - -- bash -c 'a=$(sed -n "s/^readonly ENVELOPE_FIELDS=//p" "$1/templates/guard/bin/launch.sh"); b=$(sed -n "s/^fields=//p" "$1/templates/guard/bin/fence.sh"); [ -n "$a" ] && [ "$a" = "$b" ]' _ "$here"
 expect contract-names-check-names ok - -- bash -c 'for k in gpu-hours host-supervision host-memory host-strays host-log-errors execution-within-envelope execution-ledger execution-history card-lineage; do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
 
+echo "== merge policy without rulesets"
+P=$tmp/policy
+git init -q --bare -b main "$P.git"; git clone -q "$P.git" "$P" 2>/dev/null
+git -C "$P" checkout -q -b main; echo "# p" > "$P/README.md"; git -C "$P" add -A; git -C "$P" commit -q -m init
+git -C "$P" push -q -u origin main; git -C "$P" remote set-head origin -a >/dev/null
+git -C "$P" remote set-url origin https://github.com/lab/policy.git
+free_plan='!Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)'
+policy_init() {  # policy_init <MOCK_GH_RULES> <args...>: guard init on lab/policy, fetched from the local bare repo
+  env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="url.$P.git.insteadOf" GIT_CONFIG_VALUE_0=https://github.com/lab/policy.git \
+    MOCK_GH_TOKEN=github_pat_agent MOCK_GH_RULES="$1" "$guard" init "$P" "${@:2}"
+}
+expect init-policy-rulesets ok - -- policy_init pull_request --worktree "$P.wt1"
+expect init-policy-rulesets-autonomous ok '^merge_policy: autonomous$' -- grep '^merge_policy:' "$P.wt1/guard/budget.card"
+expect init-policy-rulesets-quiet fail - -- bash -c 'policy_init pull_request --worktree "$1.wtx" --branch x | grep -q merge_policy' _ "$P"
+git -C "$P" worktree remove --force "$P.wtx" 2>/dev/null; git -C "$P" branch -q -D x 2>/dev/null
+git -C "$P" worktree remove --force "$P.wt1"; git -C "$P" branch -q -D guard/init
+policy_init "$free_plan" --worktree "$P.wt2" > "$tmp/policy.out" 2>&1
+expect init-policy-free-plan ok '^merge_policy: semi-manual$' -- grep '^merge_policy:' "$P.wt2/guard/budget.card"
+expect init-policy-free-plan-why ok '^merge_policy is semi-manual in guard/budget.card, because GitHub offers no rulesets on lab/policy \(Upgrade to GitHub Pro' -- cat "$tmp/policy.out"
+expect init-policy-unknown ok '^Could not tell whether GitHub offers rulesets on lab/policy \(API rate limit exceeded\), so merge_policy stays autonomous\.' -- \
+  policy_init '!API rate limit exceeded' --worktree "$P.wt3" --branch guard/unknown
+git -C "$P" worktree remove --force "$P.wt2"; git -C "$P" branch -q -D guard/init
+git -C "$P" worktree remove --force "$P.wt3"; git -C "$P" branch -q -D guard/unknown
+policy_init pull_request --worktree "$P.wt1" >/dev/null 2>&1
+git -C "$P.wt1" push -q "$P.git" HEAD:main; git -C "$P" worktree remove --force "$P.wt1"; git -C "$P" branch -q -D guard/init
+git -C "$P" fetch -q "$P.git" main:refs/remotes/origin/main
+policy_init "$free_plan" --update --worktree "$P.wt4" > "$tmp/policy.out" 2>&1
+expect update-policy-free-plan ok '^merge_policy: semi-manual$' -- grep '^merge_policy:' "$P.wt4/guard/budget.card"
+expect update-policy-free-plan-listed ok '^  guard/budget.card$' -- cat "$tmp/policy.out"
+expect update-policy-free-plan-why ok '^merge_policy is semi-manual in guard/budget.card, because GitHub offers no rulesets on lab/policy' -- cat "$tmp/policy.out"
+expect update-policy-one-line ok '^-merge_policy: autonomous\|\+merge_policy: semi-manual$' -- bash -c 'git -C "$1" diff HEAD~1 -- guard/budget.card | grep "^[-+][^-+]" | paste -sd"|"' _ "$P.wt4"
+
 echo "== doctor"
 D=$tmp/doc
 git init -q --bare -b main "$D.git"; git clone -q "$D.git" "$D" 2>/dev/null
@@ -1043,6 +1075,10 @@ expect doctor-ruleset-no-check fail '^FAIL  main has no active rule requiring gu
 expect doctor-ruleset-none fail '^FAIL  main has no active rule requiring a pull request and guard-fence / fence$' -- doctor MOCK_GH_RULES=
 expect doctor-ruleset-free-plan fail '^FAIL  GitHub offers no rulesets on lab/proj: Upgrade to GitHub Pro' -- \
   doctor MOCK_GH_RULES='!Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)'
+expect doctor-policy-free-plan fail '^FAIL  merge_policy is autonomous .*, but GitHub offers no rulesets on lab/proj, so guard merge refuses every merge$' -- \
+  doctor MOCK_GH_RULES="$free_plan"
+expect doctor-policy-free-plan-fix fail '^      Set merge_policy: semi-manual in guard/budget.card in a pull request a person merges, or give lab/proj rulesets: ' -- \
+  doctor MOCK_GH_RULES="$free_plan"
 expect doctor-fence-never-ran fail '^FAIL  guard-fence / fence has never completed a run on GitHub$' -- doctor MOCK_GH_RUNS=
 expect doctor-fence-failure-ran ok '^pass  guard-fence / fence has run on GitHub \(last completed run: failure, ' -- doctor "MOCK_GH_RUNS=failure 2026-10-01T12:00:00Z https://x/1"
 expect doctor-fence-broken fail '^FAIL  guard-fence / fence last completed run ended startup_failure' -- doctor "MOCK_GH_RUNS=startup_failure 2026-10-01T12:00:00Z https://x/1"

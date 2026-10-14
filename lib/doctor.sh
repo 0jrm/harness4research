@@ -101,7 +101,7 @@ check_ruleset() {
     "Run guard doctor where gh can read $slug, or open Settings, Rules, Rulesets: ${enforce}4-protect-the-default-branch"; return; fi
   if ! missing=$(ruleset_missing "$slug" "$branch" 1); then
     case $missing in
-      *"Upgrade to GitHub Pro"*) result fail "GitHub offers no rulesets on $slug: $(why "$missing")" \
+      *"Upgrade to GitHub Pro"*) no_rulesets=1; result fail "GitHub offers no rulesets on $slug: $(why "$missing")" \
         "Make the repository public, or move it to a paid plan or an organization; without that, nothing protects $branch: ${enforce}4-protect-the-default-branch" ;;
       *) result cannot "whether $branch has an active ruleset requiring guard-fence / fence: $(why "$missing")" \
         "Open Settings, Rules, Rulesets on $slug: ${enforce}4-protect-the-default-branch" ;;
@@ -172,8 +172,13 @@ check_reviewer() {
 }
 
 check_merge_policy() {
+  local fix="guard config set merge_policy semi-manual"
   read_merge_policy "$repo" "$base" "$p_guarded"
-  if [ "$merge_policy" = autonomous ] && [ "$p_guarded" = 1 ]; then
+  [ "$p_guarded" = 0 ] || fix="Set merge_policy: semi-manual in guard/budget.card in a pull request a person merges"
+  if [ "$merge_policy" = autonomous ] && [ "$no_rulesets" = 1 ]; then
+    result fail "merge_policy is autonomous $merge_policy_where, but GitHub offers no rulesets on $slug, so guard merge refuses every merge" \
+      "$fix, or give $slug rulesets: ${enforce}4-protect-the-default-branch"
+  elif [ "$merge_policy" = autonomous ] && [ "$p_guarded" = 1 ]; then
     result pass "merge_policy is autonomous $merge_policy_where, so guard merge also needs the ruleset and non-admin login items above to pass"
   elif [ "$merge_policy" = autonomous ]; then
     result pass "merge_policy is autonomous $merge_policy_where, so guard merge also needs the non-admin login item above and a ruleset requiring a pull request"
@@ -205,7 +210,7 @@ check_needs_you() {
 
 project_version "$repo"; base=$p_base; branch=${base#origin/}
 slug=$(github_slug "$repo")
-gh_why=""; admin=""
+gh_why=""; admin=""; no_rulesets=0
 if [ -z "$slug" ]; then gh_why="origin is not a github.com remote"
 elif ! command -v gh >/dev/null; then gh_why="gh is not on PATH"
 elif admin=$(gh_admin "$slug" "$branch"); then :
