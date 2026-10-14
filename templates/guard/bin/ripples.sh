@@ -47,6 +47,15 @@ if [ -n "$launch" ] && launched --here; then
   sacct() { [ -z "$(type -P sacct)" ] || command sacct "$@"; [[ $* != *JobName* ]] || launched --sacct; }
 fi
 nosacct="sacct not found on PATH on this host; run ripples on the cluster login node to check"
+sacct_err=$(mktemp); trap 'rm -f "$sacct_err"' EXIT
+# sacct_failed: prints why sacct failed, from its stderr in $sacct_err. The accounting database serves the whole
+# cluster, so a connection error there is not this host's.
+sacct_failed() {
+  local line; line=$(grep -m 1 -v '^[[:space:]]*$' "$sacct_err" || true)
+  if grep -qiE 'connection refused|talking to the database|slurmdbd|unable to contact|connect failure|timed out' "$sacct_err"; then
+    echo "sacct cannot reach the Slurm accounting database (${line:-no message}); it is down or unreachable for the cluster, not only this host, so run ripples again later"
+  else echo "sacct failed on this host (${line:-no message}); run ripples on the cluster login node to check"; fi
+}
 # A job is handled once $run_dir/incidents/*.md on the protected branch has the line `job: <id>`. Reading HEAD would
 # let an agent clear its own ripple with a bare job: line that nobody reviewed.
 declare -A incident=() acked=()
@@ -64,13 +73,17 @@ sort_out() {  # sort_out <check> "<id>:<detail> ..." <next step>: HANDLED for en
 }
 
 # A host whose sacct answers for another cluster, or for none, lists no rows and exits 0, so no rows is no verdict.
+# Rows on the account, none of them this run's, mean this host sees the cluster and the run has no Slurm jobs yet.
 blind=""
 if ! command -v sacct >/dev/null; then blind=$nosacct
-elif ! rows=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobID,JobName,State,ElapsedRaw,TimelimitRaw); then
-  blind="sacct failed on this host; run ripples on the cluster login node to check"
+elif ! rows=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobID,JobName,State,ElapsedRaw,TimelimitRaw 2>"$sacct_err"); then
+  blind=$(sacct_failed)
+elif [ -z "$rows" ]; then
+  blind="sacct lists no job at all on account $acct since $start from this host, so it may not see this cluster; if the run has submitted jobs, run ripples on the cluster login node"
 else
+  seen=$(grep -c . <<<"$rows")
   rows=$(awk -F'|' -v r="$run_id" '$2==r' <<<"$rows")
-  [ -n "$rows" ] || blind="sacct lists no job named $run_id on account $acct since $start from this host, so there is nothing to judge; if the run has submitted jobs, run ripples on the cluster login node"
+  [ -n "$rows" ] || blind="no jobs yet: sacct lists $seen job(s) on account $acct since $start from this host, none named $run_id, so there is nothing to judge"
 fi
 if [ -z "$blind" ]; then
   incident_step="diagnose, then merge $run_dir/incidents/<n>.md with a job: <id> line and the root cause for each, since ripples reads incidents from $base"
@@ -91,8 +104,8 @@ else
 fi
 
 if [ -z "$(type -P sacct)" ]; then say UNCHECKED budget "$nosacct"
-elif ! cpu=$(command sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW); then
-  say UNCHECKED budget "sacct failed on this host; run ripples on the cluster login node to check"
+elif ! cpu=$(command sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW 2>"$sacct_err"); then
+  say UNCHECKED budget "$(sacct_failed)"
 elif [ -z "$cpu" ]; then
   say UNCHECKED budget "sacct lists no job on account $acct since $start from this host, so spend is unknown here; run ripples on the cluster login node to check"
 else
