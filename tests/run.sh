@@ -121,6 +121,7 @@ max_walltime_minutes: 720
 max_concurrent_jobs: 10
 quota_pct_cmd: echo 42%
 slurm_bin: $here/tests/mock-bin
+checks: waived the suite tests preflight, not results
 CARD
 printf 'runs/*/checks/*\ntests\n' > guard/watch.list
 git commit -q -am "chore(guard): set budget"; git push -q origin guard/init:main; git fetch -q origin
@@ -187,6 +188,11 @@ else expect preflight-slurm-bin-default fail '^PREFLIGHT FAIL: no squeue and sac
 git reset -q --hard HEAD~2
 expect preflight-queued-m-s ok 'PREFLIGHT OK: .* queued=10 ' -- env MOCK_SQUEUE_PENDING='128 5:00' guard/run preflight "$R" job.sh
 expect preflight-queued-unlimited ok 'PREFLIGHT OK: .* queued=0 ' -- env MOCK_SQUEUE_PENDING='128 UNLIMITED' guard/run preflight "$R" job.sh
+expect preflight-accounting-down fail '^PREFLIGHT FAIL: accounting unavailable \(sacct failed: sacct: error: Problem talking to the database: Connection refused\); not submitting$' -- \
+  env MOCK_SACCT_EXIT=1 HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
+expect preflight-queue-down fail '^PREFLIGHT FAIL: queue unavailable \(squeue failed: slurm_load_jobs error: Unable to contact slurm controller \(connect failure\)\); not submitting$' -- \
+  env MOCK_SQUEUE_EXIT=1 HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
+expect preflight-no-queued-jobs ok 'PREFLIGHT OK: .* queued=0 ' -- env MOCK_SQUEUE_PENDING= guard/run preflight "$R" job.sh
 expect preflight-walltime fail 'exceeds max_walltime' -- guard/run preflight "$R" job.sh --time=1-00:00:00
 expect preflight-budget fail 'exceeds 8500 available' -- guard/run preflight "$R" job.sh --nodes=4 --time=12:00:00 --array=0-9%2
 expect preflight-reserve-open ok 'available=10000' -- env HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
@@ -197,6 +203,34 @@ sed -i 's/^verification_reserve_core_hours: .*/verification_reserve_core_hours: 
 git commit -q -am "unit in cores_per_node"
 expect preflight-budget-not-integer fail "^PREFLIGHT FAIL: budget card 'cores_per_node' must be a whole number: 128 cores; a human fixes it in guard/budget.card on the protected branch$" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~2
+expect preflight-budget-waiver ok 'PREFLIGHT OK' -- guard/run preflight "$R" job.sh
+sed -i '/^checks: /d' guard/budget.card; git commit -q -am "no project waiver"
+expect preflight-no-checks fail "^PREFLIGHT FAIL: no executable domain check in $R/checks/ on HEAD; a verifier writes them in a pull request that changes only $R/checks/, a person merges it, then submit; or the question card says checks: waived <reason>$" -- \
+  env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+mkdir -p "$R/checks"; printf '#!/bin/bash\necho fine\n' > "$R/checks/bounds.sh"; git add -A; git commit -q -m "checks, not executable"
+expect preflight-checks-not-executable fail '^PREFLIGHT FAIL: no executable domain check' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+chmod +x "$R/checks/bounds.sh"; git commit -q -am "checks, executable"
+expect preflight-checks-merged ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+expect preflight-checks-only-on-base fail '^PREFLIGHT FAIL: no executable domain check' -- env HPC_GUARD_REF=HEAD~2 HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
+git reset -q --hard HEAD~2
+R8=runs/2026-10-14-timing; mkdir -p "$R8"; sed 's/^checks: .*/checks: waived a timing benchmark with no domain output/' runs/_template/question.card > "$R8/question.card"
+git add -A; git commit -q -m "run: a waived card"
+expect preflight-card-waiver ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R8" job.sh
+R9=runs/2026-10-14-bare-waiver; mkdir -p "$R9"; sed 's/^checks: .*/checks: waived/' runs/_template/question.card > "$R9/question.card"
+git add -A; git commit -q -m "run: a waiver without a reason"
+expect preflight-waiver-needs-reason fail '^PREFLIGHT FAIL: no executable domain check' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R9" job.sh
+expect preflight-explore-no-checks ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-b8 job.sh --time=30 --nodes=1
+git reset -q --hard HEAD~3
+base_card=$(git rev-parse HEAD); echo "card_on_main: yes" >> guard/budget.card; git commit -q -am "cards on main"
+git branch -q -f card-base HEAD; git reset -q --hard "$base_card"
+git switch -q -c card-later card-base; R10=runs/2026-10-14-unread; mkdir -p "$R10"; cp runs/_template/question.card "$R10/"; git add -A; git commit -q -m "run: a card nobody read"
+expect preflight-card-not-on-main fail "^PREFLIGHT FAIL: card_on_main is yes in guard/budget.card, and $R10/question.card is not on card-base as committed here; open a pull request with the card, wait for a person to merge it, then submit$" -- \
+  env HPC_GUARD_REF=card-base HPC_SPEND_RESERVE=1 guard/run preflight "$R10" job.sh
+git branch -q -f card-merged HEAD
+expect preflight-card-on-main ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=card-merged HPC_SPEND_RESERVE=1 guard/run preflight "$R10" job.sh
+expect preflight-card-on-main-explore ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=card-base HPC_SPEND_RESERVE=1 guard/run preflight runs/explore-c9 job.sh --time=30 --nodes=1
+git switch -q agent/run; git branch -q -D card-later card-base card-merged
+expect preflight-card-on-main-default ok 'PREFLIGHT OK' -- guard/run preflight "$R" job.sh
 sed -i 's/^stop_date: .*/stop_date: 2000-01-01/' guard/budget.card; git commit -q -am "past stop date"
 expect preflight-past-stop fail '^PREFLIGHT FAIL: past stop_date 2000-01-01; a human extends stop_date in guard/budget.card on the protected branch$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
@@ -273,19 +307,25 @@ expect ripples-clean ok 'PASS.budget.30 of 10000' -- guard/run ripples "$R"
 expect ripples-no-sacct ok 'UNCHECKED.job-states.*UNCHECKED.walltime-headroom.*UNCHECKED.retries.*UNCHECKED.budget.*PASS.quota.42%' -- \
   env PATH="$(path_without sacct)" bash -c 'set -o pipefail; guard/run ripples "$1" 2>&1 | tr "\n" " "' _ "$R"
 expect ripples-unchecked-remedy ok '^UNCHECKED	budget	sacct not found on PATH on this host; run ripples on the cluster login node to check$' -- env PATH="$(path_without sacct)" guard/run ripples "$R"
-expect ripples-domain-remedy ok '^UNCHECKED	domain-checks	no executable runs/2026-09-29-demo/checks/\*; add a script there that exits non-zero when a result looks wrong$' -- guard/run ripples "$R"
+expect ripples-domain-remedy ok '^UNCHECKED	domain-checks	no executable runs/2026-09-29-demo/checks/\*; a verifier, not the implementer, adds scripts there that exit non-zero when a result looks wrong, in a pull request that changes only that directory, which a person merges before the first full submission$' -- guard/run ripples "$R"
 expect ripples-tty-unchecked ok '^UNCHECKED  budget {21}sacct not found on PATH on this host; run ripples' -- on_tty env NO_COLOR=1 PATH="$(path_without sacct)" guard/run ripples "$R"
 # Off the cluster sacct can exist yet list nothing and exit 0, and the quota path can be missing: no verdict, so no PASS.
 R4=runs/2026-10-05-no-jobs; mkdir -p "$R4"; cp runs/_template/question.card "$R4/question.card"; git add -A; git commit -q -m "run: a run with no jobs"
 nopass='^PASS	(job-states|walltime-headroom|retries|handled-failures|budget|quota)	'
-expect ripples-no-jobs ok '^UNCHECKED	job-states	sacct lists no job named 2026-10-05-no-jobs on account gom since 2026-09-01 from this host, so there is nothing to judge; if the run has submitted jobs, run ripples on the cluster login node$' -- guard/run ripples "$R4"
-expect ripples-no-jobs-no-pass ok - -- bash -c 'out=$(guard/run ripples "$1"); [ "$(grep -cE "^UNCHECKED	(job-states|walltime-headroom|retries|handled-failures)	sacct lists no job named" <<<"$out")" = 4 ]' _ "$R4"
+expect ripples-no-jobs-yet ok '^UNCHECKED	job-states	no jobs yet: sacct lists 1 job\(s\) on account gom since 2026-09-01 from this host, none named 2026-10-05-no-jobs, so there is nothing to judge$' -- guard/run ripples "$R4"
+expect ripples-no-jobs-yet-no-pass ok - -- bash -c 'out=$(guard/run ripples "$1"); [ "$(grep -cE "^UNCHECKED	(job-states|walltime-headroom|retries|handled-failures)	no jobs yet: " <<<"$out")" = 4 ]' _ "$R4"
+expect ripples-no-account-rows ok '^UNCHECKED	job-states	sacct lists no job at all on account gom since 2026-09-01 from this host, so it may not see this cluster; if the run has submitted jobs, run ripples on the cluster login node$' -- \
+  env MOCK_SACCT_ROWS=/dev/null guard/run ripples "$R4"
+expect ripples-no-account-rows-no-pass ok - -- bash -c 'out=$(MOCK_SACCT_ROWS=/dev/null guard/run ripples "$1"); [ "$(grep -cE "^UNCHECKED	(job-states|walltime-headroom|retries|handled-failures)	sacct lists no job at all" <<<"$out")" = 4 ]' _ "$R4"
 expect ripples-no-account-jobs ok '^UNCHECKED	budget	sacct lists no job on account gom since 2026-09-01 from this host, so spend is unknown here; run ripples on the cluster login node to check$' -- env MOCK_SACCT_CPUSECONDS= guard/run ripples "$R4"
-expect ripples-sacct-fails ok 'UNCHECKED	job-states	sacct failed on this host; run ripples on the cluster login node to check .*UNCHECKED	budget	sacct failed on this host' -- \
+expect ripples-sacct-db-down ok 'UNCHECKED	job-states	sacct cannot reach the Slurm accounting database \(sacct: error: Problem talking to the database: Connection refused\); it is down or unreachable for the cluster, not only this host, so run ripples again later .*UNCHECKED	budget	sacct cannot reach the Slurm accounting database' -- \
   env MOCK_SACCT_EXIT=1 bash -c 'guard/run ripples "$1" 2>/dev/null | tr "\n" " "' _ "$R"
+expect ripples-sacct-db-down-no-login-advice ok - -- bash -c '! MOCK_SACCT_EXIT=1 guard/run ripples "$1" 2>&1 | grep "cluster login node"' _ "$R"
+expect ripples-sacct-fails ok 'UNCHECKED	job-states	sacct failed on this host \(sacct: error: Invalid user id: 1000\); run ripples on the cluster login node to check .*UNCHECKED	budget	sacct failed on this host \(sacct: error: Invalid user id' -- \
+  env MOCK_SACCT_EXIT=1 MOCK_SACCT_ERR='sacct: error: Invalid user id: 1000' bash -c 'guard/run ripples "$1" 2>/dev/null | tr "\n" " "' _ "$R"
 sed -i "s|^quota_pct_cmd: .*|quota_pct_cmd: df --output=pcent $tmp/no-such-mount \| tail -1 \| tr -dc 0-9|" guard/budget.card; git commit -q -am "quota on a path this host lacks"
 expect ripples-quota-path-missing ok "^UNCHECKED	quota	quota_pct_cmd printed no number on this host \(df: .*No such file or directory\); run ripples where its path exists, or a human fixes quota_pct_cmd in guard/budget.card$" -- env HPC_GUARD_REF=HEAD guard/run ripples "$R"
-expect ripples-off-cluster-no-pass ok - -- bash -c 'out=$(HPC_GUARD_REF=HEAD MOCK_SACCT_CPUSECONDS= guard/run ripples "$1") && ! grep -E "$2" <<<"$out" && [ "$(grep -c ^UNCHECKED <<<"$out")" -ge 6 ]' _ "$R4" "$nopass"
+expect ripples-off-cluster-no-pass ok - -- bash -c 'out=$(HPC_GUARD_REF=HEAD MOCK_SACCT_CPUSECONDS= MOCK_SACCT_ROWS=/dev/null guard/run ripples "$1") && ! grep -E "$2" <<<"$out" && [ "$(grep -c ^UNCHECKED <<<"$out")" -ge 6 ]' _ "$R4" "$nopass"
 git reset -q --hard HEAD~2
 pre=$(git rev-parse HEAD); mkdir -p "$R/incidents"
 printf '100|2026-09-29-demo|TIMEOUT|14400|240\n101|2026-09-29-demo|COMPLETED|100|240\n102|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
@@ -594,6 +634,14 @@ expect launch-no-card fail 'runs/2026-10-02-nocard/question.card is not committe
 echo "metric: changed" >> "$R2/question.card"; git commit -q -am "edit card"
 expect launch-card-frozen fail 'edited after its first commit' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
 git reset -q --hard HEAD~1
+git switch -q --detach HEAD; sed -i '/^checks: /d' guard/budget.card; git commit -q -am "no project waiver"
+expect launch-no-checks fail "^LAUNCH FAIL: no executable domain check in $R2/checks/ on HEAD; a verifier writes them" -- env HPC_GUARD_REF=HEAD HPC_SPEND_RESERVE=1 guard/run launch "$R2" --time=1 --gpus=none --mem=0.01 -- true
+git switch -q -
+git switch -q --detach HEAD; echo "card_on_main: yes" >> guard/budget.card; git commit -q -am "cards on main"; git branch -q -f launch-card-base HEAD
+R11=runs/2026-10-14-unread-launch; mkdir -p "$R11"; cp runs/_template/question.card "$R11/"; git add -A; git commit -q -m "run: a card nobody read"
+expect launch-card-not-on-main fail "^LAUNCH FAIL: card_on_main is yes in guard/budget.card, and $R11/question.card is not on launch-card-base as committed here" -- \
+  env HPC_GUARD_REF=launch-card-base HPC_SPEND_RESERVE=1 guard/run launch "$R11" --time=1 --gpus=none --mem=0.01 -- true
+git switch -q -; git branch -q -D launch-card-base
 sed -i 's/^max_gpu_hours: .*/max_gpu_hours: 999/' guard/budget.card; git commit -q -am "raise"
 expect launch-guard-touched fail 'guard/ differs' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
 same_refusal() {  # same_refusal <name> <preflight args...> -- <launch args...>: the text after the two prefixes is identical
@@ -703,6 +751,15 @@ expect ripples-envelope-host ok 'x3: host login1 is not in launch_hosts \(skynet
 expect ripples-envelope-mem ok 'x3: mem_stop_gb 2000 is over host_max_mem_gb=1000' -- echo "$rip"
 expect ripples-envelope-restart ok 'x4: restart x-1-done is not a resource stop of this run' -- echo "$rip"
 expect ripples-envelope-resume ok 'x5: resume /nowhere/ckpt is under no launch cwd of this run' -- echo "$rip"
+X5=runs/2026-10-14-outcome; mkdir -p "$X5"; cp runs/_template/question.card "$X5/"
+printf 'id\tts\tfield\tvalue\twhy\tevidence\n# a comment\nx1\tt\thost\tskynet\tw\te\nx2\tt\tstage\tdone\tjob finished\te\n' > "$X5/execution.tsv"
+git add -A; git commit -q -m "run: an outcome in the ledger"
+expect ripples-ledger-outcome fail 'RIPPLE	execution-within-envelope	x2: stage is not a ledger field \(host gpus .* or void <id>\); job outcomes go in report.md, and a void row in a records-only pull request retracts this one; the ledger is append-only' -- guard/run ripples "$X5"
+printf 'x3\tt\tvoid\tx2\tan outcome, not an execution fact\tnone\n' >> "$X5/execution.tsv"; git commit -q -am "run: void the outcome"
+expect ripples-ledger-voided ok 'PASS	execution-within-envelope	3 rows: host x1, stage x2, void x3' -- guard/run ripples "$X5"
+printf 'x5\tt\tvoid\tx3\tw\te\nx6\tt\tvoid\tx4\tw\te\n' >> "$X/execution.tsv"; git commit -q -am "run: void the restart and the resume"
+expect ripples-voided-restart-not-handled fail 'RIPPLE	job-states	.*x-2-oom:OUT_OF_MEMORY' -- guard/run ripples "$X"
+git reset -q --hard HEAD~1
 X3=runs/2026-10-02-science; mkdir -p "$X3"; cp runs/_template/question.card "$X3/"
 X4=runs/2026-10-02-capped; mkdir -p "$X4"; sed 's/^budget_gpu_hours: .*/budget_gpu_hours: 1/' runs/_template/question.card > "$X4/question.card"
 X5=runs/2026-10-02-late; mkdir -p "$X5"; sed 's/^deadline: .*/deadline: 2000-01-01/' runs/_template/question.card > "$X5/question.card"
@@ -883,6 +940,10 @@ expect fence-ledger-added ok 'PASS.execution-ledger' -- guard/run fence origin/m
 expect fence-history-no-report ok 'PASS.execution-history' -- guard/run fence origin/main HEAD
 cp runs/_template/report.md runs/lg/report.md; git add -A; git commit -q -m x
 expect fence-history-placeholder fail 'FAIL.execution-history.*runs/lg/report.md' -- guard/run fence origin/main HEAD
+sed -i '/^## Execution history$/,/^<one line per/d' runs/lg/report.md; git commit -q -am x
+expect fence-history-no-section fail "FAIL.execution-history.*runs/lg/report.md \\(no ## Execution history section; harness4research's templates/runs/_template/report.md has it, and guard init --update adds it to runs/_template/report.md\\)$" -- guard/run fence origin/main HEAD
+git checkout -q HEAD~1 -- runs/lg/report.md; git commit -q -am x
+expect fence-history-uncited-ids fail 'FAIL.execution-history.*runs/lg/report.md \(uncited: x1\)$' -- guard/run fence origin/main HEAD
 sed -i 's/^<one line per execution.tsv row.*/`x1` ran on skynet/' runs/lg/report.md; git commit -q -am x
 expect fence-history-cited ok 'PASS.execution-history' -- guard/run fence origin/main HEAD
 git push -q origin pr/ledger:refs/heads/pr-ledger
@@ -896,9 +957,28 @@ expect fence-ledger-rewritten fail 'FAIL.execution-ledger.*runs/lg/execution.tsv
 git switch -q -c pr/ledger-delete origin/pr-ledger; git rm -q runs/lg/execution.tsv; git commit -q -m x
 expect fence-ledger-deleted fail 'FAIL.execution-ledger.*runs/lg/execution.tsv \(deleted\)' -- guard/run fence origin/pr-ledger HEAD
 git switch -q -c pr/ledger-design origin/pr-ledger; printf 'x2\tt\tsetting\tfloat64\tw\te\n' >> runs/lg/execution.tsv; git commit -q -am x
-expect fence-ledger-design fail 'FAIL.execution-ledger.*runs/lg/execution.tsv$' -- guard/run fence origin/pr-ledger HEAD
+expect fence-ledger-design fail 'FAIL.execution-ledger.*runs/lg/execution.tsv \(x2: setting is a question card key, so it is design; a change to it needs a new card\)$' -- guard/run fence origin/pr-ledger HEAD
+git switch -q -c pr/ledger-outcome origin/pr-ledger; printf 'x2\tt\tstage\tdone\tjob 4801 finished\te\n' >> runs/lg/execution.tsv; git commit -q -am x
+expect fence-ledger-outcome fail 'FAIL.execution-ledger.*runs/lg/execution.tsv \(x2: stage is not a ledger field \(host gpus start concurrency workers staging mem_stop_gb stage_minutes resume restart or void <id>\); job outcomes go in report.md, and a void row in a records-only pull request retracts this one\)$' -- guard/run fence origin/pr-ledger HEAD
+printf 'x3\tt\tvoid\tx2\tan outcome, not an execution fact\tnone\n' >> runs/lg/execution.tsv; git commit -q -am x
+expect fence-ledger-void ok 'PASS.execution-ledger' -- guard/run fence origin/pr-ledger HEAD
+echo "A note." >> README.md; git commit -q -am x
+expect fence-ledger-void-records-only fail 'FAIL.execution-ledger.*runs/lg/execution.tsv \(a void row goes in a pull request of run records only; this one also changes README.md\)$' -- guard/run fence origin/pr-ledger HEAD
+git switch -q -c pr/ledger-void-design origin/pr-ledger; printf 'x2\tt\tsetting\tfloat64\tw\te\nx3\tt\tvoid\tx2\tw\te\n' >> runs/lg/execution.tsv; git commit -q -am x
+expect fence-ledger-void-design fail 'FAIL.execution-ledger.*\(x3: x2 sets setting, a question card key, so it is design; a change to it needs a new card\)$' -- guard/run fence origin/pr-ledger HEAD
+git switch -q -c pr/ledger-void-later origin/pr-ledger; printf 'x2\tt\tvoid\tx3\tw\te\nx3\tt\tstage\tdone\tw\te\n' >> runs/lg/execution.tsv; git commit -q -am x
+expect fence-ledger-void-names-earlier fail 'FAIL.execution-ledger.*\(x2: void x3 names no earlier row\)$' -- guard/run fence origin/pr-ledger HEAD
+expect fence-local-template ok '^PASS	execution-ledger	runs/_template/execution.tsv$' -- guard/run fence --ledger runs/_template/execution.tsv
+expect fence-local-usage fail '^usage: guard/run fence --ledger' -- guard/run fence --ledger runs/nowhere/execution.tsv
+git switch -q pr/ledger-outcome; git reset -q --hard HEAD~2
+expect fence-local-outcome fail '^FAIL	execution-ledger	runs/lg/execution.tsv: x2: stage is not a ledger field' -- guard/run fence --ledger runs/lg/execution.tsv
+printf 'x3\tt\tvoid\tx2\tan outcome\tnone\n' >> runs/lg/execution.tsv
+expect fence-local-void ok '^PASS	execution-ledger	runs/lg/execution.tsv$' -- guard/run fence --ledger runs/lg/execution.tsv
+sed -i 's/skynet/login1/' runs/lg/execution.tsv
+expect fence-local-append-only fail '^FAIL	execution-ledger	runs/lg/execution.tsv: committed rows changed or removed; the ledger is append-only$' -- guard/run fence --ledger runs/lg/execution.tsv
+git checkout -q -- runs/lg/execution.tsv
 git switch -q -c pr/legacy-ledger origin/main; mkdir -p runs/ll; printf 'bad header\nx1\tt\tsetting\tx\tw\te\n' > runs/ll/execution.tsv; git add -A; git commit -q -m x
-expect fence-ledger-bad-header fail 'FAIL.execution-ledger.*runs/ll/execution.tsv$' -- guard/run fence origin/main HEAD
+expect fence-ledger-bad-header fail 'FAIL.execution-ledger.*runs/ll/execution.tsv \(the header is not: id ts field value why evidence\)$' -- guard/run fence origin/main HEAD
 git push -q origin pr/legacy-ledger:refs/heads/pr-legacy-ledger
 git switch -q -c pr/legacy-ledger-edit origin/pr-legacy-ledger; printf 'x2\tt\tgpus\t0\tw\te\n' >> runs/ll/execution.tsv; git commit -q -am x
 expect fence-legacy-ledger ok 'PASS.execution-ledger' -- guard/run fence origin/pr-legacy-ledger HEAD
@@ -962,6 +1042,10 @@ expect path-not-harness-copy fail - -- bash -c '"$1" fence origin/main HEAD | gr
 git init -q "$tmp/plain"
 expect path-refuses-unguarded fail 'runs inside a guarded project' -- bash -c 'cd "$1" && "$2" ripples runs/x' _ "$tmp/plain" "$guard"
 expect update-from-old ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt7"
+expect update-adds-section ok '^  runs/_template/report.md: ## Execution history$' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt9" --branch guard/sections
+expect update-section-placed ok '^## Deviations from the question card ## Execution history <one line per execution.tsv row, citing its id, .*> ## Spend $' -- \
+  bash -c 'awk "/^## Deviations/,/^## Spend/" "$1" | grep . | tr "\n" " "' _ "$tmp/wt9/runs/_template/report.md"
+expect update-section-keeps-edit ok '^Question: our wording$' -- grep '^Question:' "$tmp/wt9/runs/_template/report.md"
 expect update-reports-edit ok '^  guard/bin/fence.sh$' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt8" --branch guard/again
 expect update-merged-new-rule ok 'hypothesis-line' -- cat "$tmp/wt7/guard/bin/fence.sh"
 expect update-kept-site-edit ok '-le 200 \]' -- cat "$tmp/wt7/guard/bin/fence.sh"
@@ -1003,6 +1087,38 @@ expect contract-names-every-key ok - -- bash -c 'for k in $(cut -d: -f1 "$1/temp
 expect envelope-vocabulary-pinned ok - -- bash -c 'a=$(sed -n "s/^readonly ENVELOPE_FIELDS=//p" "$1/templates/guard/bin/launch.sh"); b=$(sed -n "s/^fields=//p" "$1/templates/guard/bin/fence.sh"); [ -n "$a" ] && [ "$a" = "$b" ]' _ "$here"
 expect contract-names-check-names ok - -- bash -c 'for k in gpu-hours host-supervision host-memory host-strays host-log-errors execution-within-envelope execution-ledger execution-history card-lineage; do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
 
+echo "== merge policy without rulesets"
+P=$tmp/policy
+git init -q --bare -b main "$P.git"; git clone -q "$P.git" "$P" 2>/dev/null
+git -C "$P" checkout -q -b main; echo "# p" > "$P/README.md"; git -C "$P" add -A; git -C "$P" commit -q -m init
+git -C "$P" push -q -u origin main; git -C "$P" remote set-head origin -a >/dev/null
+git -C "$P" remote set-url origin https://github.com/lab/policy.git
+free_plan='!Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)'
+policy_init() {  # policy_init <MOCK_GH_RULES> <args...>: guard init on lab/policy, fetched from the local bare repo
+  env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="url.$P.git.insteadOf" GIT_CONFIG_VALUE_0=https://github.com/lab/policy.git \
+    MOCK_GH_TOKEN=github_pat_agent MOCK_GH_RULES="$1" "$guard" init "$P" "${@:2}"
+}
+expect init-policy-rulesets ok - -- policy_init pull_request --worktree "$P.wt1"
+expect init-policy-rulesets-autonomous ok '^merge_policy: autonomous$' -- grep '^merge_policy:' "$P.wt1/guard/budget.card"
+expect init-policy-rulesets-quiet fail - -- bash -c 'policy_init pull_request --worktree "$1.wtx" --branch x | grep -q merge_policy' _ "$P"
+git -C "$P" worktree remove --force "$P.wtx" 2>/dev/null; git -C "$P" branch -q -D x 2>/dev/null
+git -C "$P" worktree remove --force "$P.wt1"; git -C "$P" branch -q -D guard/init
+policy_init "$free_plan" --worktree "$P.wt2" > "$tmp/policy.out" 2>&1
+expect init-policy-free-plan ok '^merge_policy: semi-manual$' -- grep '^merge_policy:' "$P.wt2/guard/budget.card"
+expect init-policy-free-plan-why ok '^merge_policy is semi-manual in guard/budget.card, because GitHub offers no rulesets on lab/policy \(Upgrade to GitHub Pro' -- cat "$tmp/policy.out"
+expect init-policy-unknown ok '^Could not tell whether GitHub offers rulesets on lab/policy \(API rate limit exceeded\), so merge_policy stays autonomous\.' -- \
+  policy_init '!API rate limit exceeded' --worktree "$P.wt3" --branch guard/unknown
+git -C "$P" worktree remove --force "$P.wt2"; git -C "$P" branch -q -D guard/init
+git -C "$P" worktree remove --force "$P.wt3"; git -C "$P" branch -q -D guard/unknown
+policy_init pull_request --worktree "$P.wt1" >/dev/null 2>&1
+git -C "$P.wt1" push -q "$P.git" HEAD:main; git -C "$P" worktree remove --force "$P.wt1"; git -C "$P" branch -q -D guard/init
+git -C "$P" fetch -q "$P.git" main:refs/remotes/origin/main
+policy_init "$free_plan" --update --worktree "$P.wt4" > "$tmp/policy.out" 2>&1
+expect update-policy-free-plan ok '^merge_policy: semi-manual$' -- grep '^merge_policy:' "$P.wt4/guard/budget.card"
+expect update-policy-free-plan-listed ok '^  guard/budget.card$' -- cat "$tmp/policy.out"
+expect update-policy-free-plan-why ok '^merge_policy is semi-manual in guard/budget.card, because GitHub offers no rulesets on lab/policy' -- cat "$tmp/policy.out"
+expect update-policy-one-line ok '^-merge_policy: autonomous\|\+merge_policy: semi-manual$' -- bash -c 'git -C "$1" diff HEAD~1 -- guard/budget.card | grep "^[-+][^-+]" | paste -sd"|"' _ "$P.wt4"
+
 echo "== doctor"
 D=$tmp/doc
 git init -q --bare -b main "$D.git"; git clone -q "$D.git" "$D" 2>/dev/null
@@ -1013,7 +1129,7 @@ git -C "$D" update-ref refs/remotes/origin/main guard/init
 git -C "$D" remote set-url origin https://github.com/lab/proj.git
 mkdir -p "$tmp/home/.agents/skills" "$tmp/home-bare"
 for s in "$here"/skills/*/; do ln -s "${s%/}" "$tmp/home/.agents/skills/"; done
-printf '#!/bin/sh\n' > "$tmp/doctor-reviewer"; chmod +x "$tmp/doctor-reviewer"
+printf '#!/bin/sh\necho ready\n' > "$tmp/doctor-reviewer"; chmod +x "$tmp/doctor-reviewer"
 mkdir -p "$tmp/xdg-doctor/guard"; echo "reviewer_cmd_proprietary: $tmp/doctor-reviewer -p" > "$tmp/xdg-doctor/guard/config"
 setup=(XDG_CONFIG_HOME="$tmp/xdg-doctor" MOCK_GH_TOKEN=github_pat_agent MOCK_GH_ADMIN=false MOCK_GH_RULES=$'pull_request\ncheck fence'
   "MOCK_GH_RUNS=success 2026-10-01T12:00:00Z https://github.com/lab/proj/actions/runs/1" MOCK_SACCTMGR_ASSOC='|cpu=600000')
@@ -1024,7 +1140,7 @@ expect doctor-remedy-links-readme fail '^      Replace each <placeholder> .*: ht
 git -C "$tmp/proj" show "$good:guard/budget.card" > "$D.wt/guard/budget.card"
 git -C "$D.wt" commit -q -am "chore(guard): set budget"; git -C "$D" update-ref refs/remotes/origin/main guard/init
 expect doctor-clean-card ok '^pass  guard/budget.card on origin/main has no placeholders$' -- doctor
-expect doctor-all-pass ok '^14 passed, 0 failed, 0 cannot check from here$' -- doctor
+expect doctor-all-pass ok '^15 passed, 0 failed, 0 cannot check from here$' -- doctor
 expect doctor-version ok '^pass  guard schema [0-9]+ \(release .*\) against harness schema [0-9]+ .*: current$' -- doctor
 expect doctor-version-once ok - -- bash -c '! grep -E "\(release ([^ )]+)\1\)" <<<"$1"' _ "$(doctor)"
 expect doctor-workflow ok '^pass  .github/workflows/guard-fence.yml on origin/main defines guard-fence / fence$' -- doctor
@@ -1033,7 +1149,7 @@ expect onboard-names-real-doctor-lines ok - -- bash -c 'grep -o "\`pass  [^\`]*\
   while IFS= read -r line; do grep -qE "^$line" "$2" || { echo "not in doctor output: $line"; exit 1; }; done' _ "$here/skills/guard-onboard/SKILL.md" "$tmp/doctor-out"
 expect doctor-no-colour-in-pipe fail - -- grep -q $'\e' "$tmp/doctor-out"
 expect doctor-no-gh ok '^cannot check from here  whether guard-fence / fence has run on GitHub: gh is not on PATH$' -- doctor PATH="$(path_without gh)"
-expect doctor-cannot-is-not-pass ok '^12 passed, 0 failed, 2 cannot check from here$' -- doctor PATH="$(path_without gh)"
+expect doctor-cannot-is-not-pass ok '^13 passed, 0 failed, 2 cannot check from here$' -- doctor PATH="$(path_without gh)"
 expect doctor-gh-logged-out ok '^cannot check from here  whether main has an active ruleset requiring guard-fence / fence: gh is not logged in$' -- doctor MOCK_GH_TOKEN=
 expect doctor-not-github ok '^cannot check from here  .*: origin is not a github.com remote$' -- \
   doctor GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0="$D.git"
@@ -1043,6 +1159,10 @@ expect doctor-ruleset-no-check fail '^FAIL  main has no active rule requiring gu
 expect doctor-ruleset-none fail '^FAIL  main has no active rule requiring a pull request and guard-fence / fence$' -- doctor MOCK_GH_RULES=
 expect doctor-ruleset-free-plan fail '^FAIL  GitHub offers no rulesets on lab/proj: Upgrade to GitHub Pro' -- \
   doctor MOCK_GH_RULES='!Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)'
+expect doctor-policy-free-plan fail '^FAIL  merge_policy is autonomous .*, but GitHub offers no rulesets on lab/proj, so guard merge refuses every merge$' -- \
+  doctor MOCK_GH_RULES="$free_plan"
+expect doctor-policy-free-plan-fix fail '^      Set merge_policy: semi-manual in guard/budget.card in a pull request a person merges, or give lab/proj rulesets: ' -- \
+  doctor MOCK_GH_RULES="$free_plan"
 expect doctor-fence-never-ran fail '^FAIL  guard-fence / fence has never completed a run on GitHub$' -- doctor MOCK_GH_RUNS=
 expect doctor-fence-failure-ran ok '^pass  guard-fence / fence has run on GitHub \(last completed run: failure, ' -- doctor "MOCK_GH_RUNS=failure 2026-10-01T12:00:00Z https://x/1"
 expect doctor-fence-broken fail '^FAIL  guard-fence / fence last completed run ended startup_failure' -- doctor "MOCK_GH_RUNS=startup_failure 2026-10-01T12:00:00Z https://x/1"
@@ -1074,9 +1194,32 @@ doctor >/dev/null; doctor MOCK_GH_TOKEN= SSH_AUTH_SOCK=/x >/dev/null; doctor PAT
 expect doctor-writes-nothing ok '^$' -- find "$D" "$D.wt" "$tmp/home" -newer "$tmp/doctor-before"
 expect doctor-status-unchanged ok '^$' -- bash -c 'git -C "$1" status --porcelain | diff - "$2"' _ "$D" "$tmp/doctor-status"
 expect doctor-reviewer ok "^pass  reviewer is proprietary: $tmp/doctor-reviewer -p, and $tmp/doctor-reviewer is an executable file$" -- doctor
+expect doctor-reviewer-answers ok "^pass  the reviewer $tmp/doctor-reviewer starts and answers on skynet$" -- doctor
 xdg() {  # xdg <name> <config line>...: prints a fresh XDG_CONFIG_HOME whose guard config holds the lines
   mkdir -p "$tmp/xdg-$1/guard"; printf '%s\n' "${@:2}" > "$tmp/xdg-$1/guard/config"; echo "$tmp/xdg-$1"
 }
+mkdir -p "$tmp/probe"
+stand_in() {  # stand_in <name> <script body>: prints an XDG_CONFIG_HOME whose reviewer is a stand-in running the body
+  printf '#!/bin/bash\n%s\n' "$2" > "$tmp/probe/$1"; chmod +x "$tmp/probe/$1"; xdg "probe-$1" "reviewer_cmd_proprietary: $tmp/probe/$1 -p"
+}
+expect doctor-probe-login fail '^FAIL  no reviewer answers on skynet: login is not logged in \(Error: Authentication required\)$' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in login 'echo "Error: Authentication required" >&2; exit 1')"
+expect doctor-probe-login-fix fail '^      Log in to login\. A CLI on a host without internet access can say this too, so check that first$' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in login 'echo "Error: Authentication required" >&2; exit 1')"
+expect doctor-probe-memory fail '^FAIL  no reviewer answers on skynet: oom ran out of memory \(RangeError: WebAssembly\.instantiate\(\): Out of memory\) under a soft ulimit -v of ' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in oom 'printf "/opt/a.js:2\n  ^\n\nRangeError: WebAssembly.instantiate(): Out of memory\n\nNode.js v24.5.0\n" >&2; exit 1')"
+expect doctor-probe-memory-fix fail '^      Raise the soft limit in the shell that runs guard review and guard ship, with ulimit -v unlimited; the hard limit here is ' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in oom 'echo "RangeError: Out of memory" >&2; exit 1')"
+expect doctor-probe-network fail '^FAIL  no reviewer answers on skynet: offline cannot reach its service \(Error: getaddrinfo ENOTFOUND api\.example\.com\)$' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in offline 'echo "Error: getaddrinfo ENOTFOUND api.example.com" >&2; exit 1')"
+expect doctor-probe-timeout fail '^FAIL  no reviewer answers on skynet: slow did not answer within 1 seconds$' -- \
+  doctor HPC_REVIEWER_PROBE_SECONDS=1 XDG_CONFIG_HOME="$(stand_in slow 'sleep 10')"
+expect doctor-probe-silent fail '^FAIL  no reviewer answers on skynet: silent exited 0 with an empty reply$' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in silent 'true')"
+mkdir -p "$tmp/probe-chain"; printf '#!/bin/bash\n[ "$*" = "auth status" ] && exit 0; echo "Failed to authenticate. API Error: 401" >&2; exit 1\n' > "$tmp/probe-chain/claude"
+chmod +x "$tmp/probe-chain/claude"; ln -sf "$tmp/doctor-reviewer" "$tmp/probe-chain/cursor-agent"
+expect doctor-probe-fallback ok '^pass  the reviewer cursor-agent starts and answers on skynet; claude is not logged in \(Failed to authenticate\. API Error: 401\); so reviews fall back to it$' -- \
+  doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/probe-chain:$PATH"
 mkdir -p "$tmp/claude-bin"; ln -s "$tmp/doctor-reviewer" "$tmp/claude-bin/claude"
 expect doctor-reviewer-default ok '^pass  reviewer is proprietary: claude -p --permission-mode acceptEdits --strict-mcp-config --setting-sources project --disable-slash-commands --tools=Bash,Read,Edit,Grep,Glob --allowedTools=Bash, and claude is on PATH$' -- \
   doctor XDG_CONFIG_HOME="$(xdg empty)" PATH="$tmp/claude-bin:$PATH"
@@ -1086,7 +1229,7 @@ expect doctor-reviewer-missing-hint fail "^      Install Claude Code or Cursor's
 mkdir -p "$tmp/cursor-bin" "$tmp/claude-auth"; ln -s "$tmp/doctor-reviewer" "$tmp/cursor-bin/cursor-agent"
 cat > "$tmp/claude-auth/claude" <<'FAKE'
 #!/bin/sh
-[ "$*" = "auth status" ] && printf '{\n  "loggedIn": %s,\n  "authMethod": "none"\n}\n' "$MOCK_CLAUDE_LOGGED_IN"
+if [ "$*" = "auth status" ]; then printf '{\n  "loggedIn": %s,\n  "authMethod": "none"\n}\n' "$MOCK_CLAUDE_LOGGED_IN"; else echo ready; fi
 FAKE
 chmod +x "$tmp/claude-auth/claude"
 expect doctor-reviewer-chain ok '^pass  reviewer is proprietary: claude, then cursor-agent, and claude is on PATH$' -- \
@@ -1732,7 +1875,7 @@ expect atlas-verdict-stop ok '<p class="verdict-line">Stop spending on 4 runs: e
 expect atlas-no-jobs-unchecked ok '^UNCHECKED$' -- python3 -c 'import json, sys
 r = next(r for r in json.load(open(sys.argv[1]))["runs"] if r["id"] == "hand-run")
 print(*{l["status"] for l in r["ripples"] if l["check"] in ("job-states", "walltime-headroom", "retries", "handled-failures")})' "$tmp/atlas/atlas.json"
-expect atlas-no-jobs-prose ok '</svg>jobs: unchecked</span> <span class="detail">sacct lists no job named hand-run on account gom since 2026-09-01' -- cat "$tmp/atlas/atlas.html"
+expect atlas-no-jobs-prose ok '</svg>jobs: unchecked</span> <span class="detail">no jobs yet: sacct lists [0-9]+ job\(s\) on account gom since 2026-09-01 from this host, none named hand-run' -- cat "$tmp/atlas/atlas.html"
 # The skynet reproduction: sacct on PATH that lists nothing. No run may show a job or budget pass.
 expect atlas-off-cluster ok 'Spend source</dt><dd>none: the budget ripple could not read sacct on this host</dd>' -- bash -c '. "$1"; MOCK_SACCT_ROWS=/dev/null MOCK_SACCT_CPUSECONDS= "$2" atlas --out "$3/off.html" >/dev/null && cat "$3/off.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-off-cluster-no-pass ok - -- bash -c '! grep -oE "aria-label=\"(job-states|walltime-headroom|retries|handled-failures|budget): pass\"" "$1"' _ "$tmp/atlas/off.html"

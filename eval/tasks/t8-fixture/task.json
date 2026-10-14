@@ -12,7 +12,7 @@
     "budget": {
       "account": "gom", "stop_date": "2099-01-01", "max_core_hours": 100, "verification_reserve_core_hours": 10,
       "cores_per_node": 4, "max_nodes_per_job": 1, "max_walltime_minutes": 30, "max_concurrent_jobs": 4,
-      "quota_pct_cmd": "echo 12%", "slurm_bin": "/opt/site/bin"
+      "quota_pct_cmd": "echo 12%", "slurm_bin": "/opt/site/bin", "checks": "waived the evaluation scores every episode with its own scorer"
     },
     "watch": ["tests/", "docs/spec.md"]
   },

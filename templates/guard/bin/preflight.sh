@@ -109,6 +109,10 @@ if [ $explore = 0 ]; then
   git ls-files --error-unmatch "$q" >/dev/null 2>&1 || fail "$q is not committed; commit it first"
   git diff --quiet HEAD -- "$q" || fail "$q has uncommitted edits; revert them with git checkout HEAD -- $q, or start a new run id for a new design"
   [ "$(git log --format=%H -- "$q" | wc -l)" -le 1 ] || fail "$q was edited after its first commit; start a new run id instead"
+  # card_on_main: yes means a person has read the card: only a person merges a new card to the protected branch.
+  if [ "$(get card_on_main)" = yes ] && [ "$(git rev-parse -q --verify "$base:$q" || true)" != "$(git rev-parse "HEAD:$q")" ]; then
+    fail "card_on_main is yes in guard/budget.card, and $q is not on $base as committed here; open a pull request with the card, wait for a person to merge it, then submit"
+  fi
 fi
 
 if [ "${HPC_SPEND_RESERVE:-0}" != 1 ]; then
@@ -149,23 +153,43 @@ fi
 [ "$nodes" -le "$max_nodes" ] || fail "--nodes=$nodes exceeds max_nodes_per_job=$max_nodes; ask for fewer"
 [ "$wmin" -le "$max_wall" ] || fail "--time=$wall ($wmin min) exceeds max_walltime_minutes=$max_wall; ask for less, and checkpoint to resume"
 
-spent=$("$sbin/sacct" -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW | awk '{s+=$1} END{printf "%d", s/3600}')
-queued=$("$sbin/squeue" -A "$acct" -u "$USER" -h -t PENDING -o "%C %l" | while read -r c l; do echo "$c $(to_min "$l")"; done \
-  | awk '{s+=$1*$2} END{printf "%d", s/60}')
+# slurm <sacct|squeue> <args...>: sets got to the command's output. A count it cannot read is not zero, so a failure
+# stops preflight with the command's first error line.
+slurm() {
+  local err rc=0 line what=queue
+  [ "$1" != sacct ] || what=accounting
+  err=$(mktemp); got=$("$sbin/$1" "${@:2}" 2>"$err") || rc=$?
+  line=$(grep -m 1 -v '^[[:space:]]*$' "$err" || true)
+  [ $rc -eq 0 ] || { rm -f "$err"; fail "$what unavailable ($1 failed: ${line:-exit $rc}); not submitting"; }
+  cat "$err" >&2; rm -f "$err"
+}
+slurm sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW
+spent=$(awk '{s+=$1} END{printf "%d", s/3600}' <<<"$got")
+slurm squeue -A "$acct" -u "$USER" -h -t PENDING -o "%C %l"
+queued=$(while read -r c l; do [ -z "$c" ] || echo "$c $(to_min "$l")"; done <<<"$got" | awk '{s+=$1*$2} END{printf "%d", s/60}')
 proj=$(( nodes * cpn * wmin * n / 60 ))
 if [ "${HPC_SPEND_RESERVE:-0}" = 1 ]; then held=0; else held=$reserve; fi
 avail=$(( max_ch - held ))
 [ $(( spent + queued + proj )) -le "$avail" ] \
   || fail "spent $spent + queued $queued + this job $proj core-h exceeds $avail available (max $max_ch, reserve held $held); ask for less, wait for queued jobs, or a human raises max_core_hours"
 qget() { [ $explore = 1 ] || awk -F': *' -v k="$1" '$1==k && $2 !~ /</ {print $2; exit}' <<<"$(git show "HEAD:$run_dir/question.card")"; }
+# A full run needs domain checks that a person merged, so the implementer cannot grade its own results. The question
+# card waives them for one run and the budget card for the project, each with `checks: waived <reason>`.
+if [ $explore = 0 ]; then
+  waiver=$(qget checks); [ -n "$waiver" ] || waiver=$(get checks)
+  [[ $waiver =~ ^waived[[:space:]]+[^[:space:]\<] ]] || [ -n "$(git ls-tree -r "$base" -- "$run_dir/checks/" | awk '$1 == "100755"')" ] \
+    || fail "no executable domain check in $run_dir/checks/ on $base; a verifier writes them in a pull request that changes only $run_dir/checks/, a person merges it, then submit; or the question card says checks: waived <reason>"
+fi
 deadline=$(qget deadline)
 [ -z "$deadline" ] || [[ ! $(date +%F) > $deadline ]] || fail "past deadline $deadline in $run_dir/question.card; a human decides whether a new run continues it"
 run_max=$(qget budget_core_hours); run_max=${run_max:-$(get default_run_core_hours)}
 if [[ $run_max =~ ^[0-9]+$ ]] && [ "$run_max" -gt 0 ]; then
-  run_spent=$("$sbin/sacct" -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobName,CPUTimeRAW | awk -F'|' -v r="$run_id" '$1==r {s+=$2} END{printf "%d", s/3600}')
+  slurm sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobName,CPUTimeRAW
+  run_spent=$(awk -F'|' -v r="$run_id" '$1==r {s+=$2} END{printf "%d", s/3600}' <<<"$got")
   [ $(( run_spent + proj )) -le "$run_max" ] || fail "this run spent $run_spent + this job $proj core-h exceeds budget_core_hours=$run_max; a human decides whether a new run continues it"
 fi
-live=$("$sbin/squeue" -A "$acct" -u "$USER" -h | wc -l)
+slurm squeue -A "$acct" -u "$USER" -h
+live=$(grep -c . <<<"$got" || true)
 [ $(( live + n )) -le "$max_conc" ] || fail "$live live + $n new jobs exceeds max_concurrent_jobs=$max_conc; wait for running jobs to finish"
 # The checked time, nodes and array follow the caller's options, so sbatch takes them over any other form or variable,
 # and --ignore-pbs keeps sbatch from reading an array or a walltime from #PBS lines, which preflight does not read.

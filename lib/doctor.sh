@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # usage: guard doctor [repo]
 # Read-only checklist of the Quickstart setup, the reviewer, the merge policy and the needs-you queue. Writes nothing;
-# calls gh api only with GET.
+# calls gh api only with GET. Starts the reviewer once with a one-word task, in an empty temporary directory, because a
+# reviewer that cannot run on this host would otherwise surface only in guard review; HPC_REVIEWER_PROBE_SECONDS caps
+# the wait (default 120).
 # Exit 1 when any item fails, else 0. An item this host cannot check is counted apart and never as a pass.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -101,7 +103,7 @@ check_ruleset() {
     "Run guard doctor where gh can read $slug, or open Settings, Rules, Rulesets: ${enforce}4-protect-the-default-branch"; return; fi
   if ! missing=$(ruleset_missing "$slug" "$branch" 1); then
     case $missing in
-      *"Upgrade to GitHub Pro"*) result fail "GitHub offers no rulesets on $slug: $(why "$missing")" \
+      *"Upgrade to GitHub Pro"*) no_rulesets=1; result fail "GitHub offers no rulesets on $slug: $(why "$missing")" \
         "Make the repository public, or move it to a paid plan or an organization; without that, nothing protects $branch: ${enforce}4-protect-the-default-branch" ;;
       *) result cannot "whether $branch has an active ruleset requiring guard-fence / fence: $(why "$missing")" \
         "Open Settings, Rules, Rulesets on $slug: ${enforce}4-protect-the-default-branch" ;;
@@ -171,9 +173,63 @@ check_reviewer() {
   else result fail "$item, and claude is not signed in" "Run claude auth login"; fi
 }
 
+# first_match <pattern> <text>: prints the text's first line that matches the pattern, ignoring case, trimmed.
+first_match() { grep -m 1 -iE -- "$1" <<<"$2" | sed 's/^[[:space:]]*//' | cut -c 1-160; }
+
+# probe_why <exit status> <output> <command>: sets why and fix for a reviewer command that did not answer.
+probe_why() {
+  local rc=$1 out=$2 name=${3%% *} line
+  name=${name##*/}
+  if [ "$rc" = 124 ]; then
+    why="$name did not answer within $probe_seconds seconds"
+    fix="Check that this host reaches the internet; where a site sends commands to compute nodes, run guard review and guard ship on a login node"
+  elif line=$(first_match 'out of memory|cannot allocate|allocation failed|heap limit|ENOMEM' "$out") && [ -n "$line" ]; then
+    why="$name ran out of memory ($line) under a soft ulimit -v of $(ulimit -Sv)"
+    fix="Raise the soft limit in the shell that runs guard review and guard ship, with ulimit -v unlimited; the hard limit here is $(ulimit -Hv)"
+  elif line=$(first_match 'ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|getaddrinfo|network is unreachable|could not resolve|fetch failed|unable to connect|connection (refused|reset|timed out)' "$out") && [ -n "$line" ]; then
+    why="$name cannot reach its service ($line)"
+    fix="Run guard review and guard ship on a host with internet access, such as a login node"
+  elif line=$(first_match 'authenticat|not logged in|log ?in|signed out|not signed in|unauthori|401|api key|credential' "$out") && [ -n "$line" ]; then
+    why="$name is not logged in ($line)"
+    case $name in claude) fix="Run claude auth login" ;; cursor-agent) fix="Run cursor-agent login" ;; *) fix="Log in to $name" ;; esac
+    fix="$fix. A CLI on a host without internet access can say this too, so check that first"
+  else
+    line=$(first_match '[^[:space:]]' "$out" || true)
+    if [ "$rc" = 0 ]; then why="$name exited 0 with an empty reply"; else why="$name exited $rc${line:+ ($line)}"; fi
+    fix="Run it by hand in an empty directory to see why: $3 'Reply with the one word: ready'"
+  fi
+}
+
+# check_reviewer_answers: starts each reviewer command once, as guard review would on this host, in an empty directory
+# with a one-word task, and passes on the first that answers.
+check_reviewer_answers() {
+  local c dir out rc cant=() why fix first_fix=""
+  probe_seconds=${HPC_REVIEWER_PROBE_SECONDS:-120}
+  resolve_reviewer 2>/dev/null || return 0
+  for c in "${reviewer_cmds[@]}"; do
+    command -v "$(sed "s|^~|$HOME|" <<<"${c%% *}")" >/dev/null || continue
+    dir=$(mktemp -d); rc=0
+    out=$(cd "$dir" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK timeout "$probe_seconds" \
+      bash -c "$c \"\$@\"" reviewer "Reply with the one word: ready" < /dev/null 2>&1) || rc=$?
+    rm -rf "$dir"
+    if [ $rc -eq 0 ] && [[ $out =~ [^[:space:]] ]]; then
+      result pass "the reviewer ${c%% *} starts and answers on $(hostname -s)${cant[0]:+; $(printf '%s; ' "${cant[@]}")so reviews fall back to it}"
+      return
+    fi
+    probe_why "$rc" "$out" "$c"; cant+=("$why"); first_fix=${first_fix:-$fix}
+  done
+  [ ${#cant[@]} -gt 0 ] || return 0
+  result fail "no reviewer answers on $(hostname -s): $(printf '%s; ' "${cant[@]}" | sed 's/; $//')" "$first_fix"
+}
+
 check_merge_policy() {
+  local fix="guard config set merge_policy semi-manual"
   read_merge_policy "$repo" "$base" "$p_guarded"
-  if [ "$merge_policy" = autonomous ] && [ "$p_guarded" = 1 ]; then
+  [ "$p_guarded" = 0 ] || fix="Set merge_policy: semi-manual in guard/budget.card in a pull request a person merges"
+  if [ "$merge_policy" = autonomous ] && [ "$no_rulesets" = 1 ]; then
+    result fail "merge_policy is autonomous $merge_policy_where, but GitHub offers no rulesets on $slug, so guard merge refuses every merge" \
+      "$fix, or give $slug rulesets: ${enforce}4-protect-the-default-branch"
+  elif [ "$merge_policy" = autonomous ] && [ "$p_guarded" = 1 ]; then
     result pass "merge_policy is autonomous $merge_policy_where, so guard merge also needs the ruleset and non-admin login items above to pass"
   elif [ "$merge_policy" = autonomous ]; then
     result pass "merge_policy is autonomous $merge_policy_where, so guard merge also needs the non-admin login item above and a ruleset requiring a pull request"
@@ -205,7 +261,7 @@ check_needs_you() {
 
 project_version "$repo"; base=$p_base; branch=${base#origin/}
 slug=$(github_slug "$repo")
-gh_why=""; admin=""
+gh_why=""; admin=""; no_rulesets=0
 if [ -z "$slug" ]; then gh_why="origin is not a github.com remote"
 elif ! command -v gh >/dev/null; then gh_why="gh is not on PATH"
 elif admin=$(gh_admin "$slug" "$branch"); then :
@@ -230,6 +286,7 @@ check_ruleset
 check_agent_env
 [ $p_guarded = 1 ] && check_account
 check_reviewer
+check_reviewer_answers
 check_merge_policy
 check_hook
 check_needs_you
