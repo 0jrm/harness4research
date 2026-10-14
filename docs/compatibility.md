@@ -34,7 +34,7 @@ The question card holds the design and stays frozen. Its optional keys `budget_g
 
 ## Merge policy
 
-`merge_policy` in `guard/budget.card` decides whether `guard merge` may merge a pull request without a human. `autonomous`, the template value and the default when the key is missing, lets it merge once its other gates pass. Any other value, such as `semi-manual`, makes it refuse and queue the merge for a human. `guard merge` reads the key from the pull request's base branch, so an agent cannot change it on its own branch. A repository without a guard reads `merge_policy` from the user config instead (`guard config`). No other script reads the key, and `guard init --update` inserts it.
+`merge_policy` in `guard/budget.card` decides whether `guard merge` may merge a pull request without a human. `autonomous`, the template value and the default when the key is missing, lets it merge once its other gates pass. Any other value, such as `semi-manual`, makes it refuse and queue the merge for a human. `guard merge` reads the key from the pull request's base branch, so an agent cannot change it on its own branch. A repository without a guard reads `merge_policy` from the user config instead (`guard config`). No other script reads the key, and `guard init --update` inserts it. `guard merge` refuses every merge without a ruleset, so when GitHub offers the repository no rulesets, as for a private repository on the free plan, `guard init` and `guard init --update` set `merge_policy: semi-manual` and say why, and `guard doctor` fails while the key stays `autonomous` there.
 
 ## Card lineage
 
