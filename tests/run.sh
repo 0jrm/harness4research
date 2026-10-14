@@ -187,6 +187,11 @@ else expect preflight-slurm-bin-default fail '^PREFLIGHT FAIL: no squeue and sac
 git reset -q --hard HEAD~2
 expect preflight-queued-m-s ok 'PREFLIGHT OK: .* queued=10 ' -- env MOCK_SQUEUE_PENDING='128 5:00' guard/run preflight "$R" job.sh
 expect preflight-queued-unlimited ok 'PREFLIGHT OK: .* queued=0 ' -- env MOCK_SQUEUE_PENDING='128 UNLIMITED' guard/run preflight "$R" job.sh
+expect preflight-accounting-down fail '^PREFLIGHT FAIL: accounting unavailable \(sacct failed: sacct: error: Problem talking to the database: Connection refused\); not submitting$' -- \
+  env MOCK_SACCT_EXIT=1 HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
+expect preflight-queue-down fail '^PREFLIGHT FAIL: queue unavailable \(squeue failed: slurm_load_jobs error: Unable to contact slurm controller \(connect failure\)\); not submitting$' -- \
+  env MOCK_SQUEUE_EXIT=1 HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
+expect preflight-no-queued-jobs ok 'PREFLIGHT OK: .* queued=0 ' -- env MOCK_SQUEUE_PENDING= guard/run preflight "$R" job.sh
 expect preflight-walltime fail 'exceeds max_walltime' -- guard/run preflight "$R" job.sh --time=1-00:00:00
 expect preflight-budget fail 'exceeds 8500 available' -- guard/run preflight "$R" job.sh --nodes=4 --time=12:00:00 --array=0-9%2
 expect preflight-reserve-open ok 'available=10000' -- env HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
