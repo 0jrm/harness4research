@@ -187,6 +187,11 @@ else expect preflight-slurm-bin-default fail '^PREFLIGHT FAIL: no squeue and sac
 git reset -q --hard HEAD~2
 expect preflight-queued-m-s ok 'PREFLIGHT OK: .* queued=10 ' -- env MOCK_SQUEUE_PENDING='128 5:00' guard/run preflight "$R" job.sh
 expect preflight-queued-unlimited ok 'PREFLIGHT OK: .* queued=0 ' -- env MOCK_SQUEUE_PENDING='128 UNLIMITED' guard/run preflight "$R" job.sh
+expect preflight-accounting-down fail '^PREFLIGHT FAIL: accounting unavailable \(sacct failed: sacct: error: Problem talking to the database: Connection refused\); not submitting$' -- \
+  env MOCK_SACCT_EXIT=1 HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
+expect preflight-queue-down fail '^PREFLIGHT FAIL: queue unavailable \(squeue failed: slurm_load_jobs error: Unable to contact slurm controller \(connect failure\)\); not submitting$' -- \
+  env MOCK_SQUEUE_EXIT=1 HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
+expect preflight-no-queued-jobs ok 'PREFLIGHT OK: .* queued=0 ' -- env MOCK_SQUEUE_PENDING= guard/run preflight "$R" job.sh
 expect preflight-walltime fail 'exceeds max_walltime' -- guard/run preflight "$R" job.sh --time=1-00:00:00
 expect preflight-budget fail 'exceeds 8500 available' -- guard/run preflight "$R" job.sh --nodes=4 --time=12:00:00 --array=0-9%2
 expect preflight-reserve-open ok 'available=10000' -- env HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
@@ -278,14 +283,20 @@ expect ripples-tty-unchecked ok '^UNCHECKED  budget {21}sacct not found on PATH 
 # Off the cluster sacct can exist yet list nothing and exit 0, and the quota path can be missing: no verdict, so no PASS.
 R4=runs/2026-10-05-no-jobs; mkdir -p "$R4"; cp runs/_template/question.card "$R4/question.card"; git add -A; git commit -q -m "run: a run with no jobs"
 nopass='^PASS	(job-states|walltime-headroom|retries|handled-failures|budget|quota)	'
-expect ripples-no-jobs ok '^UNCHECKED	job-states	sacct lists no job named 2026-10-05-no-jobs on account gom since 2026-09-01 from this host, so there is nothing to judge; if the run has submitted jobs, run ripples on the cluster login node$' -- guard/run ripples "$R4"
-expect ripples-no-jobs-no-pass ok - -- bash -c 'out=$(guard/run ripples "$1"); [ "$(grep -cE "^UNCHECKED	(job-states|walltime-headroom|retries|handled-failures)	sacct lists no job named" <<<"$out")" = 4 ]' _ "$R4"
+expect ripples-no-jobs-yet ok '^UNCHECKED	job-states	no jobs yet: sacct lists 1 job\(s\) on account gom since 2026-09-01 from this host, none named 2026-10-05-no-jobs, so there is nothing to judge$' -- guard/run ripples "$R4"
+expect ripples-no-jobs-yet-no-pass ok - -- bash -c 'out=$(guard/run ripples "$1"); [ "$(grep -cE "^UNCHECKED	(job-states|walltime-headroom|retries|handled-failures)	no jobs yet: " <<<"$out")" = 4 ]' _ "$R4"
+expect ripples-no-account-rows ok '^UNCHECKED	job-states	sacct lists no job at all on account gom since 2026-09-01 from this host, so it may not see this cluster; if the run has submitted jobs, run ripples on the cluster login node$' -- \
+  env MOCK_SACCT_ROWS=/dev/null guard/run ripples "$R4"
+expect ripples-no-account-rows-no-pass ok - -- bash -c 'out=$(MOCK_SACCT_ROWS=/dev/null guard/run ripples "$1"); [ "$(grep -cE "^UNCHECKED	(job-states|walltime-headroom|retries|handled-failures)	sacct lists no job at all" <<<"$out")" = 4 ]' _ "$R4"
 expect ripples-no-account-jobs ok '^UNCHECKED	budget	sacct lists no job on account gom since 2026-09-01 from this host, so spend is unknown here; run ripples on the cluster login node to check$' -- env MOCK_SACCT_CPUSECONDS= guard/run ripples "$R4"
-expect ripples-sacct-fails ok 'UNCHECKED	job-states	sacct failed on this host; run ripples on the cluster login node to check .*UNCHECKED	budget	sacct failed on this host' -- \
+expect ripples-sacct-db-down ok 'UNCHECKED	job-states	sacct cannot reach the Slurm accounting database \(sacct: error: Problem talking to the database: Connection refused\); it is down or unreachable for the cluster, not only this host, so run ripples again later .*UNCHECKED	budget	sacct cannot reach the Slurm accounting database' -- \
   env MOCK_SACCT_EXIT=1 bash -c 'guard/run ripples "$1" 2>/dev/null | tr "\n" " "' _ "$R"
+expect ripples-sacct-db-down-no-login-advice ok - -- bash -c '! MOCK_SACCT_EXIT=1 guard/run ripples "$1" 2>&1 | grep "cluster login node"' _ "$R"
+expect ripples-sacct-fails ok 'UNCHECKED	job-states	sacct failed on this host \(sacct: error: Invalid user id: 1000\); run ripples on the cluster login node to check .*UNCHECKED	budget	sacct failed on this host \(sacct: error: Invalid user id' -- \
+  env MOCK_SACCT_EXIT=1 MOCK_SACCT_ERR='sacct: error: Invalid user id: 1000' bash -c 'guard/run ripples "$1" 2>/dev/null | tr "\n" " "' _ "$R"
 sed -i "s|^quota_pct_cmd: .*|quota_pct_cmd: df --output=pcent $tmp/no-such-mount \| tail -1 \| tr -dc 0-9|" guard/budget.card; git commit -q -am "quota on a path this host lacks"
 expect ripples-quota-path-missing ok "^UNCHECKED	quota	quota_pct_cmd printed no number on this host \(df: .*No such file or directory\); run ripples where its path exists, or a human fixes quota_pct_cmd in guard/budget.card$" -- env HPC_GUARD_REF=HEAD guard/run ripples "$R"
-expect ripples-off-cluster-no-pass ok - -- bash -c 'out=$(HPC_GUARD_REF=HEAD MOCK_SACCT_CPUSECONDS= guard/run ripples "$1") && ! grep -E "$2" <<<"$out" && [ "$(grep -c ^UNCHECKED <<<"$out")" -ge 6 ]' _ "$R4" "$nopass"
+expect ripples-off-cluster-no-pass ok - -- bash -c 'out=$(HPC_GUARD_REF=HEAD MOCK_SACCT_CPUSECONDS= MOCK_SACCT_ROWS=/dev/null guard/run ripples "$1") && ! grep -E "$2" <<<"$out" && [ "$(grep -c ^UNCHECKED <<<"$out")" -ge 6 ]' _ "$R4" "$nopass"
 git reset -q --hard HEAD~2
 pre=$(git rev-parse HEAD); mkdir -p "$R/incidents"
 printf '100|2026-09-29-demo|TIMEOUT|14400|240\n101|2026-09-29-demo|COMPLETED|100|240\n102|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
@@ -1770,7 +1781,7 @@ expect atlas-verdict-stop ok '<p class="verdict-line">Stop spending on 4 runs: e
 expect atlas-no-jobs-unchecked ok '^UNCHECKED$' -- python3 -c 'import json, sys
 r = next(r for r in json.load(open(sys.argv[1]))["runs"] if r["id"] == "hand-run")
 print(*{l["status"] for l in r["ripples"] if l["check"] in ("job-states", "walltime-headroom", "retries", "handled-failures")})' "$tmp/atlas/atlas.json"
-expect atlas-no-jobs-prose ok '</svg>jobs: unchecked</span> <span class="detail">sacct lists no job named hand-run on account gom since 2026-09-01' -- cat "$tmp/atlas/atlas.html"
+expect atlas-no-jobs-prose ok '</svg>jobs: unchecked</span> <span class="detail">no jobs yet: sacct lists [0-9]+ job\(s\) on account gom since 2026-09-01 from this host, none named hand-run' -- cat "$tmp/atlas/atlas.html"
 # The skynet reproduction: sacct on PATH that lists nothing. No run may show a job or budget pass.
 expect atlas-off-cluster ok 'Spend source</dt><dd>none: the budget ripple could not read sacct on this host</dd>' -- bash -c '. "$1"; MOCK_SACCT_ROWS=/dev/null MOCK_SACCT_CPUSECONDS= "$2" atlas --out "$3/off.html" >/dev/null && cat "$3/off.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
 expect atlas-off-cluster-no-pass ok - -- bash -c '! grep -oE "aria-label=\"(job-states|walltime-headroom|retries|handled-failures|budget): pass\"" "$1"' _ "$tmp/atlas/off.html"

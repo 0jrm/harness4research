@@ -149,9 +149,20 @@ fi
 [ "$nodes" -le "$max_nodes" ] || fail "--nodes=$nodes exceeds max_nodes_per_job=$max_nodes; ask for fewer"
 [ "$wmin" -le "$max_wall" ] || fail "--time=$wall ($wmin min) exceeds max_walltime_minutes=$max_wall; ask for less, and checkpoint to resume"
 
-spent=$("$sbin/sacct" -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW | awk '{s+=$1} END{printf "%d", s/3600}')
-queued=$("$sbin/squeue" -A "$acct" -u "$USER" -h -t PENDING -o "%C %l" | while read -r c l; do echo "$c $(to_min "$l")"; done \
-  | awk '{s+=$1*$2} END{printf "%d", s/60}')
+# slurm <sacct|squeue> <args...>: sets got to the command's output. A count it cannot read is not zero, so a failure
+# stops preflight with the command's first error line.
+slurm() {
+  local err rc=0 line what=queue
+  [ "$1" != sacct ] || what=accounting
+  err=$(mktemp); got=$("$sbin/$1" "${@:2}" 2>"$err") || rc=$?
+  line=$(grep -m 1 -v '^[[:space:]]*$' "$err" || true)
+  [ $rc -eq 0 ] || { rm -f "$err"; fail "$what unavailable ($1 failed: ${line:-exit $rc}); not submitting"; }
+  cat "$err" >&2; rm -f "$err"
+}
+slurm sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW
+spent=$(awk '{s+=$1} END{printf "%d", s/3600}' <<<"$got")
+slurm squeue -A "$acct" -u "$USER" -h -t PENDING -o "%C %l"
+queued=$(while read -r c l; do [ -z "$c" ] || echo "$c $(to_min "$l")"; done <<<"$got" | awk '{s+=$1*$2} END{printf "%d", s/60}')
 proj=$(( nodes * cpn * wmin * n / 60 ))
 if [ "${HPC_SPEND_RESERVE:-0}" = 1 ]; then held=0; else held=$reserve; fi
 avail=$(( max_ch - held ))
@@ -162,10 +173,12 @@ deadline=$(qget deadline)
 [ -z "$deadline" ] || [[ ! $(date +%F) > $deadline ]] || fail "past deadline $deadline in $run_dir/question.card; a human decides whether a new run continues it"
 run_max=$(qget budget_core_hours); run_max=${run_max:-$(get default_run_core_hours)}
 if [[ $run_max =~ ^[0-9]+$ ]] && [ "$run_max" -gt 0 ]; then
-  run_spent=$("$sbin/sacct" -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobName,CPUTimeRAW | awk -F'|' -v r="$run_id" '$1==r {s+=$2} END{printf "%d", s/3600}')
+  slurm sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobName,CPUTimeRAW
+  run_spent=$(awk -F'|' -v r="$run_id" '$1==r {s+=$2} END{printf "%d", s/3600}' <<<"$got")
   [ $(( run_spent + proj )) -le "$run_max" ] || fail "this run spent $run_spent + this job $proj core-h exceeds budget_core_hours=$run_max; a human decides whether a new run continues it"
 fi
-live=$("$sbin/squeue" -A "$acct" -u "$USER" -h | wc -l)
+slurm squeue -A "$acct" -u "$USER" -h
+live=$(grep -c . <<<"$got" || true)
 [ $(( live + n )) -le "$max_conc" ] || fail "$live live + $n new jobs exceeds max_concurrent_jobs=$max_conc; wait for running jobs to finish"
 # The checked time, nodes and array follow the caller's options, so sbatch takes them over any other form or variable,
 # and --ignore-pbs keeps sbatch from reading an array or a walltime from #PBS lines, which preflight does not read.
