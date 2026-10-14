@@ -139,7 +139,8 @@ fi
 live=$("$sbin/squeue" -A "$acct" -u "$USER" -h | wc -l)
 [ $(( live + n )) -le "$max_conc" ] || fail "$live live + $n new jobs exceeds max_concurrent_jobs=$max_conc; wait for running jobs to finish"
 # The checked time, nodes and array follow the caller's options, so sbatch takes them over any other form or variable.
-set -- "$@" --time="$wall" --nodes="$nodes" ${array:+--array="$array"}
+# The --comment before them is spare: a last caller option that wants a value takes it, and the rest stand.
+set -- "$@" --comment="run:$run_id" --time="$wall" --nodes="$nodes" ${array:+--array="$array"}
 unset SBATCH_ARRAY_INX
 
 echo "PREFLIGHT OK: $run_id nodes=$nodes time=${wmin}m tasks=$n projected=$proj spent=$spent queued=$queued available=$avail" >&2
