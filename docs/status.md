@@ -2,6 +2,10 @@
 
 Written on 2026-10-09 for the agent who takes over as chief of staff, and updated on 2026-10-10 with the model host's serving report, on 2026-10-11 with the pipeline test on skynet, and on 2026-10-13 with self-hosting and the pilots. Keep this page current, or replace it, as items move.
 
+## Start here, as of 2026-10-14
+
+[plan-2026-10-14.md](plan-2026-10-14.md) is the current plan. It covers the field report from the first HPC install (rolled back by the owner), the small audit fixes in progress, the sandboxed-agent design waiting on the owner, and the paused evaluation. The sections below record the state before it.
+
 ## The big picture
 
 harness4research adds guardrails to research repositories, so that AI agents can run experiments on shared compute without a person watching every step:
@@ -57,10 +61,6 @@ As of 2026-10-13, on skynet:
 - `n26`: the `mcp_` history trick has no side effects.
 - `n27`: the proxy's history repairs affect arms A and E alike; check after the run, from the proxy logs.
 - `n28`: tell the model host we serve on GPU 1, and about the Slurm GPU mismatch.
-
-## Start here, as of 2026-10-14
-
-[plan-2026-10-14.md](plan-2026-10-14.md) is the current plan. It covers the field report from the first HPC install (rolled back by the owner), the small audit fixes in progress, the sandboxed-agent design waiting on the owner, and the paused evaluation. The sections below record the state before it.
 
 ## The next steps, in order
 
