@@ -42,7 +42,7 @@ wt=${wt:-$(dirname "$repo")/$name.$(echo "$branch" | tr / -)}
 [ -e "$wt" ] && { echo "worktree path exists: $wt. Pass --worktree." >&2; exit 2; }
 git -C "$repo" worktree add -q -b "$branch" "$wt" "$base"
 
-added=(); skipped=(); edited=(); unbased=(); conflicts=(); keys=(); optional=()
+added=(); skipped=(); edited=(); unbased=(); conflicts=(); keys=(); sections=(); optional=()
 from=$p_from; [ "$from" = unknown ] && from=""
 place() {
   local src=$1 dst=$2 mode=${3:-keep}
@@ -98,6 +98,26 @@ add_keys() {
   done
   git -C "$wt" diff --quiet -- "$dst" || added+=("$dst")
 }
+# add_sections <path under templates/> <dst>: inserts each "## " section of the template that the file lacks, heading
+# and template text, before the next template section the file has, or at its end. Unlike a key, a missing section is
+# proposed even when the install's template had it: place never refreshes a file that exists, so a project's template
+# can predate the install it records.
+add_sections() {
+  local src=$1 dst=$2 h block anchor a tmp
+  [ -f "$wt/$dst" ] || return 0
+  while IFS= read -r h; do
+    grep -qxF -- "$h" "$wt/$dst" && continue
+    block=$(awk -v h="$h" '$0 == h { on = 1; print; next } on && /^## / { exit } on' "$t/$src")
+    anchor=""
+    while IFS= read -r a; do grep -qxF -- "$a" "$wt/$dst" && { anchor=$a; break; }; done \
+      < <(awk -v h="$h" 'after && /^## /; $0 == h { after = 1 }' "$t/$src")
+    tmp=$(mktemp)
+    if [ -n "$anchor" ]; then BLOCK=$block awk -v a="$anchor" '$0 == a && !done { print ENVIRON["BLOCK"]; print ""; done = 1 } { print }' "$wt/$dst" > "$tmp"
+    else { cat "$wt/$dst"; echo; printf '%s\n' "$block"; } > "$tmp"; fi
+    cat "$tmp" > "$wt/$dst"; rm -f "$tmp"; sections+=("$dst: $h")
+  done < <(grep '^## ' "$t/$src")
+  git -C "$wt" diff --quiet -- "$dst" || [[ " ${added[*]} " == *" $dst "* ]] || added+=("$dst")
+}
 t=$here/templates
 if [ $update = 0 ]; then
   for f in preflight ripples manifest fence code launch; do place "$t/guard/bin/$f.sh" "guard/bin/$f.sh" replace; done
@@ -123,6 +143,7 @@ else
   add_keys guard/budget.card guard/budget.card 0
   add_keys runs/_template/question.card runs/_template/question.card 1
   add_keys runs/_template/report.md runs/_template/report.md 1
+  add_sections runs/_template/report.md runs/_template/report.md
   [ -e "$wt/runs/_template/execution.tsv" ] || place "$t/runs/_template/execution.tsv" runs/_template/execution.tsv
 fi
 # set_merge_policy: guard merge refuses every merge without a ruleset, so a card whose repository GitHub offers no
@@ -169,6 +190,7 @@ if [ $update = 0 ]; then list "Added:" "${added[@]}"; else list "Changed:" "${ad
 list "Left alone because they already exist:" "${skipped[@]}"
 list "Your edits were kept in:" "${edited[@]}"
 list "Keys added from the templates:" "${keys[@]}"
+list "Sections added from the templates, to merge or drop in the pull request:" "${sections[@]}"
 list "Optional keys you may set:" "${optional[@]}"
 list "No recorded install commit, so these were merged as whole files:" "${unbased[@]}"
 [ -z "$policy_note" ] || { echo; echo "$policy_note"; }

@@ -204,19 +204,25 @@ if [ -n "$voids" ]; then
 fi
 if [ -z "$bad_l" ]; then say PASS execution-ledger ""; else say FAIL execution-ledger "append rows with a field from the vocabulary; a change to the design needs a new card:$bad_l"; fi
 
-history_ok() {  # history_ok <ref> <report>: a run with a ledger has a ## Execution history section naming every row id
-  local ids body id
+# history_problem <ref> <report>: prints why a run with a ledger fails the rule that its report has a
+# ## Execution history section citing every row id, or nothing.
+history_problem() {
+  local ids body id missing=""
   ids=$(git show "$1:${2%/report.md}/execution.tsv" 2>/dev/null | awk -F'\t' 'NR > 1 && NF && !/^#/ { print $1 }') || return 0
   [ -n "$ids" ] || return 0
   body=$(git show "$1:$2" | awk '/^## / { e = ($0 == "## Execution history") } e')
-  [ -n "$body" ] || return 1
-  for id in $ids; do grep -qF "\`$id\`" <<<"$body" || return 1; done
+  if [ -z "$body" ]; then
+    echo "no ## Execution history section; harness4research's templates/runs/_template/report.md has it, and guard init --update adds it to runs/_template/report.md"
+    return
+  fi
+  for id in $ids; do grep -qF "\`$id\`" <<<"$body" || missing="$missing $id"; done
+  [ -z "$missing" ] || echo "uncited:$missing"
 }
 bad_x=""
 while read -r st f; do
   [ -n "$f" ] || continue
-  [ "$st" = M ] && ! history_ok "$mb" "$f" && continue
-  history_ok "$head" "$f" || bad_x="$bad_x $f"
+  [ "$st" = M ] && [ -n "$(history_problem "$mb" "$f")" ] && continue
+  p=$(history_problem "$head" "$f"); [ -z "$p" ] || bad_x="$bad_x $f ($p)"
 done < <(git diff --name-status --no-renames --diff-filter=AM "$base...$head" -- 'runs/*/report.md')
 if [ -z "$bad_x" ]; then say PASS execution-history ""; else say FAIL execution-history "## Execution history must cite every execution.tsv row id:$bad_x"; fi
 
