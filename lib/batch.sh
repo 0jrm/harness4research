@@ -178,7 +178,12 @@ review_batch() {
   review_small "${small[@]}"
   for n in "${large[@]}"; do
     if [ -n "$reviewer_down" ]; then verdict_of[$n]="not reviewed; the reviewer is unavailable"; continue; fi
-    echo; rc=0; bash "$here/lib/review.sh" "$n" || rc=$?
+    echo; rc=0; rm -f "$state/review-unavailable"
+    HPC_REVIEW_UNAVAILABLE_FILE=$state/review-unavailable bash "$here/lib/review.sh" "$n" || rc=$?
+    if [ -s "$state/review-unavailable" ]; then
+      reviewer_down=$(cat "$state/review-unavailable"); rm -f "$state/review-unavailable"
+      verdict_of[$n]="not reviewed; $reviewer_down"; continue
+    fi
     if [ $rc -eq 2 ]; then notes+=("#$n is large, and guard review $n refused to start; its message is above."); continue; fi
     IFS=$'\t' read -r at v r <<<"$(last_review "$n")"
     head_of[$n]=$at verdict_of[$n]="$v - $r"

@@ -1472,6 +1472,7 @@ PRS=$(prs_json "$old" "${all[@]}")
 cat > "$tmp/fake-batch" <<'FAKE'
 #!/usr/bin/env bash
 prs=$(sed -n 's/^# Pull request #\([0-9]*\)$/\1/p' .guard-review/prompt.md)
+[ -n "$prs" ] || [ "${FAKE_SINGLE:-}" != crash ] || { echo "Error: offline" >&2; exit 3; }
 [ -n "$prs" ] || { printf 'Single.\nVERDICT: approve - single review\n'; exit; }
 git rev-parse HEAD > "$FAKE_DIR/head"
 echo $prs >> "$FAKE_DIR/sessions"; cp .guard-review/prompt.md "$FAKE_DIR/prompt.md"
@@ -1536,6 +1537,11 @@ expect batch-crash-exit-2 ok '^exit 2$' -- tail -n 1 "$tmp/batch.out"
 expect batch-crash-not-recorded ok '^0$' -- bash -c 'grep -c "	1[45]	" "$1" || true' _ "$bt_reviews"
 expect batch-crash-not-queued fail - -- bash -c '"$1" needs-you | grep -q "Review of PR #1[45]"' _ "$guard"
 expect batch-crash-summary ok '^  #14 small: not reviewed; reviewer unavailable: Error: rate limited\. .*fake-batch exited 3;' -- cat "$tmp/batch.out"
+fresh; batch env FAKE_SINGLE=crash "$guard" review --batch > "$tmp/batch.out" 2>&1; echo "exit $?" >> "$tmp/batch.out"
+expect batch-large-crash-exit-2 ok '^exit 2$' -- tail -n 1 "$tmp/batch.out"
+expect batch-large-crash-summary ok '^  #17 large: not reviewed; reviewer unavailable: Error: offline\. .*fake-batch exited 3;' -- cat "$tmp/batch.out"
+expect batch-large-crash-not-recorded ok '^0$' -- bash -c 'grep -c "	17	" "$1" || true' _ "$bt_reviews"
+expect batch-large-crash-small-reviewed ok "	14	[0-9a-f]*	approve	.*fine 14$" -- cat "$bt_reviews"
 fresh; batch env FAKE_BATCH=trailer "$guard" review --batch >/dev/null 2>&1
 expect batch-verdicts-must-end-reply ok '^2$' -- grep -c '	escalate	.*one VERDICT line for #1[45]$' "$bt_reviews"
 fresh; batch env FAKE_BATCH=commit "$guard" review --batch > "$tmp/batch.out" 2>&1
