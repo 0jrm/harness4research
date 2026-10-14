@@ -109,6 +109,10 @@ if [ $explore = 0 ]; then
   git ls-files --error-unmatch "$q" >/dev/null 2>&1 || fail "$q is not committed; commit it first"
   git diff --quiet HEAD -- "$q" || fail "$q has uncommitted edits; revert them with git checkout HEAD -- $q, or start a new run id for a new design"
   [ "$(git log --format=%H -- "$q" | wc -l)" -le 1 ] || fail "$q was edited after its first commit; start a new run id instead"
+  # card_on_main: yes means a person has read the card: only a person merges a new card to the protected branch.
+  if [ "$(get card_on_main)" = yes ] && [ "$(git rev-parse -q --verify "$base:$q" || true)" != "$(git rev-parse "HEAD:$q")" ]; then
+    fail "card_on_main is yes in guard/budget.card, and $q is not on $base as committed here; open a pull request with the card, wait for a person to merge it, then submit"
+  fi
 fi
 
 if [ "${HPC_SPEND_RESERVE:-0}" != 1 ]; then

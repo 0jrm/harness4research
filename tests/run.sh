@@ -221,6 +221,16 @@ git add -A; git commit -q -m "run: a waiver without a reason"
 expect preflight-waiver-needs-reason fail '^PREFLIGHT FAIL: no executable domain check' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R9" job.sh
 expect preflight-explore-no-checks ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-b8 job.sh --time=30 --nodes=1
 git reset -q --hard HEAD~3
+base_card=$(git rev-parse HEAD); echo "card_on_main: yes" >> guard/budget.card; git commit -q -am "cards on main"
+git branch -q -f card-base HEAD; git reset -q --hard "$base_card"
+git switch -q -c card-later card-base; R10=runs/2026-10-14-unread; mkdir -p "$R10"; cp runs/_template/question.card "$R10/"; git add -A; git commit -q -m "run: a card nobody read"
+expect preflight-card-not-on-main fail "^PREFLIGHT FAIL: card_on_main is yes in guard/budget.card, and $R10/question.card is not on card-base as committed here; open a pull request with the card, wait for a person to merge it, then submit$" -- \
+  env HPC_GUARD_REF=card-base HPC_SPEND_RESERVE=1 guard/run preflight "$R10" job.sh
+git branch -q -f card-merged HEAD
+expect preflight-card-on-main ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=card-merged HPC_SPEND_RESERVE=1 guard/run preflight "$R10" job.sh
+expect preflight-card-on-main-explore ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=card-base HPC_SPEND_RESERVE=1 guard/run preflight runs/explore-c9 job.sh --time=30 --nodes=1
+git switch -q agent/run; git branch -q -D card-later card-base card-merged
+expect preflight-card-on-main-default ok 'PREFLIGHT OK' -- guard/run preflight "$R" job.sh
 sed -i 's/^stop_date: .*/stop_date: 2000-01-01/' guard/budget.card; git commit -q -am "past stop date"
 expect preflight-past-stop fail '^PREFLIGHT FAIL: past stop_date 2000-01-01; a human extends stop_date in guard/budget.card on the protected branch$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
@@ -627,6 +637,11 @@ git reset -q --hard HEAD~1
 git switch -q --detach HEAD; sed -i '/^checks: /d' guard/budget.card; git commit -q -am "no project waiver"
 expect launch-no-checks fail "^LAUNCH FAIL: no executable domain check in $R2/checks/ on HEAD; a verifier writes them" -- env HPC_GUARD_REF=HEAD HPC_SPEND_RESERVE=1 guard/run launch "$R2" --time=1 --gpus=none --mem=0.01 -- true
 git switch -q -
+git switch -q --detach HEAD; echo "card_on_main: yes" >> guard/budget.card; git commit -q -am "cards on main"; git branch -q -f launch-card-base HEAD
+R11=runs/2026-10-14-unread-launch; mkdir -p "$R11"; cp runs/_template/question.card "$R11/"; git add -A; git commit -q -m "run: a card nobody read"
+expect launch-card-not-on-main fail "^LAUNCH FAIL: card_on_main is yes in guard/budget.card, and $R11/question.card is not on launch-card-base as committed here" -- \
+  env HPC_GUARD_REF=launch-card-base HPC_SPEND_RESERVE=1 guard/run launch "$R11" --time=1 --gpus=none --mem=0.01 -- true
+git switch -q -; git branch -q -D launch-card-base
 sed -i 's/^max_gpu_hours: .*/max_gpu_hours: 999/' guard/budget.card; git commit -q -am "raise"
 expect launch-guard-touched fail 'guard/ differs' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
 same_refusal() {  # same_refusal <name> <preflight args...> -- <launch args...>: the text after the two prefixes is identical
