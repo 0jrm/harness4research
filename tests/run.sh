@@ -703,6 +703,15 @@ expect ripples-envelope-host ok 'x3: host login1 is not in launch_hosts \(skynet
 expect ripples-envelope-mem ok 'x3: mem_stop_gb 2000 is over host_max_mem_gb=1000' -- echo "$rip"
 expect ripples-envelope-restart ok 'x4: restart x-1-done is not a resource stop of this run' -- echo "$rip"
 expect ripples-envelope-resume ok 'x5: resume /nowhere/ckpt is under no launch cwd of this run' -- echo "$rip"
+X5=runs/2026-10-14-outcome; mkdir -p "$X5"; cp runs/_template/question.card "$X5/"
+printf 'id\tts\tfield\tvalue\twhy\tevidence\n# a comment\nx1\tt\thost\tskynet\tw\te\nx2\tt\tstage\tdone\tjob finished\te\n' > "$X5/execution.tsv"
+git add -A; git commit -q -m "run: an outcome in the ledger"
+expect ripples-ledger-outcome fail 'RIPPLE	execution-within-envelope	x2: stage is not a ledger field \(host gpus .* or void <id>\); job outcomes go in report.md, and a void row in a records-only pull request retracts this one; the ledger is append-only' -- guard/run ripples "$X5"
+printf 'x3\tt\tvoid\tx2\tan outcome, not an execution fact\tnone\n' >> "$X5/execution.tsv"; git commit -q -am "run: void the outcome"
+expect ripples-ledger-voided ok 'PASS	execution-within-envelope	3 rows: host x1, stage x2, void x3' -- guard/run ripples "$X5"
+printf 'x5\tt\tvoid\tx3\tw\te\nx6\tt\tvoid\tx4\tw\te\n' >> "$X/execution.tsv"; git commit -q -am "run: void the restart and the resume"
+expect ripples-voided-restart-not-handled fail 'RIPPLE	job-states	.*x-2-oom:OUT_OF_MEMORY' -- guard/run ripples "$X"
+git reset -q --hard HEAD~1
 X3=runs/2026-10-02-science; mkdir -p "$X3"; cp runs/_template/question.card "$X3/"
 X4=runs/2026-10-02-capped; mkdir -p "$X4"; sed 's/^budget_gpu_hours: .*/budget_gpu_hours: 1/' runs/_template/question.card > "$X4/question.card"
 X5=runs/2026-10-02-late; mkdir -p "$X5"; sed 's/^deadline: .*/deadline: 2000-01-01/' runs/_template/question.card > "$X5/question.card"
@@ -896,9 +905,28 @@ expect fence-ledger-rewritten fail 'FAIL.execution-ledger.*runs/lg/execution.tsv
 git switch -q -c pr/ledger-delete origin/pr-ledger; git rm -q runs/lg/execution.tsv; git commit -q -m x
 expect fence-ledger-deleted fail 'FAIL.execution-ledger.*runs/lg/execution.tsv \(deleted\)' -- guard/run fence origin/pr-ledger HEAD
 git switch -q -c pr/ledger-design origin/pr-ledger; printf 'x2\tt\tsetting\tfloat64\tw\te\n' >> runs/lg/execution.tsv; git commit -q -am x
-expect fence-ledger-design fail 'FAIL.execution-ledger.*runs/lg/execution.tsv$' -- guard/run fence origin/pr-ledger HEAD
+expect fence-ledger-design fail 'FAIL.execution-ledger.*runs/lg/execution.tsv \(x2: setting is a question card key, so it is design; a change to it needs a new card\)$' -- guard/run fence origin/pr-ledger HEAD
+git switch -q -c pr/ledger-outcome origin/pr-ledger; printf 'x2\tt\tstage\tdone\tjob 4801 finished\te\n' >> runs/lg/execution.tsv; git commit -q -am x
+expect fence-ledger-outcome fail 'FAIL.execution-ledger.*runs/lg/execution.tsv \(x2: stage is not a ledger field \(host gpus start concurrency workers staging mem_stop_gb stage_minutes resume restart or void <id>\); job outcomes go in report.md, and a void row in a records-only pull request retracts this one\)$' -- guard/run fence origin/pr-ledger HEAD
+printf 'x3\tt\tvoid\tx2\tan outcome, not an execution fact\tnone\n' >> runs/lg/execution.tsv; git commit -q -am x
+expect fence-ledger-void ok 'PASS.execution-ledger' -- guard/run fence origin/pr-ledger HEAD
+echo "A note." >> README.md; git commit -q -am x
+expect fence-ledger-void-records-only fail 'FAIL.execution-ledger.*runs/lg/execution.tsv \(a void row goes in a pull request of run records only; this one also changes README.md\)$' -- guard/run fence origin/pr-ledger HEAD
+git switch -q -c pr/ledger-void-design origin/pr-ledger; printf 'x2\tt\tsetting\tfloat64\tw\te\nx3\tt\tvoid\tx2\tw\te\n' >> runs/lg/execution.tsv; git commit -q -am x
+expect fence-ledger-void-design fail 'FAIL.execution-ledger.*\(x3: x2 sets setting, a question card key, so it is design; a change to it needs a new card\)$' -- guard/run fence origin/pr-ledger HEAD
+git switch -q -c pr/ledger-void-later origin/pr-ledger; printf 'x2\tt\tvoid\tx3\tw\te\nx3\tt\tstage\tdone\tw\te\n' >> runs/lg/execution.tsv; git commit -q -am x
+expect fence-ledger-void-names-earlier fail 'FAIL.execution-ledger.*\(x2: void x3 names no earlier row\)$' -- guard/run fence origin/pr-ledger HEAD
+expect fence-local-template ok '^PASS	execution-ledger	runs/_template/execution.tsv$' -- guard/run fence --ledger runs/_template/execution.tsv
+expect fence-local-usage fail '^usage: guard/run fence --ledger' -- guard/run fence --ledger runs/nowhere/execution.tsv
+git switch -q pr/ledger-outcome; git reset -q --hard HEAD~2
+expect fence-local-outcome fail '^FAIL	execution-ledger	runs/lg/execution.tsv: x2: stage is not a ledger field' -- guard/run fence --ledger runs/lg/execution.tsv
+printf 'x3\tt\tvoid\tx2\tan outcome\tnone\n' >> runs/lg/execution.tsv
+expect fence-local-void ok '^PASS	execution-ledger	runs/lg/execution.tsv$' -- guard/run fence --ledger runs/lg/execution.tsv
+sed -i 's/skynet/login1/' runs/lg/execution.tsv
+expect fence-local-append-only fail '^FAIL	execution-ledger	runs/lg/execution.tsv: committed rows changed or removed; the ledger is append-only$' -- guard/run fence --ledger runs/lg/execution.tsv
+git checkout -q -- runs/lg/execution.tsv
 git switch -q -c pr/legacy-ledger origin/main; mkdir -p runs/ll; printf 'bad header\nx1\tt\tsetting\tx\tw\te\n' > runs/ll/execution.tsv; git add -A; git commit -q -m x
-expect fence-ledger-bad-header fail 'FAIL.execution-ledger.*runs/ll/execution.tsv$' -- guard/run fence origin/main HEAD
+expect fence-ledger-bad-header fail 'FAIL.execution-ledger.*runs/ll/execution.tsv \(the header is not: id ts field value why evidence\)$' -- guard/run fence origin/main HEAD
 git push -q origin pr/legacy-ledger:refs/heads/pr-legacy-ledger
 git switch -q -c pr/legacy-ledger-edit origin/pr-legacy-ledger; printf 'x2\tt\tgpus\t0\tw\te\n' >> runs/ll/execution.tsv; git commit -q -am x
 expect fence-legacy-ledger ok 'PASS.execution-ledger' -- guard/run fence origin/pr-legacy-ledger HEAD
