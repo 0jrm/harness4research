@@ -296,9 +296,12 @@ run_budget() { local v; v=$(qval "$1"); [ -n "$v" ] || v=$(card_or_default "$2" 
 # ---------------------------------------------------------------- the execution envelope
 # The question card is design, frozen at first commit. Execution facts go in runs/<id>/execution.tsv, an
 # append-only ledger the agent commits: `id ts field value why evidence`, ids x1, x2, ... in order. Only committed
-# rows count. The vocabulary is ENVELOPE_FIELDS, fixed here and in fence.sh, not in a card, so an agent cannot extend it.
+# rows count, and lines starting with # are comments. The vocabulary is ENVELOPE_FIELDS, fixed here and in fence.sh,
+# not in a card, so an agent cannot extend it. A `void <id>` row retracts an earlier row that sets no question card key.
 
-ledger_rows() { git show "HEAD:${1%/}/execution.tsv" 2>/dev/null; }
+ledger_rows() { git show "HEAD:${1%/}/execution.tsv" 2>/dev/null | grep -v '^#'; }
+# voided <run_dir>: the ids that a void row retracts, one per line.
+voided() { ledger_rows "$1" | awk -F'\t' 'NR > 1 && $3 == "void" { print $4 }'; }
 # resume_owner <run_id> <path>: the latest launch of the run whose cwd contains <path>; prints its job id.
 resume_owner() {
   local d
@@ -318,17 +321,28 @@ restart_ok() {
 }
 # ledger_check <run_dir>: sets bad (the problems, `; ` separated) and summary over the committed ledger.
 ledger_check() {
-  local rd=${1%/} rid id ts field value why evidence n=0 header=0 cap
+  local rd=${1%/} rid id ts field value why evidence n=0 header=0 cap gone keys
   bad="" summary=""; rid=$(basename "$rd")
+  load_qcard "$rd"; keys=" $(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\):.*/\1/p' <<<"$qcard" | tr '\n' ' ') "
+  gone=" $(voided "$rd" | tr '\n' ' ') "
+  declare -A fields_of=()
   while IFS=$'\t' read -r id ts field value why evidence; do
     if [ $header = 0 ]; then
       header=1; [ "$id	$ts	$field	$value	$why	$evidence" = "id	ts	field	value	why	evidence" ] || bad="$bad; header must be id, ts, field, value, why, evidence"
       continue
     fi
     [ -n "$id" ] || continue
-    n=$((n+1)); summary="$summary, $field $id"
+    n=$((n+1)); summary="$summary, $field $id"; fields_of[$id]=$field
     [ "$id" = "x$n" ] || bad="$bad; $id: ids run x1, x2, ... in order; this is row $n"
-    [[ $ENVELOPE_FIELDS == *" $field "* ]] || { bad="$bad; $id: $field is design; a change to it needs a new card"; continue; }
+    if [ "$field" = void ]; then
+      if [ -z "$value" ] || [ "$value" = "$id" ] || [ -z "${fields_of[$value]:-}" ]; then bad="$bad; $id: void $value names no earlier row"
+      elif [ "${fields_of[$value]}" = void ]; then bad="$bad; $id: $value is a void row, which cannot be voided"
+      elif [[ $keys == *" ${fields_of[$value]} "* ]]; then bad="$bad; $id: $value sets ${fields_of[$value]}, a question card key, so it is design; a change to it needs a new card"; fi
+      continue
+    fi
+    [[ $gone != *" $id "* ]] || continue
+    if [[ $keys == *" $field "* ]]; then bad="$bad; $id: $field is design; a change to it needs a new card"; continue; fi
+    [[ $ENVELOPE_FIELDS == *" $field "* ]] || { bad="$bad; $id: $field is not a ledger field ($(echo $ENVELOPE_FIELDS) or void <id>); job outcomes go in report.md, and a void row in a records-only pull request retracts this one"; continue; }
     case $field in
       host) [[ " $(launch_hosts) " == *" $value "* ]] || bad="$bad; $id: host $value is not in launch_hosts ($(launch_hosts))" ;;
       mem_stop_gb) cap=$(card_or_default host_max_mem_gb 64)
@@ -338,7 +352,6 @@ ledger_check() {
     esac
   done < <(ledger_rows "$rd")
   summary="$n rows: ${summary#, }"
-  load_qcard "$rd"
   cap=$(run_budget budget_gpu_hours default_run_gpu_hours)
   if [ "$cap" != 0 ]; then gpu_seconds "$rid"; [ "$spent" -le $(( cap * 3600 )) ] || bad="$bad; spent $(gpu_h "$spent") GPU-h over budget_gpu_hours=$cap"; fi
   cap=$(run_budget budget_core_hours default_run_core_hours)
@@ -351,8 +364,10 @@ ledger_check() {
 # cmd_handled <run_dir>: "<job id> execution.tsv:<row id>" for every valid restart or resume row, so ripples treats
 # the job as handled, exactly like an incident naming it.
 cmd_handled() {
-  local rd=${1%/} rid id field value owner; rid=$(basename "$rd")
+  local rd=${1%/} rid id field value owner gone; rid=$(basename "$rd")
+  gone=" $(voided "$rd" | tr '\n' ' ') "
   while IFS=$'\t' read -r id _ field value _; do
+    [[ $gone != *" $id "* ]] || continue
     case $field in
       restart) restart_ok "$rid" "$value" && echo "$value execution.tsv:$id" ;;
       resume) owner=$(resume_owner "$rid" "$value") && echo "$owner execution.tsv:$id" ;;

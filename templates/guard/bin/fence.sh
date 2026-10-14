@@ -1,12 +1,54 @@
 #!/usr/bin/env bash
-# usage: guard/bin/fence.sh [base_ref] [head_ref]
+# usage: guard/bin/fence.sh [base_ref] [head_ref] | guard/bin/fence.sh --ledger <runs/<id>/execution.tsv>
 # The merge inspector. CI runs the protected branch's copy of this file against a pull request.
-# It reads the pull request as data and never executes it.
+# It reads the pull request as data and never executes it. --ledger checks one execution ledger in the working tree
+# before it is committed, by the rules the pull request check applies.
 set -uo pipefail
-base=${1:-${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}}
-head=${2:-HEAD}
 status=0
 say() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; [ "$1" = FAIL ] && status=1; return 0; }
+
+# The execution ledger is append-only and its field vocabulary is fixed here, as in launch.sh.
+fields=' host gpus start concurrency workers staging mem_stop_gb stage_minutes resume restart '
+# ledger_problems <question card>: reads a ledger on stdin and prints one line per problem. Lines starting with # are
+# comments. A row whose field is outside the vocabulary passes only when a later `void <id>` row retracts it, and a void
+# row may not retract a question card key, which is design.
+ledger_problems() {
+  awk -F'\t' -v f="$fields" -v keys=" $(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\):.*/\1/p' <<<"$1" | tr '\n' ' ') " '
+    NR == 1 { if ($0 != "id\tts\tfield\tvalue\twhy\tevidence") { print "the header is not: id ts field value why evidence"; bad = 1; exit } next }
+    /^#/ || !NF { next }
+    { n++; id[n] = $1; fd[n] = $3; v[n] = $4; if (!($1 in at)) at[$1] = n
+      if ($1 != "x" n) print $1 ": ids run x1, x2, ... in order, so row " n " is x" n }
+    END {
+      if (bad) exit
+      for (i = 1; i <= n; i++) {
+        if (fd[i] != "void") continue
+        if (!(v[i] in at) || at[v[i]] >= i) { print id[i] ": void " v[i] " names no earlier row"; continue }
+        j = at[v[i]]
+        if (fd[j] == "void") print id[i] ": " v[i] " is a void row, which cannot be voided"
+        else if (index(keys, " " fd[j] " ")) print id[i] ": " v[i] " sets " fd[j] ", a question card key, so it is design; a change to it needs a new card"
+        else gone[v[i]] = 1
+      }
+      for (i = 1; i <= n; i++) {
+        if (fd[i] == "void" || index(f, " " fd[i] " ") || (id[i] in gone)) continue
+        if (index(keys, " " fd[i] " ")) print id[i] ": " fd[i] " is a question card key, so it is design; a change to it needs a new card"
+        else print id[i] ": " fd[i] " is not a ledger field (" substr(f, 2) "or void <id>); job outcomes go in report.md, and a void row in a records-only pull request retracts this one"
+      }
+    }'
+}
+
+if [ "${1:-}" = --ledger ]; then
+  [ $# -eq 2 ] && [ -f "$2" ] || { echo "usage: guard/run fence --ledger <runs/<id>/execution.tsv>" >&2; exit 64; }
+  problems=$(ledger_problems "$(cat "$(dirname "$2")/question.card" 2>/dev/null)" < "$2")
+  if size=$(git cat-file -s "HEAD:./$2" 2>/dev/null) && ! cmp -s <(git show "HEAD:./$2") <(head -c "$size" "$2"); then
+    problems="committed rows changed or removed; the ledger is append-only${problems:+$'\n'$problems}"
+  fi
+  if [ -z "$problems" ]; then say PASS execution-ledger "$2"
+  else while IFS= read -r p; do say FAIL execution-ledger "$2: $p"; done <<<"$problems"; fi
+  exit $status
+fi
+
+base=${1:-${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}}
+head=${2:-HEAD}
 git rev-parse --verify -q "$base" >/dev/null || { say FAIL refs "base $base not found"; exit 1; }
 git rev-parse --verify -q "$head" >/dev/null || { say FAIL refs "head $head not found"; exit 1; }
 mapfile -t watch < <(git show "$base:guard/watch.list" 2>/dev/null | sed 's/#.*//' | awk 'NF')
@@ -137,31 +179,36 @@ while read -r st f; do
 done < <(git diff --name-status --no-renames --diff-filter=AM "$base...$head" -- 'runs/*/report.md')
 if [ -z "$bad_h" ]; then say PASS hypothesis-line ""; else say FAIL hypothesis-line "must be n/a or the card hypothesis:$bad_h"; fi
 
-# The execution ledger is append-only and its field vocabulary is fixed here, as in launch.sh.
-fields=' host gpus start concurrency workers staging mem_stop_gb stage_minutes resume restart '
-ledger_ok() {  # ledger_ok <ref> <file>: the header is right and every row's field is in the vocabulary
-  git show "$1:$2" 2>/dev/null | awk -F'\t' -v f="$fields" '
-    NR == 1 { if ($0 != "id\tts\tfield\tvalue\twhy\tevidence") bad = 1; next }
-    NF && index(f, " " $3 " ") == 0 { bad = 1 }
-    END { exit bad }'
+ledger_ok() {  # ledger_ok <ref> <file>: ledger_problems finds nothing in the file at the ref
+  [ -z "$(git show "$1:$2" 2>/dev/null | ledger_problems "$(git show "$1:${2%/execution.tsv}/question.card" 2>/dev/null)")" ]
 }
-bad_l=""
+bad_l="" voids=""
 while read -r st f; do
   [ -n "$f" ] || continue
+  new=$(git show "$head:$f" 2>/dev/null)
   case $st in
     D) bad_l="$bad_l $f (deleted)"; continue ;;
     M) ledger_ok "$mb" "$f" || continue
-       cmp -s <(git show "$mb:$f") <(git show "$head:$f" | head -c "$(git cat-file -s "$mb:$f")") || { bad_l="$bad_l $f (rows changed or removed)"; continue; } ;;
+       cmp -s <(git show "$mb:$f") <(git show "$head:$f" | head -c "$(git cat-file -s "$mb:$f")") || { bad_l="$bad_l $f (rows changed or removed)"; continue; }
+       new=$(git show "$head:$f" | tail -c +"$(( $(git cat-file -s "$mb:$f") + 1 ))") ;;
   esac
-  ledger_ok "$head" "$f" || bad_l="$bad_l $f"
+  p=$(git show "$head:$f" | ledger_problems "$(git show "$head:${f%/execution.tsv}/question.card" 2>/dev/null)" | head -n 1)
+  [ -z "$p" ] || bad_l="$bad_l $f ($p)"
+  ! awk -F'\t' '$3 == "void" && $1 !~ /^#/ { found = 1 } END { exit !found }' <<<"$new" || voids="$voids $f"
 done < <(git diff --name-status --no-renames --diff-filter=AMD "$base...$head" -- 'runs/*/execution.tsv')
+# A void row retracts an agent's own record, so it rides a pull request of run records only, where nothing else hides.
+if [ -n "$voids" ]; then
+  other=$(git diff --name-only --no-renames "$base...$head" \
+    | awk '!/^runs\/[^\/]+\// || /^runs\/_template\// || /\/(question\.card|report\.md)$/ || /^runs\/[^\/]+\/incidents\//' | tr '\n' ' ')
+  [ -z "$other" ] || bad_l="$bad_l$voids (a void row goes in a pull request of run records only; this one also changes ${other% })"
+fi
 if [ -z "$bad_l" ]; then say PASS execution-ledger ""; else say FAIL execution-ledger "append rows with a field from the vocabulary; a change to the design needs a new card:$bad_l"; fi
 
 # history_problem <ref> <report>: prints why a run with a ledger fails the rule that its report has a
 # ## Execution history section citing every row id, or nothing.
 history_problem() {
   local ids body id missing=""
-  ids=$(git show "$1:${2%/report.md}/execution.tsv" 2>/dev/null | awk -F'\t' 'NR > 1 && NF { print $1 }') || return 0
+  ids=$(git show "$1:${2%/report.md}/execution.tsv" 2>/dev/null | awk -F'\t' 'NR > 1 && NF && !/^#/ { print $1 }') || return 0
   [ -n "$ids" ] || return 0
   body=$(git show "$1:$2" | awk '/^## / { e = ($0 == "## Execution history") } e')
   if [ -z "$body" ]; then
