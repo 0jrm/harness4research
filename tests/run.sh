@@ -202,6 +202,16 @@ sed -i 's/^verification_reserve_core_hours: .*/verification_reserve_core_hours: 
 git commit -q -am "unit in cores_per_node"
 expect preflight-budget-not-integer fail "^PREFLIGHT FAIL: budget card 'cores_per_node' must be a whole number: 128 cores; a human fixes it in guard/budget.card on the protected branch$" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~2
+base_card=$(git rev-parse HEAD); echo "card_on_main: yes" >> guard/budget.card; git commit -q -am "cards on main"
+git branch -q -f card-base HEAD; git reset -q --hard "$base_card"
+git switch -q -c card-later card-base; R10=runs/2026-10-14-unread; mkdir -p "$R10"; cp runs/_template/question.card "$R10/"; git add -A; git commit -q -m "run: a card nobody read"
+expect preflight-card-not-on-main fail "^PREFLIGHT FAIL: card_on_main is yes in guard/budget.card, and $R10/question.card is not on card-base as committed here; open a pull request with the card, wait for a person to merge it, then submit$" -- \
+  env HPC_GUARD_REF=card-base HPC_SPEND_RESERVE=1 guard/run preflight "$R10" job.sh
+git branch -q -f card-merged HEAD
+expect preflight-card-on-main ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=card-merged HPC_SPEND_RESERVE=1 guard/run preflight "$R10" job.sh
+expect preflight-card-on-main-explore ok 'PREFLIGHT OK' -- env HPC_GUARD_REF=card-base HPC_SPEND_RESERVE=1 guard/run preflight runs/explore-c9 job.sh --time=30 --nodes=1
+git switch -q agent/run; git branch -q -D card-later card-base card-merged
+expect preflight-card-on-main-default ok 'PREFLIGHT OK' -- guard/run preflight "$R" job.sh
 sed -i 's/^stop_date: .*/stop_date: 2000-01-01/' guard/budget.card; git commit -q -am "past stop date"
 expect preflight-past-stop fail '^PREFLIGHT FAIL: past stop_date 2000-01-01; a human extends stop_date in guard/budget.card on the protected branch$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
