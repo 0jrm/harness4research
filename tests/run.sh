@@ -141,6 +141,23 @@ expect preflight-time-h-m-s ok 'PREFLIGHT OK: .* time=120m ' -- guard/run prefli
 expect preflight-time-days-hours fail 'PREFLIGHT FAIL: --time=1-12 \(2160 min\) exceeds max_walltime_minutes=720' -- guard/run preflight "$R" job.sh --time=1-12
 expect preflight-time-days-h-m ok 'PREFLIGHT OK: .* time=90m ' -- guard/run preflight "$R" job.sh --time=0-1:30
 expect preflight-time-malformed fail 'PREFLIGHT FAIL: --time=1h is not a Slurm time' -- guard/run preflight "$R" job.sh --time=1h
+expect preflight-forces-checked ok '^SBATCH --time=04:00:00 --nodes=2 --account=gom ' -- guard/run preflight "$R" job.sh
+expect preflight-cli-space-time fail 'PREFLIGHT FAIL: --time=1-12 \(2160 min\) exceeds' -- guard/run preflight "$R" job.sh --time 1-12
+expect preflight-cli-short-time fail 'PREFLIGHT FAIL: --time=1-12 \(2160 min\) exceeds' -- guard/run preflight "$R" job.sh -t 1-12
+expect preflight-cli-short-attached ok '^SBATCH -t30 --time=30 --nodes=2 ' -- guard/run preflight "$R" job.sh -t30
+expect preflight-cli-short-equals fail 'PREFLIGHT FAIL: --time==30 is not a Slurm time' -- guard/run preflight "$R" job.sh -t=30
+expect preflight-cli-dangling fail 'PREFLIGHT FAIL: --time ends the options without a value' -- guard/run preflight "$R" job.sh --time
+expect preflight-cli-space-nodes fail 'PREFLIGHT FAIL: --nodes=8 exceeds max_nodes_per_job=4' -- guard/run preflight "$R" job.sh --nodes 8
+expect preflight-cli-short-nodes fail 'PREFLIGHT FAIL: --nodes=8 exceeds max_nodes_per_job=4' -- guard/run preflight "$R" job.sh -N8
+expect preflight-cli-space-array ok '^SBATCH -a 0-1 --time=04:00:00 --nodes=2 --array=0-1 --account=gom ' -- guard/run preflight "$R" job.sh -a 0-1
+expect preflight-cli-space-array-counted ok 'PREFLIGHT OK: .* tasks=2 ' -- guard/run preflight "$R" job.sh -a 0-1
+expect preflight-array-malformed fail 'PREFLIGHT FAIL: --array=x is not an index list' -- guard/run preflight "$R" job.sh --array x
+printf '#!/bin/bash\n#SBATCH --time=04:00:00 --nodes=2 # four hours\n#SBATCH -t 1-12\n#SBATCH -N 8\nguard/run manifest "$1" "$0"\n' > job-short.sh
+expect preflight-script-short-time fail 'PREFLIGHT FAIL: --time=1-12 \(2160 min\) exceeds' -- guard/run preflight "$R" job-short.sh --nodes=2
+expect preflight-script-short-nodes fail 'PREFLIGHT FAIL: --nodes=8 exceeds max_nodes_per_job=4' -- guard/run preflight "$R" job-short.sh -t 30
+printf '#!/bin/bash\n#SBATCH --time=04:00:00\n\n#SBATCH --nodes=2\nhostname\n#SBATCH -t 1-12\n' > job-late.sh
+expect preflight-script-stops-at-command ok 'PREFLIGHT OK: .* nodes=2 time=240m ' -- guard/run preflight "$R" job-late.sh
+rm job-short.sh job-late.sh
 expect preflight-queued-m-s ok 'PREFLIGHT OK: .* queued=10 ' -- env MOCK_SQUEUE_PENDING='128 5:00' guard/run preflight "$R" job.sh
 expect preflight-queued-unlimited ok 'PREFLIGHT OK: .* queued=0 ' -- env MOCK_SQUEUE_PENDING='128 UNLIMITED' guard/run preflight "$R" job.sh
 expect preflight-walltime fail 'exceeds max_walltime' -- guard/run preflight "$R" job.sh --time=1-00:00:00

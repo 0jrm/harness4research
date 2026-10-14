@@ -41,10 +41,18 @@ to_min() {
   else m=$a; fi
   echo $(( 10#$d*1440 + 10#$h*60 + 10#$m + (10#$s > 0) ))
 }
+# opt <short> <long>: the last value sbatch takes for -<short> or --<long> from sbopts, in each form it accepts
+# (--long=V, --long V, -sV, -s V). Prints nothing when the option is absent; fails when it ends sbopts without a value.
 opt() {
-  local name=$1 v a; shift
-  v=$(sed -n "s/^#SBATCH[[:space:]]*--$name=\([^[:space:]]*\).*/\1/p" "$job" | tail -n1)
-  for a in "$@"; do [[ $a == --$name=* ]] && v=${a#--$name=}; done
+  local s=$1 l=$2 v="" i=0
+  while [ $i -lt ${#sbopts[@]} ]; do
+    case ${sbopts[i]} in
+      --$l=*) v=${sbopts[i]#*=} ;;
+      --$l|-$s) i=$((i + 1)); [ $i -lt ${#sbopts[@]} ] || return 1; v=${sbopts[i]} ;;
+      -$s?*) v=${sbopts[i]#-$s} ;;
+    esac
+    i=$((i + 1))
+  done
   echo "$v"
 }
 tasks() {
@@ -88,9 +96,17 @@ reserve=0; [ -z "$(get verification_reserve_core_hours)" ] || reserve=$(whole ve
 cpn=$(whole cores_per_node); max_nodes=$(whole max_nodes_per_job)
 max_wall=$(whole max_walltime_minutes); max_conc=$(whole max_concurrent_jobs)
 
-wall=$(opt time "$@"); nodes=$(opt nodes "$@"); array=$(opt array "$@")
+# sbopts: the options sbatch reads, in its order: #SBATCH lines up to the script's first command, then the command line.
+mapfile -t sbopts < <(awk '/^#SBATCH/ { sub(/^#SBATCH/, ""); sub(/#.*/, ""); for (i = 1; i <= NF; i++) print $i; next }
+  /^[[:space:]]*(#|$)/ { next } { exit }' "$job")
+sbopts+=("$@")
+wall=$(opt t time) || fail "--time ends the options without a value"
+nodes=$(opt N nodes) || fail "--nodes ends the options without a value"
+array=$(opt a array) || fail "--array ends the options without a value"
 [ -n "$wall" ] || fail "state --time=... explicitly"
 [[ $nodes =~ ^[0-9]+$ ]] || fail "state --nodes=N explicitly as one integer (got '${nodes}')"
+idx='[0-9]+(-[0-9]+(:[0-9]+)?)?'
+[[ -z $array || $array =~ ^$idx(,$idx)*(%[0-9]+)?$ ]] || fail "--array=$array is not an index list (0-9, 1,3,5, 0-15:4, with an optional %N)"
 wmin=$(to_min "$wall"); n=$(tasks "$array")
 [ -n "$wmin" ] || fail "--time=$wall is not a Slurm time (M, M:S, H:M:S, D-H, D-H:M, D-H:M:S)"
 if [ $explore = 1 ]; then
@@ -119,6 +135,9 @@ if [[ $run_max =~ ^[0-9]+$ ]] && [ "$run_max" -gt 0 ]; then
 fi
 live=$(squeue -A "$acct" -u "$USER" -h | wc -l)
 [ $(( live + n )) -le "$max_conc" ] || fail "$live live + $n new jobs exceeds max_concurrent_jobs=$max_conc; wait for running jobs to finish"
+# The checked time, nodes and array follow the caller's options, so sbatch takes them over any other form or variable.
+set -- "$@" --time="$wall" --nodes="$nodes" ${array:+--array="$array"}
+unset SBATCH_ARRAY_INX
 
 echo "PREFLIGHT OK: $run_id nodes=$nodes time=${wmin}m tasks=$n projected=$proj spent=$spent queued=$queued available=$avail" >&2
 exec sbatch "$@" --account="$acct" --job-name="$run_id" --comment="run:$run_id" "$job"
