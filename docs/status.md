@@ -36,7 +36,7 @@ The evaluation compares arms of the harness (A: none, through E: full) on trap t
 | 10 | arms A and E, one model, ten seeds, published with intervals | ready to run on our own server on GPU 1 once the card is frozen; three pilots ran, see `eval/pilots.md` |
 | 11 | pstack opt-in, canonical source, pinned | done early at the owner's request, #59 |
 | 12 | GPU TRES accounting in preflight | open. skynet's Slurm accounts no gres/gpu, so check the target cluster first |
-| 13 | short and space-separated `#SBATCH` forms | open. #56 fixed the time grammar, a related bug, not this |
+| 13 | short and space-separated `#SBATCH` forms | done on branch `fix/guard-audit-small-gaps`: preflight reads `-t`, `-N`, `-a` and the space forms in the script and on its command line, and puts its checked values last on the `sbatch` line |
 | 14 | mental-model paragraph above the quickstart; trim `campaign.py` | open |
 | 15 | minimal mode (scripts only) and its guarantees | open |
 | 16 | `launch.sh`: rewrite or declare an experiment | open; an owner decision |

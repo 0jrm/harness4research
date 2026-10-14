@@ -120,6 +120,7 @@ max_nodes_per_job: 4
 max_walltime_minutes: 720
 max_concurrent_jobs: 10
 quota_pct_cmd: echo 42%
+slurm_bin: $here/tests/mock-bin
 CARD
 printf 'runs/*/checks/*\ntests\n' > guard/watch.list
 git commit -q -am "chore(guard): set budget"; git push -q origin guard/init:main; git fetch -q origin
@@ -141,6 +142,49 @@ expect preflight-time-h-m-s ok 'PREFLIGHT OK: .* time=120m ' -- guard/run prefli
 expect preflight-time-days-hours fail 'PREFLIGHT FAIL: --time=1-12 \(2160 min\) exceeds max_walltime_minutes=720' -- guard/run preflight "$R" job.sh --time=1-12
 expect preflight-time-days-h-m ok 'PREFLIGHT OK: .* time=90m ' -- guard/run preflight "$R" job.sh --time=0-1:30
 expect preflight-time-malformed fail 'PREFLIGHT FAIL: --time=1h is not a Slurm time' -- guard/run preflight "$R" job.sh --time=1h
+expect preflight-forces-checked ok '^SBATCH --comment=run:2026-09-29-demo --ignore-pbs --time=04:00:00 --nodes=2 --account=gom ' -- guard/run preflight "$R" job.sh
+expect preflight-cli-space-time fail 'PREFLIGHT FAIL: --time=1-12 \(2160 min\) exceeds' -- guard/run preflight "$R" job.sh --time 1-12
+expect preflight-cli-short-time fail 'PREFLIGHT FAIL: --time=1-12 \(2160 min\) exceeds' -- guard/run preflight "$R" job.sh -t 1-12
+expect preflight-cli-short-attached ok '^SBATCH -t30 --comment=run:2026-09-29-demo --ignore-pbs --time=30 --nodes=2 ' -- guard/run preflight "$R" job.sh -t30
+expect preflight-cli-short-equals fail 'PREFLIGHT FAIL: --time==30 is not a Slurm time' -- guard/run preflight "$R" job.sh -t=30
+expect preflight-cli-dangling fail 'PREFLIGHT FAIL: --time has no value' -- guard/run preflight "$R" job.sh --time
+expect preflight-cli-space-nodes fail 'PREFLIGHT FAIL: --nodes=8 exceeds max_nodes_per_job=4' -- guard/run preflight "$R" job.sh --nodes 8
+expect preflight-cli-short-nodes fail 'PREFLIGHT FAIL: --nodes=8 exceeds max_nodes_per_job=4' -- guard/run preflight "$R" job.sh -N8
+expect preflight-cli-space-array ok '^SBATCH -a 0-1 --comment=run:2026-09-29-demo --ignore-pbs --time=04:00:00 --nodes=2 --array=0-1 --account=gom ' -- guard/run preflight "$R" job.sh -a 0-1
+expect preflight-cli-space-array-counted ok 'PREFLIGHT OK: .* tasks=2 ' -- guard/run preflight "$R" job.sh -a 0-1
+expect preflight-dangling-option ok '^time=04:00:00 account=gom$' -- bash -c 'env SBATCH_TIMELIMIT=9999 guard/run preflight "$1" job.sh -A other --from-a-newer-slurm 2>/dev/null \
+  | python3 -c "import sys; sys.path.insert(0, sys.argv[1]); from slurmclient import parse_sbatch_args as p; o = p(sys.stdin.read().split()[1:])[0]; print(\"time=\" + o[\"time\"], \"account=\" + o[\"account\"])" "$2/eval/env"' _ "$R" "$here"
+expect preflight-array-malformed fail 'PREFLIGHT FAIL: --array=x is not an index list' -- guard/run preflight "$R" job.sh --array x
+printf '#!/bin/bash\n#SBATCH --time=04:00:00 --nodes=2 # four hours\n#SBATCH -t 1-12\n#SBATCH -N 8\nguard/run manifest "$1" "$0"\n' > job-short.sh
+expect preflight-script-short-time fail 'PREFLIGHT FAIL: --time=1-12 \(2160 min\) exceeds' -- guard/run preflight "$R" job-short.sh --nodes=2
+expect preflight-script-short-nodes fail 'PREFLIGHT FAIL: --nodes=8 exceeds max_nodes_per_job=4' -- guard/run preflight "$R" job-short.sh -t 30
+printf '#!/bin/bash\n#SBATCH --time=04:00:00\n\n#SBATCH --nodes=2\nhostname\n#SBATCH -t 1-12\n' > job-late.sh
+expect preflight-script-stops-at-command ok 'PREFLIGHT OK: .* nodes=2 time=240m ' -- guard/run preflight "$R" job-late.sh
+rm job-short.sh job-late.sh
+expect preflight-cli-long-prefix fail '^PREFLIGHT FAIL: --arr shortens --array; write the option in full$' -- guard/run preflight "$R" job.sh --arr=0-999
+expect preflight-cli-long-prefix-space fail '^PREFLIGHT FAIL: --arra shortens --array; write the option in full$' -- guard/run preflight "$R" job.sh --arra 0-999
+expect preflight-cli-long-prefix-ambiguous fail '^PREFLIGHT FAIL: --ti shortens --time --time-min; write the option in full$' -- guard/run preflight "$R" job.sh --ti=30
+expect preflight-cli-bundle fail '^PREFLIGHT FAIL: split -Ha0-999 into separate options$' -- guard/run preflight "$R" job.sh -Ha0-999
+expect preflight-cli-bare-word fail "^PREFLIGHT FAIL: 'other.sh' is not an sbatch option; preflight takes the job script as its second argument$" -- guard/run preflight "$R" job.sh other.sh
+expect preflight-cli-double-dash fail "^PREFLIGHT FAIL: -- ends sbatch's options early; drop it$" -- guard/run preflight "$R" job.sh -- other.sh
+expect preflight-cli-ordinary-values ok '^SBATCH -J my-job --hold -H -p gpu --exclusive --export=ALL -t30 --comment=' -- guard/run preflight "$R" job.sh -J my-job --hold -H -p gpu --exclusive --export=ALL -t30
+for d in '--arr=0-999' '--arra 0-999' '-Ha0-999'; do
+  printf '#!/bin/bash\n#SBATCH --time=04:00:00 --nodes=2\n#SBATCH %s\nhostname\n' "$d" > "job-${d//[^a-z0-9]/}.sh"
+done
+expect preflight-script-long-prefix fail '^PREFLIGHT FAIL: --arr shortens --array; write the option in full$' -- guard/run preflight "$R" job-arr0999.sh
+expect preflight-script-long-prefix-space fail '^PREFLIGHT FAIL: --arra shortens --array; write the option in full$' -- guard/run preflight "$R" job-arra0999.sh
+expect preflight-script-bundle fail '^PREFLIGHT FAIL: split -Ha0-999 into separate options$' -- guard/run preflight "$R" job-a0999.sh
+printf '#!/bin/bash\n#SBATCH --time=04:00:00 --nodes=2 -J my-job -p gpu\n#SBATCH -t\nhostname\n' > job-cut.sh
+expect preflight-script-value-per-line fail '^PREFLIGHT FAIL: -t has no value$' -- guard/run preflight "$R" job-cut.sh
+rm job-arr0999.sh job-arra0999.sh job-a0999.sh job-cut.sh
+mkdir -p "$tmp/planted"; printf '#!/bin/sh\n' > "$tmp/planted/squeue"; cp "$tmp/planted/squeue" "$tmp/planted/sacct"; chmod +x "$tmp/planted/"*
+expect preflight-ignores-path-squeue ok 'PREFLIGHT OK: .* spent=30 queued=3072 ' -- env PATH="$tmp/planted:$PATH" guard/run preflight "$R" job.sh
+sed -i "s|^slurm_bin: .*|slurm_bin: $tmp/no-slurm|" guard/budget.card; git commit -q -am "slurm_bin without slurm"
+expect preflight-slurm-bin-missing fail "^PREFLIGHT FAIL: no squeue and sacct in slurm_bin=$tmp/no-slurm; a human sets slurm_bin" -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
+sed -i '/^slurm_bin:/d' guard/budget.card; git commit -q -am "no slurm_bin"
+if [ -x /usr/bin/squeue ]; then skip preflight-slurm-bin-default "this host has /usr/bin/squeue"
+else expect preflight-slurm-bin-default fail '^PREFLIGHT FAIL: no squeue and sacct in slurm_bin=/usr/bin; ' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh; fi
+git reset -q --hard HEAD~2
 expect preflight-queued-m-s ok 'PREFLIGHT OK: .* queued=10 ' -- env MOCK_SQUEUE_PENDING='128 5:00' guard/run preflight "$R" job.sh
 expect preflight-queued-unlimited ok 'PREFLIGHT OK: .* queued=0 ' -- env MOCK_SQUEUE_PENDING='128 UNLIMITED' guard/run preflight "$R" job.sh
 expect preflight-walltime fail 'exceeds max_walltime' -- guard/run preflight "$R" job.sh --time=1-00:00:00
@@ -180,6 +224,11 @@ expect preflight-run-budget fail 'this run spent 100 \+ this job 1024 core-h exc
 expect preflight-deadline fail 'past deadline 2000-01-01 in runs/2026-09-29-late/question.card' -- guard/run preflight "$R4" job.sh
 echo "default_run_core_hours: 10" >> guard/budget.card; git commit -q -am "default run budget"
 expect preflight-default-run-budget fail 'this job 64 core-h exceeds budget_core_hours=10' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-sketch job.sh --nodes=1 --time=00:30:00
+git reset -q --hard HEAD~1
+sed -i 's/^max_walltime_minutes: .*/max_walltime_minutes: 10/; s/^max_nodes_per_job: .*/max_nodes_per_job: 1/' guard/budget.card
+printf 'explore_max_nodes: 2\nexplore_max_walltime_minutes: 60\n' >> guard/budget.card; git commit -q -am "explore caps above the project caps"
+expect explore-walltime-bounded fail 'exceeds max_walltime_minutes=10' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-sketch job.sh --nodes=1 --time=00:30:00
+expect explore-nodes-bounded fail 'exceeds max_nodes_per_job=1' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-sketch job.sh --nodes=2 --time=00:05:00
 git reset -q --hard HEAD~1
 printf '100|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
 expect preflight-refuses-on-ripple fail '^PREFLIGHT FAIL: ripples reports job-states 100:FAILED \(diagnose, then merge runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line and the root cause for each, since ripples reads incidents from origin/main; a resource stop of a launch continues with an execution.tsv restart or resume row instead\); fix the cause' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
@@ -713,11 +762,24 @@ git switch -q -c pr/guard origin/main; echo "max_nodes_per_job: 64" >> guard/bud
 expect fence-guard fail 'FAIL.guard-untouched' -- guard/run fence origin/main HEAD
 git switch -q -c pr/workflow origin/main; echo "# off" >> .github/workflows/guard-fence.yml; git commit -q -am x
 expect fence-workflow fail 'FAIL.guard-untouched.*guard-fence.yml' -- guard/run fence origin/main HEAD
+git switch -q -c pr/agents origin/main; sed -i '/sbatch/d' AGENTS.md; git commit -q -am x
+expect fence-agents-md fail 'FAIL.guard-untouched.*AGENTS.md' -- guard/run fence origin/main HEAD
+git switch -q -c pr/claude origin/main; echo 'ignore AGENTS.md' > CLAUDE.md; git commit -q -am x
+expect fence-claude-md fail 'FAIL.guard-untouched.*CLAUDE.md' -- guard/run fence origin/main HEAD
 git switch -q -c pr/tests origin/main; mkdir -p tests; echo x > tests/t; git add -A; git commit -q -m x
 expect fence-watched fail 'FAIL.watched-paths.*tests/t' -- guard/run fence origin/main HEAD
 git push -q origin pr/clean:refs/heads/pr-clean; git switch -q -c pr/card origin/pr-clean
 echo "metric: moved" >> runs/r1/question.card; git commit -q -am x
 expect fence-card fail 'FAIL.question-cards-frozen.*runs/r1/question.card' -- guard/run fence origin/pr-clean HEAD
+git switch -q -c pr/card-twice origin/main; mkdir -p runs/r2; cp runs/_template/question.card runs/r2/; git add -A; git commit -q -m "run: r2"
+git merge -q --no-edit origin/pr-clean
+expect fence-card-added-merged ok 'PASS.question-cards-frozen' -- guard/run fence origin/main HEAD
+echo "metric: moved" >> runs/r2/question.card; git commit -q -am x
+expect fence-card-one-push fail 'FAIL.question-cards-frozen.*runs/r2/question.card' -- guard/run fence origin/main HEAD
+git reset -q --hard HEAD~1; git switch -q -c side origin/main; echo x > side.txt; git add -A; git commit -q -m side
+git switch -q pr/card-twice; git merge -q --no-commit side; echo "metric: moved" >> runs/r2/question.card
+git add -A; git commit -q -m "merge with an edit"
+expect fence-card-merge-edit fail 'FAIL.question-cards-frozen.*runs/r2/question.card' -- guard/run fence origin/main HEAD
 
 git switch -q -c pr/no-setting origin/main; mkdir -p runs/ns; cp runs/_template/question.card runs/ns/
 sed -i '/^setting:/d' runs/ns/question.card
@@ -740,7 +802,7 @@ git push -q origin pr/lineage:refs/heads/pr-lineage
 sed -i 's/^supersedes: .*/supersedes: none/' runs/lin-054/question.card
 sed -i 's/^spawned_from: .*/spawned_from: lin-054/' runs/lin-054b/question.card
 sed -i '/^supersedes:/d; /^spawned_from:/d' runs/lin-053-phys2/question.card
-git commit -q -am x
+git commit -q -a --amend --no-edit
 expect fence-lineage-none ok - -- no_lineage 'lin-054 extends'
 expect fence-lineage-set ok - -- no_lineage 'lin-054b extends'
 expect fence-lineage-missing-keys ok 'lin-053-phys2 extends lin-053$' -- lineage
@@ -1350,6 +1412,8 @@ expect tier-card-added ok '^human$' -- tier_of 'mkdir -p runs/r2; echo q > runs/
 expect tier-card-modified ok '^small$' -- tier_of 'echo edit >> runs/r9/question.card'
 expect tier-guard ok '^human$' -- tier_of 'echo more >> guard/budget.card'
 expect tier-workflow ok '^human$' -- tier_of 'mkdir -p .github/workflows; echo "on: push" > .github/workflows/ci.yml'
+expect tier-rules-text ok '^human$' -- tier_of 'echo rule >> AGENTS.md'
+expect tier-nested-agents-md ok '^small$' -- tier_of 'mkdir -p src; echo rule >> src/AGENTS.md'
 expect tier-guard-beats-records ok '^human$' -- tier_of 'mkdir -p runs/r1; echo 1 > runs/r1/a.csv; echo more >> guard/budget.card'
 expect tier-code-and-records ok '^small$' -- tier_of 'mkdir -p runs/r1; echo 1 > runs/r1/a.csv; echo y >> src/a.py'
 expect tier-empty ok '^small$' -- tier_of ':'

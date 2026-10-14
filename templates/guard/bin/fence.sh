@@ -11,7 +11,7 @@ git rev-parse --verify -q "$base" >/dev/null || { say FAIL refs "base $base not 
 git rev-parse --verify -q "$head" >/dev/null || { say FAIL refs "head $head not found"; exit 1; }
 mapfile -t watch < <(git show "$base:guard/watch.list" 2>/dev/null | sed 's/#.*//' | awk 'NF')
 
-g=$(git diff --name-only "$base...$head" -- guard .github/workflows | tr '\n' ' ')
+g=$(git diff --name-only "$base...$head" -- guard .github/workflows AGENTS.md CLAUDE.md | tr '\n' ' ')
 if [ -z "$g" ]; then say PASS guard-untouched ""; else say FAIL guard-untouched "a human merges changes to: $g"; fi
 
 if [ ${#watch[@]} -gt 0 ]; then
@@ -19,7 +19,13 @@ if [ ${#watch[@]} -gt 0 ]; then
   if [ -z "$w" ]; then say PASS watched-paths ""; else say FAIL watched-paths "a human merges changes to: $w"; fi
 fi
 
+mb=$(git merge-base "$base" "$head")
 cards=$(git diff --name-status "$base...$head" | awk '$1 !~ /^A/ && $NF ~ /^runs\/[^/]+\/question\.card$/ && $NF !~ /^runs\/_template\// {print $NF}' | tr '\n' ' ')
+# An added card is frozen too: one commit adds it, and the head holds what that commit added.
+while read -r f; do
+  c=$(git rev-list --full-history --no-merges "$mb..$head" -- "$f")
+  [ "$(wc -w <<<"$c")" = 1 ] && [ "$(git rev-parse "$c:$f")" = "$(git rev-parse "$head:$f")" ] || cards="$cards$f "
+done < <(git diff --name-only --diff-filter=A "$base...$head" -- 'runs/*/question.card' | grep -v '^runs/_template/')
 if [ -z "$cards" ]; then say PASS question-cards-frozen ""; else say FAIL question-cards-frozen "changed after first commit, open a new run id: $cards"; fi
 
 first_val() {
@@ -77,7 +83,6 @@ while read -r f; do
 done < <(git diff --name-only --diff-filter=A "$base...$head" -- 'runs/*/question.card')
 [ -z "$undeclared" ] || say WARN card-lineage "set supersedes or spawned_from (or none) by amending the commit that added the card, since a second commit freezes the run:${undeclared%;}"
 
-mb=$(git merge-base "$base" "$head")
 # unproven_rows <ref> <report> [shape]: line numbers of ## Evidence rows with no backticked path that exists at <ref>,
 # from the repository top or the report's directory, with any :line suffix dropped. With shape, a token that
 # merely looks like a path is enough, which is the rule a modified report's merge-base copy may still be under.

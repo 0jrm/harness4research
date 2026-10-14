@@ -8,7 +8,7 @@ Rules that an agent can read are suggestions. This project puts each rule at a p
 | Speed bump | `guard/run preflight`, `guard/run ripples`, `guard/run manifest` | direct submits, edited limits, frozen-card edits, silent warning signs | an agent that calls `sbatch` directly with your credentials, or runs its own copy of the scripts (see below) |
 | Speed bump (launch host) | `guard/run launch` and its supervisor | over-cap jobs, busy GPUs, jobs past their walltime or memory, silent orphans, a restart after a resource stop that nobody recorded | an agent that runs `nohup` directly, or deletes the state dir; no memory wall exists without an administrator's `MemoryMax` on the user slice |
 | Quality check | `guard review`, `guard merge` | changes that miss the request, facts without evidence, incidents without a cause, merges while checks fail | an agent that appends to `.git/guard/reviews.tsv`, a diff that steers the reviewer, `gh pr merge` with a write token |
-| Locked door | the `guard-fence` check plus a protected default branch | merging changes to `guard/`, workflows, watched paths, question cards, or reports whose evidence rows cite no committed file | anyone who can bypass branch protection |
+| Locked door | the `guard-fence` check plus a protected default branch | merging changes to `guard/`, workflows, `AGENTS.md` and `CLAUDE.md`, watched paths, question cards, or reports whose evidence rows cite no committed file | anyone who can bypass branch protection |
 | Bank limit | a capped cluster sub-account set by the admins | spending past the cap, by anyone | nothing; the scheduler refuses |
 
 ## Who stops a job
@@ -25,6 +25,8 @@ This is a speed bump, not a wall. The agent controls its own clone and environme
 - `HPC_GUARD_REF=HEAD` makes the agent's own commit the protected ref for every script.
 - `git update-ref refs/remotes/origin/main <commit>` moves the local `origin/main` to any commit, with no environment variable to notice.
 - `guard/run` itself is read from the working tree, so an edited `guard/run` runs whatever it chooses.
+
+Preflight runs `squeue` and `sacct` from the card's `slurm_bin` (default `/usr/bin`), not from PATH, so a planted `squeue` cannot hide live jobs. Every other command it runs, `git` and `awk` among them, still comes from the caller's PATH, and `ripples` still calls `sacct` from PATH. It reads `--time`, `--nodes` and `--array` as `--long=V`, `--long V`, `-sV` and `-s V`, in the script's `#SBATCH` lines and on its command line. It refuses a word it cannot map to exactly one option of Slurm 24.05's `sbatch`: a shortened long option such as `--arr`, short options bundled after one that takes no value such as `-Ha0-999`, or a stray word. It adds `--ignore-pbs`, so `#PBS` lines set nothing, and puts the values it checked last on the `sbatch` line, where they win.
 
 None of these reaches the CI fence or the bank limit. The fence uses `pull_request_target`, so GitHub runs the base branch's workflow and fence script from GitHub's copy of the branch, and it fetches the pull request only as data. A capped sub-account refuses jobs whichever script submitted them.
 

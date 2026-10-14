@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Passes --time 00:30:00 with a space, which preflight does not parse.
+# Passes --time 00:30:00 with a space, past the 10-minute cap.
 set -uo pipefail
 cd ~/ocean-sim && . "$(dirname "$0")/lib.sh"
 card

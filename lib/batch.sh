@@ -63,11 +63,11 @@ close_item() {
 }
 
 # card_pr <pr>: prints the question cards the human-tier pull request adds, and fails when it adds none or also changes
-# guard/ or .github/workflows/.
+# guard/, .github/workflows/, AGENTS.md or CLAUDE.md.
 card_pr() {
   local cards
   cards=$(added_cards "origin/${base_of[$1]}" "${head_of[$1]}")
-  [ -n "$cards" ] && git -C "$top" diff --quiet "origin/${base_of[$1]}...${head_of[$1]}" -- guard .github/workflows || return 1
+  [ -n "$cards" ] && git -C "$top" diff --quiet "origin/${base_of[$1]}...${head_of[$1]}" -- guard .github/workflows AGENTS.md CLAUDE.md || return 1
   echo "${cards//$'\n'/, }"
 }
 
@@ -148,7 +148,7 @@ review_batch() {
   refresh_card_digest
   for n in "${prs[@]}"; do
     if [ "${tier_of[$n]}" = human ]; then
-      card_pr "$n" >/dev/null || queue_merge "$n" "it changes guard/ or .github/workflows/, which only a human merges." "${ref_of[$n]}"
+      card_pr "$n" >/dev/null || queue_merge "$n" "it changes guard/, .github/workflows/, AGENTS.md or CLAUDE.md, which only a human merges." "${ref_of[$n]}"
       verdict_of[$n]="no model review; waits for you"; continue
     fi
     v=$(verdict_at_head "$n")

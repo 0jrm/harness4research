@@ -41,11 +41,49 @@ to_min() {
   else m=$a; fi
   echo $(( 10#$d*1440 + 10#$h*60 + 10#$m + (10#$s > 0) ))
 }
-opt() {
-  local name=$1 v a; shift
-  v=$(sed -n "s/^#SBATCH[[:space:]]*--$name=\([^[:space:]]*\).*/\1/p" "$job" | tail -n1)
-  for a in "$@"; do [[ $a == --$name=* ]] && v=${a#--$name=}; done
-  echo "$v"
+# sbatch's options in Slurm 24.05, from its --help and --usage: long ones that take a value, may take one with =, or
+# take none, and short ones that take a value or none. -I, --immediate, is missing from the help.
+long_val=' account array bb bbf begin chdir cluster-constraint clusters comment constraint core-spec cores-per-socket
+  cpu-freq cpus-per-gpu cpus-per-task deadline delay-boot dependency distribution error exclude export-file
+  extra-node-info gid gpu-bind gpu-freq gpus gpus-per-node gpus-per-socket gpus-per-task gres gres-flags input job-name
+  licenses mail-type mail-user mcs-label mem mem-bind mem-per-cpu mem-per-gpu mincpus network nodefile nodelist nodes
+  ntasks ntasks-per-core ntasks-per-node ntasks-per-socket output partition power priority profile qos reservation
+  signal sockets-per-node switches thread-spec threads-per-core time time-min tmp tres-bind tres-per-task uid wckey '
+long_other=' exclusive export nice propagate wrap container container-id contiguous get-user-env help hold ignore-pbs
+  no-kill no-requeue overcommit oversubscribe parsable quiet reboot requeue resv-ports spread-job usage use-min-nodes
+  verbose version wait '
+short_val=ABCDFGJLMNSabcdeimnopqtwx
+# read_sbopts <word...>: sets wall, nodes and array to the last value sbatch takes for them from the words, in the
+# forms --long=V, --long V, -sV and -s V. It refuses a word it cannot map to exactly one option: a shortened long
+# option, short options bundled after one that takes no value, and a word that is neither an option nor its value.
+read_sbopts() {
+  local w name v c o
+  while [ $# -gt 0 ]; do
+    w=$1; shift; name=""
+    case $w in
+      --) fail "-- ends sbatch's options early; drop it" ;;
+      --?*)
+        name=${w#--}; name=${name%%=*}
+        [ -n "$name" ] || fail "'$w' is not an sbatch option"
+        if [[ $long_val$long_other != *[[:space:]]"$name"[[:space:]]* ]]; then
+          c=""; for o in $long_val$long_other; do [[ $o != "$name"* ]] || c="$c --$o"; done
+          [ -z "$c" ] || fail "${w%%=*} shortens$c; write the option in full"
+          continue
+        fi
+        [[ $long_val == *[[:space:]]"$name"[[:space:]]* ]] || continue
+        if [[ $w == *=* ]]; then v=${w#*=}; else [ $# -gt 0 ] || fail "$w has no value"; v=$1; shift; fi ;;
+      -?*)
+        name=${w:1:1}
+        if [[ $short_val != *"$name"* ]]; then [ ${#w} -eq 2 ] || fail "split $w into separate options"; continue; fi
+        if [ ${#w} -gt 2 ]; then v=${w:2}; else [ $# -gt 0 ] || fail "$w has no value"; v=$1; shift; fi ;;
+      *) fail "'$w' is not an sbatch option; preflight takes the job script as its second argument" ;;
+    esac
+    case $name in
+      t|time) wall=$v ;;
+      N|nodes) nodes=$v ;;
+      a|array) array=$v ;;
+    esac
+  done
 }
 tasks() {
   local spec=${1%%\%*} n=0 part lo hi step parts
@@ -87,22 +125,32 @@ acct=$(need account); start=$(need start_date); max_ch=$(whole max_core_hours)
 reserve=0; [ -z "$(get verification_reserve_core_hours)" ] || reserve=$(whole verification_reserve_core_hours)
 cpn=$(whole cores_per_node); max_nodes=$(whole max_nodes_per_job)
 max_wall=$(whole max_walltime_minutes); max_conc=$(whole max_concurrent_jobs)
+# squeue and sacct come from the card on the protected branch, never from PATH, which the caller sets.
+sbin=$(get slurm_bin); sbin=${sbin:-/usr/bin}
+[ -x "$sbin/squeue" ] && [ -x "$sbin/sacct" ] || fail "no squeue and sacct in slurm_bin=$sbin; a human sets slurm_bin in guard/budget.card on the protected branch to the directory that holds them"
 
-wall=$(opt time "$@"); nodes=$(opt nodes "$@"); array=$(opt array "$@")
+# The options sbatch reads, in its order: each #SBATCH line up to the script's first command, then the command line.
+wall=""; nodes=""; array=""
+while IFS= read -r line; do
+  read -ra w <<<"$line"; read_sbopts ${w[@]+"${w[@]}"}
+done < <(awk '/^#SBATCH/ { sub(/^#SBATCH/, ""); sub(/#.*/, ""); print; next } /^[[:space:]]*(#|$)/ { next } { exit }' "$job")
+read_sbopts "$@"
 [ -n "$wall" ] || fail "state --time=... explicitly"
 [[ $nodes =~ ^[0-9]+$ ]] || fail "state --nodes=N explicitly as one integer (got '${nodes}')"
+idx='[0-9]+(-[0-9]+(:[0-9]+)?)?'
+[[ -z $array || $array =~ ^$idx(,$idx)*(%[0-9]+)?$ ]] || fail "--array=$array is not an index list (0-9, 1,3,5, 0-15:4, with an optional %N)"
 wmin=$(to_min "$wall"); n=$(tasks "$array")
 [ -n "$wmin" ] || fail "--time=$wall is not a Slurm time (M, M:S, H:M:S, D-H, D-H:M, D-H:M:S)"
 if [ $explore = 1 ]; then
-  max_nodes=$(get explore_max_nodes); max_nodes=${max_nodes:-1}
-  max_wall=$(get explore_max_walltime_minutes); max_wall=${max_wall:-60}
+  e=$(get explore_max_nodes); max_nodes=$(( ${e:-1} < max_nodes ? ${e:-1} : max_nodes ))
+  e=$(get explore_max_walltime_minutes); max_wall=$(( ${e:-60} < max_wall ? ${e:-60} : max_wall ))
   [ "$n" -eq 1 ] || fail "explore- runs submit one task at a time; drop --array, or use a run with a question card"
 fi
 [ "$nodes" -le "$max_nodes" ] || fail "--nodes=$nodes exceeds max_nodes_per_job=$max_nodes; ask for fewer"
 [ "$wmin" -le "$max_wall" ] || fail "--time=$wall ($wmin min) exceeds max_walltime_minutes=$max_wall; ask for less, and checkpoint to resume"
 
-spent=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW | awk '{s+=$1} END{printf "%d", s/3600}')
-queued=$(squeue -A "$acct" -u "$USER" -h -t PENDING -o "%C %l" | while read -r c l; do echo "$c $(to_min "$l")"; done \
+spent=$("$sbin/sacct" -A "$acct" -u "$USER" -S "$start" -X -n -P -o CPUTimeRAW | awk '{s+=$1} END{printf "%d", s/3600}')
+queued=$("$sbin/squeue" -A "$acct" -u "$USER" -h -t PENDING -o "%C %l" | while read -r c l; do echo "$c $(to_min "$l")"; done \
   | awk '{s+=$1*$2} END{printf "%d", s/60}')
 proj=$(( nodes * cpn * wmin * n / 60 ))
 if [ "${HPC_SPEND_RESERVE:-0}" = 1 ]; then held=0; else held=$reserve; fi
@@ -114,11 +162,16 @@ deadline=$(qget deadline)
 [ -z "$deadline" ] || [[ ! $(date +%F) > $deadline ]] || fail "past deadline $deadline in $run_dir/question.card; a human decides whether a new run continues it"
 run_max=$(qget budget_core_hours); run_max=${run_max:-$(get default_run_core_hours)}
 if [[ $run_max =~ ^[0-9]+$ ]] && [ "$run_max" -gt 0 ]; then
-  run_spent=$(sacct -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobName,CPUTimeRAW | awk -F'|' -v r="$run_id" '$1==r {s+=$2} END{printf "%d", s/3600}')
+  run_spent=$("$sbin/sacct" -A "$acct" -u "$USER" -S "$start" -X -n -P -o JobName,CPUTimeRAW | awk -F'|' -v r="$run_id" '$1==r {s+=$2} END{printf "%d", s/3600}')
   [ $(( run_spent + proj )) -le "$run_max" ] || fail "this run spent $run_spent + this job $proj core-h exceeds budget_core_hours=$run_max; a human decides whether a new run continues it"
 fi
-live=$(squeue -A "$acct" -u "$USER" -h | wc -l)
+live=$("$sbin/squeue" -A "$acct" -u "$USER" -h | wc -l)
 [ $(( live + n )) -le "$max_conc" ] || fail "$live live + $n new jobs exceeds max_concurrent_jobs=$max_conc; wait for running jobs to finish"
+# The checked time, nodes and array follow the caller's options, so sbatch takes them over any other form or variable,
+# and --ignore-pbs keeps sbatch from reading an array or a walltime from #PBS lines, which preflight does not read.
+# The --comment before them is spare: a last caller option that wants a value takes it, and the rest stand.
+set -- "$@" --comment="run:$run_id" --ignore-pbs --time="$wall" --nodes="$nodes" ${array:+--array="$array"}
+unset SBATCH_ARRAY_INX
 
 echo "PREFLIGHT OK: $run_id nodes=$nodes time=${wmin}m tasks=$n projected=$proj spent=$spent queued=$queued available=$avail" >&2
 exec sbatch "$@" --account="$acct" --job-name="$run_id" --comment="run:$run_id" "$job"
