@@ -1197,6 +1197,8 @@ case $FAKE_REVIEW in
   dirty) echo junk >> calc.py; echo "VERDICT: approve - fine" ;;
   none) echo "It looks fine to me." ;;
   crash) echo 'Error: Authentication required.' >&2; exit 3 ;;
+  node) printf '/opt/agent/index.js:2\n  WebAssembly.instantiate(bytes)\n  ^\n\nRangeError: WebAssembly.instantiate(): Out of memory\n    at main (/opt/agent/index.js:2:3)\n\nNode.js v24.5.0\n' >&2; exit 1 ;;
+  silent) ;;
   semicolons) echo "VERDICT: escalate - ;split;; the reason;;; here;" ;;
   fenced) printf 'Report.\n```\nVERDICT: approve - fenced verdict\n```\n' ;;
   *) printf 'Report.\nVERDICT: %s - reason for %s  \n\n' "$FAKE_REVIEW" "$FAKE_REVIEW" ;;
@@ -1268,7 +1270,22 @@ expect review-escalate-queue ok '^🩺 n2 · approve · Review of PR #5 needs yo
 expect review-reason-semicolons fail '^VERDICT: escalate - split; the reason; here$' -- review semicolons
 expect review-reason-semicolons-queued ok '^Why: split; the reason; here$' -- "$guard" needs-you show n3
 expect review-no-verdict fail "^VERDICT: escalate - the reviewer's last line is not a VERDICT line$" -- review none
-expect review-crash fail '^VERDICT: escalate - the reviewer command exited 3: Error: Authentication required.$' -- review crash
+rows_before=$(wc -l < "$reviews"); rm "$RV/.git/guard/needs-you.tsv"
+review crash > "$tmp/crash.out" 2>&1; echo "exit $?" >> "$tmp/crash.out"
+expect review-crash-exit-2 ok '^exit 2$' -- tail -n 1 "$tmp/crash.out"
+expect review-crash-unavailable ok "^guard review: reviewer unavailable: Error: Authentication required\\. $tmp/fake-reviewer exited 3; its stderr is in $RV/.git/guard/reviews/5-[0-9a-f]{12}-r1\\.txt\\.err$" -- cat "$tmp/crash.out"
+expect review-crash-no-verdict fail - -- grep -q VERDICT "$tmp/crash.out"
+expect review-crash-not-recorded ok "^$rows_before$" -- bash -c 'wc -l < "$1"' _ "$reviews"
+expect review-crash-not-queued ok '^Nothing needs you\.$' -- "$guard" needs-you
+expect review-crash-err-kept ok '^Error: Authentication required\.$' -- bash -c 'cat "$1"/5-*-r1.txt.err' _ "$RV/.git/guard/reviews"
+review node > "$tmp/node.out" 2>&1; echo "exit $?" >> "$tmp/node.out"
+expect review-node-exit-2 ok '^exit 2$' -- tail -n 1 "$tmp/node.out"
+expect review-node-first-error ok '^guard review: reviewer unavailable: RangeError: WebAssembly\.instantiate\(\): Out of memory\. .* exited 1;' -- cat "$tmp/node.out"
+review silent > "$tmp/silent.out" 2>&1; echo "exit $?" >> "$tmp/silent.out"
+expect review-silent-exit-2 ok '^exit 2$' -- tail -n 1 "$tmp/silent.out"
+expect review-silent-unavailable ok "^guard review: reviewer unavailable: $tmp/fake-reviewer exited 0 with an empty reply\\.$" -- cat "$tmp/silent.out"
+expect review-unavailable-not-recorded ok "^$rows_before$" -- bash -c 'wc -l < "$1"' _ "$reviews"
+expect review-unavailable-not-queued ok '^Nothing needs you\.$' -- "$guard" needs-you
 expect review-dirty-discarded ok 'uncommitted edits, and they are discarded' -- review dirty
 expect review-dirty-not-pushed ok "^$old_head	" -- git ls-remote origin refs/heads/feat/add
 expect review-strict-verdict fail 'not a VERDICT line' -- review 'approve?'
@@ -1296,9 +1313,9 @@ expect review-fallback-recorded ok '	approve	cursor-agent	reason for approve$' -
 expect review-fallback-one-call ok '^1$' -- grep -c '^call no-token -p --force --trust Read ' "$tmp/fake/calls"
 expect review-fallback-reset fail - -- grep -q 'uncommitted edits' "$tmp/fallback.out"
 expect review-fallback-not-pushed ok "^$old_head	" -- git ls-remote origin refs/heads/feat/add
-expect review-fallback-all-fail fail '^VERDICT: escalate - the reviewer command exited 3: Error: Authentication required\.$' -- \
+expect review-fallback-all-fail fail '^guard review: reviewer unavailable: Error: Authentication required\. cursor-agent exited 3;' -- \
   review crash PATH="$tmp/badclaude:$tmp/fakebin:$PATH"
-expect review-fallback-all-fail-recorded ok '	escalate	cursor-agent	the reviewer command exited 3' -- tail -n 1 "$reviews"
+expect review-fallback-all-fail-not-recorded ok '	approve	cursor-agent	reason for approve$' -- tail -n 1 "$reviews"
 review approve PATH="$tmp/fakeclaude:$tmp/fakebin:$PATH" >/dev/null 2>&1
 expect review-claude-alone ok '^call no-token -p --permission-mode acceptEdits --strict-mcp-config --setting-sources project --disable-slash-commands --tools=Bash,Read,Edit,Grep,Glob --allowedTools=Bash Read ' -- cat "$tmp/fake/calls"
 expect review-claude-alone-once ok '^1$' -- grep -c '^call' "$tmp/fake/calls"
@@ -1514,8 +1531,11 @@ expect batch-max-per-session ok '^14 15 $' -- bash -c 'tr "\n" " " < "$1"' _ "$t
 fresh; batch env FAKE_TWICE=14 "$guard" review --batch >/dev/null 2>&1
 expect batch-two-lines-escalate ok "	14	[0-9a-f]*	escalate	.*one VERDICT line for #14$" -- cat "$bt_reviews"
 expect batch-two-lines-other-fine ok "	15	[0-9a-f]*	approve	.*fine 15$" -- cat "$bt_reviews"
-fresh; batch env FAKE_BATCH=crash "$guard" review --batch >/dev/null 2>&1
-expect batch-crash-escalates ok '^2$' -- grep -c '	escalate	.*the reviewer command exited 3: Error: rate limited$' "$bt_reviews"
+fresh; batch env FAKE_BATCH=crash "$guard" review --batch > "$tmp/batch.out" 2>&1; echo "exit $?" >> "$tmp/batch.out"
+expect batch-crash-exit-2 ok '^exit 2$' -- tail -n 1 "$tmp/batch.out"
+expect batch-crash-not-recorded ok '^0$' -- bash -c 'grep -c "	1[45]	" "$1" || true' _ "$bt_reviews"
+expect batch-crash-not-queued fail - -- bash -c '"$1" needs-you | grep -q "Review of PR #1[45]"' _ "$guard"
+expect batch-crash-summary ok '^  #14 small: not reviewed; reviewer unavailable: Error: rate limited\. .*fake-batch exited 3;' -- cat "$tmp/batch.out"
 fresh; batch env FAKE_BATCH=trailer "$guard" review --batch >/dev/null 2>&1
 expect batch-verdicts-must-end-reply ok '^2$' -- grep -c '	escalate	.*one VERDICT line for #1[45]$' "$bt_reviews"
 fresh; batch env FAKE_BATCH=commit "$guard" review --batch > "$tmp/batch.out" 2>&1
