@@ -178,7 +178,7 @@ qget() { [ $explore = 1 ] || awk -F': *' -v k="$1" '$1==k && $2 !~ /</ {print $2
 if [ $explore = 0 ]; then
   waiver=$(qget checks); [ -n "$waiver" ] || waiver=$(get checks)
   [[ $waiver =~ ^waived[[:space:]]+[^[:space:]\<] ]] || [ -n "$(git ls-tree -r "$base" -- "$run_dir/checks/" | awk '$1 == "100755"')" ] \
-    || fail "no executable domain check in $run_dir/checks/ on $base; a verifier writes them in a pull request that changes only $run_dir/checks/, a person merges it, then submit; or the question card says checks: waived <reason>"
+    || fail "no executable domain check in $run_dir/checks/ on $base; commit them there with the question card, or in a pull request that changes only $run_dir/checks/, and submit once a person merges it; or the question card says checks: waived <reason>"
 fi
 deadline=$(qget deadline)
 [ -z "$deadline" ] || [[ ! $(date +%F) > $deadline ]] || fail "past deadline $deadline in $run_dir/question.card; a human decides whether a new run continues it"
