@@ -712,7 +712,7 @@ gate_static() {
     load_qcard "$run_dir"
     waiver=$(qval checks); [ -n "$waiver" ] || waiver=$(card_or_default checks "")
     [[ $waiver =~ ^waived[[:space:]]+[^[:space:]] ]] || [ -n "$(git ls-tree -r "$base" -- "$run_dir/checks/" | awk '$1 == "100755"')" ] \
-      || fail "no executable domain check in $run_dir/checks/ on $base; a verifier writes them in a pull request that changes only $run_dir/checks/, a person merges it, then submit; or the question card says checks: waived <reason>"
+      || fail "no executable domain check in $run_dir/checks/ on $base; commit them there with the question card, or in a pull request that changes only $run_dir/checks/, and submit once a person merges it; or the question card says checks: waived <reason>"
   fi
   stop=$(need stop_date) || exit $?
   [[ ! $(date +%F) > $stop ]] || fail "past stop_date $stop; a human extends stop_date in guard/budget.card on the protected branch"

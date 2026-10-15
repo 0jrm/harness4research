@@ -205,7 +205,7 @@ expect preflight-budget-not-integer fail "^PREFLIGHT FAIL: budget card 'cores_pe
 git reset -q --hard HEAD~2
 expect preflight-budget-waiver ok 'PREFLIGHT OK' -- guard/run preflight "$R" job.sh
 sed -i '/^checks: /d' guard/budget.card; git commit -q -am "no project waiver"
-expect preflight-no-checks fail "^PREFLIGHT FAIL: no executable domain check in $R/checks/ on HEAD; a verifier writes them in a pull request that changes only $R/checks/, a person merges it, then submit; or the question card says checks: waived <reason>$" -- \
+expect preflight-no-checks fail "^PREFLIGHT FAIL: no executable domain check in $R/checks/ on HEAD; commit them there with the question card, or in a pull request that changes only $R/checks/, and submit once a person merges it; or the question card says checks: waived <reason>$" -- \
   env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 mkdir -p "$R/checks"; printf '#!/bin/bash\necho fine\n' > "$R/checks/bounds.sh"; git add -A; git commit -q -m "checks, not executable"
 expect preflight-checks-not-executable fail '^PREFLIGHT FAIL: no executable domain check' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
@@ -307,7 +307,7 @@ expect ripples-clean ok 'PASS.budget.30 of 10000' -- guard/run ripples "$R"
 expect ripples-no-sacct ok 'UNCHECKED.job-states.*UNCHECKED.walltime-headroom.*UNCHECKED.retries.*UNCHECKED.budget.*PASS.quota.42%' -- \
   env PATH="$(path_without sacct)" bash -c 'set -o pipefail; guard/run ripples "$1" 2>&1 | tr "\n" " "' _ "$R"
 expect ripples-unchecked-remedy ok '^UNCHECKED	budget	sacct not found on PATH on this host; run ripples on the cluster login node to check$' -- env PATH="$(path_without sacct)" guard/run ripples "$R"
-expect ripples-domain-remedy ok '^UNCHECKED	domain-checks	no executable runs/2026-09-29-demo/checks/\*; a verifier, not the implementer, adds scripts there that exit non-zero when a result looks wrong, in a pull request that changes only that directory, which a person merges before the first full submission$' -- guard/run ripples "$R"
+expect ripples-domain-remedy ok '^UNCHECKED	domain-checks	no executable runs/2026-09-29-demo/checks/\*; add scripts there that exit non-zero when a result looks wrong, with the question card or in a pull request that changes only that directory, which a person merges before the first full submission$' -- guard/run ripples "$R"
 expect ripples-tty-unchecked ok '^UNCHECKED  budget {21}sacct not found on PATH on this host; run ripples' -- on_tty env NO_COLOR=1 PATH="$(path_without sacct)" guard/run ripples "$R"
 # Off the cluster sacct can exist yet list nothing and exit 0, and the quota path can be missing: no verdict, so no PASS.
 R4=runs/2026-10-05-no-jobs; mkdir -p "$R4"; cp runs/_template/question.card "$R4/question.card"; git add -A; git commit -q -m "run: a run with no jobs"
@@ -635,7 +635,7 @@ echo "metric: changed" >> "$R2/question.card"; git commit -q -am "edit card"
 expect launch-card-frozen fail 'edited after its first commit' -- L "$R2" --time=1 --gpus=none --mem=0.01 -- true
 git reset -q --hard HEAD~1
 git switch -q --detach HEAD; sed -i '/^checks: /d' guard/budget.card; git commit -q -am "no project waiver"
-expect launch-no-checks fail "^LAUNCH FAIL: no executable domain check in $R2/checks/ on HEAD; a verifier writes them" -- env HPC_GUARD_REF=HEAD HPC_SPEND_RESERVE=1 guard/run launch "$R2" --time=1 --gpus=none --mem=0.01 -- true
+expect launch-no-checks fail "^LAUNCH FAIL: no executable domain check in $R2/checks/ on HEAD; commit them there with the question card" -- env HPC_GUARD_REF=HEAD HPC_SPEND_RESERVE=1 guard/run launch "$R2" --time=1 --gpus=none --mem=0.01 -- true
 git switch -q -
 git switch -q --detach HEAD; echo "card_on_main: yes" >> guard/budget.card; git commit -q -am "cards on main"; git branch -q -f launch-card-base HEAD
 R11=runs/2026-10-14-unread-launch; mkdir -p "$R11"; cp runs/_template/question.card "$R11/"; git add -A; git commit -q -m "run: a card nobody read"

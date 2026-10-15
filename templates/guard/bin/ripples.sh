@@ -131,7 +131,7 @@ for c in "$run_dir"/checks/*; do
   elif [ $rc -eq 77 ]; then say UNCHECKED "check:$(basename "$c")" "$(tail -n1 <<<"$out"); it exits 77 until its input exists"
   else say RIPPLE "check:$(basename "$c")" "$(tail -n1 <<<"$out"); run $c $run_dir for its full output"; fi
 done
-[ $found -eq 1 ] || say UNCHECKED domain-checks "no executable $run_dir/checks/*; a verifier, not the implementer, adds scripts there that exit non-zero when a result looks wrong, in a pull request that changes only that directory, which a person merges before the first full submission"
+[ $found -eq 1 ] || say UNCHECKED domain-checks "no executable $run_dir/checks/*; add scripts there that exit non-zero when a result looks wrong, with the question card or in a pull request that changes only that directory, which a person merges before the first full submission"
 # launch prints nothing unless launch_hosts names a host, so a project that never opted in gets no new line.
 if [ -n "$launch" ]; then
   while IFS=$'\t' read -r s k d n; do
