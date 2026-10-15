@@ -286,7 +286,7 @@ expect ripples-check fail 'RIPPLE.check:nan.sh.nan count 3' -- guard/run ripples
 printf '#!/bin/bash\necho "no metrics.csv yet"; exit 77\n' > "$R/checks/later.sh"; chmod +x "$R/checks/later.sh"
 expect ripples-check-not-yet fail '^UNCHECKED	check:later.sh	no metrics.csv yet; it exits 77 until its input exists$' -- guard/run ripples "$R"
 rm "$R/checks/later.sh"
-expect ripples-watched fail 'RIPPLE.watched-paths' -- guard/run ripples "$R"
+expect ripples-watched fail 'RIPPLE.watched-paths.*a human merges changes to watched paths, so submit nothing until they reach ' -- guard/run ripples "$R"
 expect ripples-quota fail 'PASS.quota.42%' -- guard/run ripples "$R"
 expect ripples-other-run-ignored fail 'retries.2 not' -- guard/run ripples "$R"
 expect ripples-piped-tsv ok - -- bash -c 'out=$(guard/run ripples "$1" | cat); [ -n "$out" ] && ! grep -vE "^(PASS|RIPPLE|HANDLED|UNCHECKED)	[^	]+	[^	]*$" <<<"$out"' _ "$R"

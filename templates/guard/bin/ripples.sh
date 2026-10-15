@@ -33,7 +33,7 @@ else say PASS question-card-frozen ""; fi
 
 if [ ${#watch[@]} -gt 0 ]; then
   w=$( { git diff --name-only "$base"...HEAD -- "${watch[@]}"; git status --porcelain --untracked-files=all -- "${watch[@]}"; } | sort -u)
-  if [ -z "$w" ]; then say PASS watched-paths ""; else say RIPPLE watched-paths "$(echo $w); revert them to $base and commit, since a human changes watched paths"; fi
+  if [ -z "$w" ]; then say PASS watched-paths ""; else say RIPPLE watched-paths "$(echo $w); a human merges changes to watched paths, so submit nothing until they reach $base: a new run's checks ride its question card's pull request, and any other change goes back to $base"; fi
 else say UNCHECKED watched-paths "a human lists verifier, test and threshold paths in guard/watch.list"; fi
 
 # launch.sh runs only for a project that opted in or a run with a ledger, so a Slurm project pays nothing for it.
