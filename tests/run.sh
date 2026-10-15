@@ -1761,6 +1761,10 @@ upgrade_from() {
   mkdir -p runs/legacy; cp runs/_template/question.card runs/_template/report.md runs/legacy/
   git add -A; git commit -q -m "budget, site edits, and a legacy run"; git push -q origin HEAD:main; git fetch -q origin
   old_names=$(names runs/legacy)
+  if git -C "$here" diff --quiet "$tag" HEAD -- templates; then
+    expect "$c-current" ok 'already current' -- "$guard" init "$p" --update --worktree "$p.up"
+    cd "$tmp/wt" || return; return
+  fi
   expect "$c-update" ok 'Changed:' -- "$guard" init "$p" --update --worktree "$p.up"
   expect "$c-card-kept" ok '^account: gom$' -- cat "$p.up/guard/budget.card"
   if git -C "$here" show "$tag:templates/guard/budget.card" | grep -q '^max_handled_failures:'; then
@@ -1771,7 +1775,10 @@ upgrade_from() {
   expect "$c-workflow-edit-kept" ok 'runs-on: self-hosted' -- cat "$p.up/.github/workflows/guard-fence.yml"
   expect "$c-no-conflicts" fail - -- grep -rlE '^(<{7}|>{7}) ' "$p.up/guard" "$p.up/.github"
   expect "$c-schema" ok "^schema: $(cat "$here/SCHEMA")$" -- cat "$p.up/guard/VERSION"
-  expect "$c-merge-policy" ok '^merge_policy: autonomous$' -- cat "$p.up/guard/budget.card"
+  # A key the install's template already had and the project's card lacks was removed on purpose, so it stays out.
+  if git -C "$here" show "$tag:templates/guard/budget.card" | grep -q '^merge_policy:'; then
+    expect "$c-merge-policy-not-readded" fail - -- grep '^merge_policy:' "$p.up/guard/budget.card"
+  else expect "$c-merge-policy" ok '^merge_policy: autonomous$' -- cat "$p.up/guard/budget.card"; fi
   expect "$c-lineage-keys" ok '^spawned_from: <' -- grep -A1 '^supersedes: <' "$p.up/runs/_template/question.card"
   git -C "$p.up" push -q origin guard/update:main; git fetch -q origin; git switch -q -c agent origin/main
   mkdir -p runs/r; cp runs/_template/question.card runs/r/
