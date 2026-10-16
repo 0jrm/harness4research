@@ -178,7 +178,7 @@ guard/bin/manifest.sh             records commit, modules, and inputs at the sta
 guard/bin/fence.sh                the merge inspector, also run by CI
 guard/bin/launch.sh               runs a job on a GPU box without a scheduler, under a supervisor that enforces its limits
 guard/SURVEY.md                   the survey, for the cleanup
-.github/workflows/guard-fence.yml runs the fence on every pull request
+.github/workflows/guard-fence.yml runs the fence on every pull request, from the harness release guard/budget.card pins
 runs/_template/                   question card and report templates
 ```
 
