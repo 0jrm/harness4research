@@ -1,6 +1,6 @@
 # How agents review and merge their own work
 
-An agent in a guarded repository can take a change from a finished branch to a merged pull request without a person in the loop. Three commands do the work: `guard review` gets a second model to judge the change, `guard merge` merges only when every condition holds, and `guard needs-you` queues whatever is left for a person. Whether this lowers rule violations or keeps agent success is unmeasured; [evaluation.md](evaluation.md) describes how it will be measured. The review is a quality tool, not an enforcement point: the walls are the checks and the ruleset, as the last section says. `guard ship` runs the first two over every open pull request at once, a few times a day. This page explains what each one checks, how `guard ship` sorts pull requests into tiers, what agents never do, and where the protection stops.
+An agent in a guarded repository can take a change from a finished branch to a merged pull request without a person in the loop. Three commands do the work: `guard review` gets a second model to judge the change, `guard merge` merges only when every condition holds, and `guard needs-you` queues whatever is left for a person. Whether this lowers rule violations or keeps agent success is unmeasured; [evaluation.md](evaluation.md) describes how it will be measured. The review is a quality tool, not an enforcement point: the walls are the checks and the ruleset, as the last section says. `guard ship` runs the first two over every open pull request at once: as soon as a record-only pull request passes its checks, and otherwise once `review_batch_max` wait or the oldest is `ship_interval_hours` old. This page explains what each one checks, how `guard ship` sorts pull requests into tiers, what agents never do, and where the protection stops.
 
 ## Two merge modes
 
@@ -79,7 +79,7 @@ Items 2 and 3 are why autonomous merge needs [the enforceable setup](enforceable
 
 ## Tiers and batches
 
-A model review cost 1.5 to 3.5 million input tokens before the reviewer was trimmed, and costs about 300,000 to 400,000 now. In one project, 79 pull requests merged in a week, and 31 of them only added run records. `guard ship` spends a model review only where one helps. It sorts each open pull request into a tier by the paths it changes and its size, then reviews and merges them together, a few times a day.
+A model review cost 1.5 to 3.5 million input tokens before the reviewer was trimmed, and costs about 300,000 to 400,000 now. In one project, 79 pull requests merged in a week, and 31 of them only added run records. `guard ship` spends a model review only where one helps. It sorts each open pull request into a tier by the paths it changes and its size, then reviews and merges them together: at once for a green record-only pull request, which needs no model, and otherwise within `ship_interval_hours`.
 
 `pr_tier` in [lib/pr.sh](../lib/pr.sh) gives the tier from the diff between the base branch and the pull request's head. The first row that matches wins.
 

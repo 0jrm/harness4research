@@ -7,8 +7,9 @@
 # queues human ones for a person: one digest item for new question cards, one merge item for each other.
 # merge runs guard merge's gate on every pull request approved at its head, lowest number first, and queues one item
 # for all it refuses.
-# ship runs review and then merge once the batch is due: review_batch_max pull requests wait, or the oldest waiting
-# one is ship_interval_hours old. Until then it only refreshes the question card digest. --now runs it at once.
+# ship runs review and then merge once the batch is due: a records pull request has passed every check, since it needs
+# no model, or review_batch_max pull requests wait, or the oldest waiting one is ship_interval_hours old, the longest a
+# reviewed pull request waits. Until then it only refreshes the question card digest. --now runs it at once.
 # When no reviewer can run, review and ship record and queue nothing for the pull requests left unreviewed, and exit 2.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -27,25 +28,29 @@ refused_title="Merge approved pull requests"
 batch_wt=$state/review-worktrees/batch
 
 prs=() notes=() review_ran=0 reviewer_down=""
-declare -A title_of ref_of head_of base_of created_of tier_of verdict_of merged refused
+declare -A title_of ref_of head_of base_of created_of tier_of green_of verdict_of merged refused
 
 # load_prs: sets prs, the open pull requests of origin by number, and for each title_of, ref_of, head_of, base_of,
-# created_of (epoch seconds) and tier_of. Notes the drafts, forks and unpushed heads it leaves out.
+# created_of (epoch seconds), tier_of and green_of (yes when at least one check ran and every check passed). Notes the
+# drafts, forks and unpushed heads it leaves out.
 load_prs() {
-  local rows n t r h b fork draft c bad
+  local rows n t r h b fork draft c g bad
   bad=$(config_whole review_small_lines) || refuse "$bad"
   rows=$(gh pr list --state open --limit 500 \
-    --json number,title,headRefName,headRefOid,baseRefName,isCrossRepository,isDraft,createdAt --jq 'sort_by(.number)[] |
+    --json number,title,headRefName,headRefOid,baseRefName,isCrossRepository,isDraft,createdAt,statusCheckRollup \
+    --jq 'sort_by(.number)[] |
       [.number, .title, .headRefName, .headRefOid, .baseRefName, (.isCrossRepository | tostring), (.isDraft | tostring),
-       (.createdAt | fromdateiso8601)] | @tsv' 2>&1) || refuse "gh cannot list the open pull requests: $(why "$rows")"
+       (.createdAt | fromdateiso8601),
+       (if (.statusCheckRollup | length) > 0 and all(.statusCheckRollup[]; (.conclusion // .state) as $c
+          | ["SUCCESS", "NEUTRAL", "SKIPPED"] | index($c)) then "yes" else "no" end)] | @tsv' 2>&1) || refuse "gh cannot list the open pull requests: $(why "$rows")"
   git -C "$top" fetch -q origin || refuse "cannot fetch origin."
-  while IFS=$'\t' read -r n t r h b fork draft c; do
+  while IFS=$'\t' read -r n t r h b fork draft c g; do
     [ -n "$n" ] || continue
     if [ "$fork" = true ]; then notes+=("#$n comes from a fork, and guard reviews branches of origin only."); continue; fi
     if [ "$draft" = true ]; then notes+=("#$n is a draft."); continue; fi
     if [ "$(git -C "$top" rev-parse -q --verify "origin/$r" || true)" != "$h" ]; then
       notes+=("#$n waits for its head ${h:0:7}, which origin/$r is not at after a fetch."); continue; fi
-    prs+=("$n"); title_of[$n]=$t ref_of[$n]=$r head_of[$n]=$h base_of[$n]=$b created_of[$n]=$c
+    prs+=("$n"); title_of[$n]=$t ref_of[$n]=$r head_of[$n]=$h base_of[$n]=$b created_of[$n]=$c green_of[$n]=$g
     tier_of[$n]=$(pr_tier "origin/$b" "$h")
   done <<<"$rows"
 }
@@ -228,7 +233,7 @@ summary() {
 
 # ship [--now]: runs review and merge when the batch is due, and otherwise refreshes the question card digest.
 ship() {
-  local n max interval now oldest="" waiting=()
+  local n max interval now oldest="" waiting=() green=""
   max=$(config_whole review_batch_max) || refuse "$max"
   interval=$(config_whole ship_interval_hours) || refuse "$interval"
   load_prs
@@ -236,15 +241,17 @@ ship() {
     [ "${tier_of[$n]}" != human ] || continue
     case $(verdict_at_head "$n") in ""|approve) ;; *) continue ;; esac
     waiting+=("#$n")
+    [ "${tier_of[$n]}" != records ] || [ "${green_of[$n]}" != yes ] || green+=" #$n"
     [ -n "$oldest" ] && [ "$oldest" -le "${created_of[$n]}" ] || oldest=${created_of[$n]}
   done
   now=$(date +%s)
-  if [ "$*" != --now ] && [ ${#waiting[@]} -lt "$max" ] && { [ -z "$oldest" ] || [ $((now - oldest)) -lt $((interval * 3600)) ]; }; then
+  if [ "$*" != --now ] && [ -z "$green" ] && [ ${#waiting[@]} -lt "$max" ] && { [ -z "$oldest" ] || [ $((now - oldest)) -lt $((interval * 3600)) ]; }; then
     refresh_card_digest
     if [ -z "$oldest" ]; then echo "$name: nothing waits for review or merge."
     else echo "$name: ${#waiting[@]} pull request(s) wait (${waiting[*]}). The batch is due in about $(( (oldest + interval * 3600 - now + 3599) / 3600 )) hour(s), when the oldest is $interval hours old, or once $max wait. guard ship --now runs it now."; fi
     return
   fi
+  [ -z "$green" ] || echo "$name: due now: green records pull request(s)$green need no model."
   review_batch
   merge_batch
   summary
