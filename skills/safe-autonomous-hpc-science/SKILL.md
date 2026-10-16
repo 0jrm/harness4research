@@ -40,7 +40,7 @@ A guarded repo has `guard/`, `FACTS.md`, and a `guard-fence` CI check. Without `
 
 A guard's block is the answer: report it, never route around it.
 
-This text describes guard schema 6. Once per session, read `git show origin/main:guard/VERSION`. If its `schema:` line is missing or lower, tell the human that `guard init <repo> --update` is pending. If it is higher, tell them to pull harness4research, and trust the scripts' output over this text. A usage error from `guard/run` means the project lacks that command. Report it, and never run the harness's own copy instead.
+This text describes guard schema 7. Once per session, read `git show origin/main:guard/VERSION`. If its `schema:` line is missing or lower, tell the human that `guard init <repo> --update` is pending. If it is higher, tell them to pull harness4research, and trust the scripts' output over this text. A usage error from `guard/run` means the project lacks that command. Report it, and never run the harness's own copy instead.
 
 ## Run lifecycle
 

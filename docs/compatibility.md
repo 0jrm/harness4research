@@ -8,67 +8,34 @@ Stable means additions only. Nothing on this list is renamed or removed.
 
 | Surface | Stable part |
 |---|---|
-| Paths | `guard/run`, `guard/bin/{preflight,ripples,manifest,fence,code,launch}.sh`, `guard/budget.card`, `guard/watch.list`, `guard/VERSION`, `runs/_template/{question.card,report.md,execution.tsv}`, `runs/<id>/{question.card,report.md,execution.tsv,checks/*,incidents/*.md}` |
+| Paths | `guard/run`, `guard/budget.card` with its `harness:` pin, `guard/watch.list`, `guard/VERSION`, `guard/harness-<pin>.sh` (offline projects), `runs/_template/{question.card,report.md,execution.tsv}`, `runs/<id>/{question.card,report.md,execution.tsv,checks/*,incidents/*.md}` |
 | Workflow | `.github/workflows/guard-fence.yml`, workflow name `guard-fence`, job id `fence`. Rulesets require the check `guard-fence / fence`, so a renamed job leaves every pull request waiting. The job reads `harness:` from the base branch's `guard/budget.card` and runs `guard/run fence` with `HPC_HARNESS` at a checkout of `0jrm/harness4research` at the pin, or from `guard/harness-<pin>.sh` when the base branch has it; a card without the pin runs `guard/bin/fence.sh`. |
-| Calling convention | `guard/run <command> args` runs the base branch's script as `bash -c "$script" guard/bin/<command>.sh args` from the repository top, with `HPC_CALLER_DIR` set to the directory the caller ran it from. Any `guard/run` must run any script version, because agent branches carry an older working-tree `guard/run`. |
-| Environment | `HPC_GUARD_REF`, `HPC_GUARD_LOCAL`, `HPC_SPEND_RESERVE`, `HPC_LOCK_FILES`, `HPC_HASH_INPUTS`, `HPC_CODE_ROOT`, `HPC_RIPPLES_TSV`, `HPC_REVIEWER_PROBE_SECONDS` (read by `guard doctor`), `HPC_CALLER_DIR` (set by `guard/run`), and `HPC_JOB_ID` and `HPC_RUN_DIR`, which launch sets for its job and the manifest reads |
+| Calling convention | `guard/run <command> args`, for the commands `preflight`, `ripples`, `manifest`, `fence`, `code` and `launch`, runs `lib/guard/<command>.sh` from the harness at the base branch's pin (or from `guard/harness-<pin>.sh`) as `bash -c "$script" guard/bin/<command>.sh args` from the repository top, with `HPC_CALLER_DIR` set to the directory the caller ran it from. Any `guard/run` must run any script version, because agent branches carry an older working-tree `guard/run`. |
+| Environment | `HPC_HARNESS` (the harness clone the shim runs from), `HPC_GUARD_REF`, `HPC_GUARD_LOCAL`, `HPC_SPEND_RESERVE`, `HPC_LOCK_FILES`, `HPC_HASH_INPUTS`, `HPC_CODE_ROOT`, `HPC_RIPPLES_TSV`, `HPC_REVIEWER_PROBE_SECONDS` (read by `guard doctor`), `HPC_CALLER_DIR` (set by `guard/run`), and `HPC_JOB_ID` and `HPC_RUN_DIR`, which launch sets for its job and the manifest reads |
 | Exit codes | 64 is a usage error everywhere. Preflight exits 2 when it refuses, otherwise with sbatch's code. Ripples exits 0, or 1 to stop submissions. The fence exits 0 or 1. `code` exits 2 when it refuses. Launch exits 2 when it refuses or its job does not start, and 0 once the job runs. `guard/run` exits 2 when the script is missing on the base branch or does not parse. |
 | Output | Ripples and the fence print `STATUS<TAB>check<TAB>detail`. When its stdout is a terminal, ripples prints the same lines as an aligned table instead, coloured unless `NO_COLOR` is set or `TERM` is `dumb`. A program that reads the output through a pipe or a file gets the TSV, and one that reads through a terminal (`ssh -t`, a pty) sets `HPC_RIPPLES_TSV=1` to get it. Ripples statuses are PASS, RIPPLE, HANDLED, UNCHECKED. Fence statuses are PASS, FAIL, WARN. Check names are never removed; a check that cannot run says UNCHECKED. Preflight keeps the `PREFLIGHT OK:` and `PREFLIGHT FAIL:` prefixes. Launch keeps `LAUNCH OK:` and `LAUNCH FAIL:` and prints the job id alone on stdout. |
 | Card format | Flat `key: value` lines. The first match wins. `<...>` means unset. Manifests and incidents use the same format, and incidents keep `job: <id>`. |
 | Launch records | `<host_state_dir>/<job id>/{request,start,beat,end,stop}` in the card format. Keys are only added. A job id is `<host>-<UTC %Y%m%dT%H%M%SZ>`. State words come from Slurm where Slurm has the word (COMPLETED, FAILED, TIMEOUT, OUT_OF_MEMORY, CANCELLED, PREEMPTED, NODE_FAIL, RUNNING, PENDING), plus HOST_OUT_OF_MEMORY, SUPERVISOR_FAILED and LAUNCH_FAILED. |
 | Execution ledger | `runs/<id>/execution.tsv`, tab-separated, header `id ts field value why evidence`, ids `x1`, `x2`, ... in order, append-only. Fields are `host`, `gpus`, `start`, `concurrency`, `workers`, `staging`, `mem_stop_gb`, `stage_minutes`, `resume`, `restart`; the list only grows. A line starting with `#` is a comment. A `void <id>` row retracts an earlier row whose field is not a question card key, in a pull request that changes only run records. `guard/run fence --ledger <file>` checks a ledger before it is committed. |
 | Required budget keys | `account`, `start_date`, `stop_date`, `max_core_hours`, `verification_reserve_core_hours`, `cores_per_node`, `max_nodes_per_job`, `max_walltime_minutes`, `max_concurrent_jobs`. No key is ever added to this list. |
+| Optional keys | Budget card: `harness` (the pin), `quota_pct_cmd`, `slurm_bin`, `explore_max_nodes`, `explore_max_walltime_minutes`, `explore_max_gpus`, `max_handled_failures`, `merge_policy`, `card_on_main`, `checks`, `launch_hosts`, `max_gpu_hours`, `host_max_walltime_minutes`, `host_max_mem_gb`, `host_min_available_gb`, `host_stop_grace_seconds`, `host_state_dir`, `stray_ignore`, `default_run_gpu_hours`, `default_run_core_hours`. Question card: `budget_gpu_hours`, `budget_core_hours`, `deadline`, `supersedes`, `spawned_from`, `checks`. Each has a working default, so a card without it works; what each does is in [guard-reference.md](guard-reference.md). |
+| Check names | Besides the original checks, the host and envelope checks `gpu-hours`, `host-supervision`, `host-memory`, `host-strays`, `host-log-errors`, `execution-within-envelope`, and the fence rules `execution-ledger`, `execution-history`, `card-lineage`. A check name is never removed. |
 | Fence rules | A rule judges files the pull request adds. It judges a modified file only if the file's merge-base copy already passed the rule. No rule scans the whole tree. |
 
 Free to change: the detail column, message wording after the fixed prefixes, internal code, and template comments.
 
-Optional budget keys, each with a working default the scripts share: `explore_max_nodes`, `explore_max_walltime_minutes`, `max_handled_failures`, `merge_policy`, `slurm_bin` (default `/usr/bin`, the directory preflight runs `squeue` and `sacct` from), `card_on_main` (default `no`; `yes` makes preflight refuse a run other than `explore-*` until its question card is on the protected branch, as committed on the submitting branch, which only a person merges), `checks` (unset by default; `waived <reason>` lets every run of the project submit without domain checks), and the launch and envelope keys below.
-
-Preflight refuses a run other than `explore-*` while the protected branch has no executable file in `runs/<id>/checks/`, unless the question card or the budget card says `checks: waived <reason>`. The question card's `checks` key is optional, and its placeholder means no waiver.
-
-## Launch hosts
-
-Launch is off until a human sets `launch_hosts` on the protected branch, as a space-separated list of short hostnames exactly as `hostname -s` prints them on each host (an ssh alias is refused, and the refusal names the real name). `host_state_dir` must survive a reboot: keep the default under `~/.local/state` and never point it at a tmpfs such as `/tmp` on a host where `/tmp` is RAM-backed, or every record and the GPU-hour count vanish. Its keys, `launch_hosts`, `max_gpu_hours`, `host_max_walltime_minutes`, `host_max_mem_gb`, `host_min_available_gb`, `host_stop_grace_seconds`, `host_state_dir`, `explore_max_gpus`, and `stray_ignore`, have working defaults, so a card without them works and the required list does not grow. With `launch_hosts: none`, ripples prints the same lines as before and preflight is byte-identical. Once a project opts in, the five host checks, `gpu-hours`, `host-supervision`, `host-memory`, `host-strays` and `host-log-errors`, print on every host, as UNCHECKED where they cannot look, and the job checks (`job-states`, `walltime-headroom`, `retries`, `handled-failures`) cover launched jobs through the same incident rules.
-
-## The execution envelope
-
-The question card holds the design and stays frozen. Its optional keys `budget_gpu_hours`, `budget_core_hours` and `deadline` cap one run; `default_run_gpu_hours` and `default_run_core_hours` in `guard/budget.card` are the workspace defaults, `0` meaning no per-run cap. Execution facts go in `runs/<id>/execution.tsv`. A `restart` or `resume` row may cite a resource stop (OUT_OF_MEMORY, HOST_OUT_OF_MEMORY, NODE_FAIL, PREEMPTED, SUPERVISOR_FAILED, CANCELLED, LAUNCH_FAILED), never a science stop (FAILED, TIMEOUT); the lists only grow. Ripples prints `execution-within-envelope` only for a run that has a ledger at HEAD. The fence rules `execution-ledger` and `execution-history` follow the ratchet.
-
-## Merge policy
-
-`merge_policy` in `guard/budget.card` decides whether `guard merge` may merge a pull request without a human. `autonomous`, the template value and the default when the key is missing, lets it merge once its other gates pass. Any other value, such as `semi-manual`, makes it refuse and queue the merge for a human. `guard merge` reads the key from the pull request's base branch, so an agent cannot change it on its own branch. A repository without a guard reads `merge_policy` from the user config instead (`guard config`). No other script reads the key. `guard merge` refuses every merge without a ruleset, so when GitHub offers the repository no rulesets, as for a private repository on the free plan, `guard init` and `guard init --update` set `merge_policy: semi-manual` and say why, and `guard doctor` fails while the key stays `autonomous` there.
-
-## Where each command runs
-
-Commands differ in what they need from the host. At a site with login and compute nodes, run each one where its needs are met.
-
-| Command | Needs | Runs on |
-|---|---|---|
-| `guard/run preflight`, `guard/run ripples` | git and the Slurm clients (`sbatch`, `squeue`, `sacct`), which reach the controller and the accounting database | a login node or a compute node |
-| `guard/run fence` | git | anywhere |
-| `guard review`, `guard ship` | `gh`, the internet, and the reviewer CLI (`claude` or `cursor-agent`) logged in on this host | a host with internet access, such as a login node |
-| `guard merge`, `guard doctor` | `gh` and the internet | a host with internet access |
-
-Some sites route shell commands to a compute allocation through a shell hook, and their compute nodes have no internet access. There, run `guard review` and `guard ship` on a login node. On a compute node without network, the reviewer CLI cannot reach its service. At FSU RCC, `cursor-agent` reported `Authentication required` there, although its login was valid.
-
-The reviewer CLIs run on Node.js, which reserves large regions of virtual address space for WebAssembly memory. A soft `ulimit -v` below about 8 GB makes it fail with `RangeError: WebAssembly.instantiate(): Out of memory`. FSU RCC's login nodes set the soft limit to 6 GB. Read the limits with `ulimit -Sv` and `ulimit -Hv`. When the hard limit allows it, raise the soft limit in the shell that runs `guard review` or `guard ship`, with `ulimit -v unlimited`.
-
-Login nodes can also cap the number of processes per user. FSU RCC's cap is 200. A default OpenBLAS or OpenMP thread pool starts one thread per core and can reach that cap. Set `OPENBLAS_NUM_THREADS=1` and `OMP_NUM_THREADS=1` for work on such a node.
-
-## Card lineage
-
-The question card's optional keys `supersedes` and `spawned_from` name the run id a card replaces or grew out of. The value `none` declares that the card has no parent; a `<...>` placeholder or a missing line leaves it unset. No script requires either key, so a card without them passes preflight, ripples and the fence as before. The atlas draws the question map from them. The fence rule `card-lineage` prints WARN, which does not fail the fence, when a card the pull request adds sets neither key and its id extends another carded run id by name. It judges added cards only, so an existing card never warns.
+Optional budget keys and how the scripts use them are in [guard-reference.md](guard-reference.md); each key has a working default, so a card without it works.
 
 ## Versions
 
 `SCHEMA` at the repository root holds one integer. A commit without the file is schema 1. A release raises it when it adds a command, a check name, a status, a card key, a run-file key, or a fence rule. Bug fixes do not raise it. The skill states the schema it describes, and a test keeps the two equal.
 
-Releases are annotated tags `vS.N`, where S is the schema. `v1.0` is the oldest release whose `guard init` works.
+Releases are annotated tags `vS.N`, where S is the schema. Schema 7 (v7.0) is the first where a project holds no scripts: `guard/bin/` is gone, and `guard/run` runs the harness at the pin. A schema 6 project moves once with `guard init --update`.
 
 `guard init` writes `guard/VERSION` in the project:
 
 ```text
-schema: 6
+schema: 7
 installer: <full commit of the harness that wrote this file>
 release: <git describe of that commit>
 pstack: <commit>

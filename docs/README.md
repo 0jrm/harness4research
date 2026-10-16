@@ -15,6 +15,7 @@ One line per page. None is required reading: open a page when a task names it.
 - [design-sandboxed-agents.md](design-sandboxed-agents.md): the design for sandboxed agents and the broker
 - [autonomy.md](autonomy.md): how agents review and merge their own work
 - [compatibility.md](compatibility.md): what stays stable across harness releases and `guard init --update`
+- [guard-reference.md](guard-reference.md): optional budget keys, launch hosts, the execution envelope, merge policy and card lineage
 - [releases/](releases/): release notes, one page per tag
 - [atlas.md](atlas.md): `guard atlas`, the read-only page of a guarded project
 - [atlas-json.md](atlas-json.md): the data contract behind the atlas
