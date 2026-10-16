@@ -1153,8 +1153,9 @@ expect doctor-version ok '^pass  guard schema [0-9]+ \(release .*\) against harn
 expect doctor-version-once ok - -- bash -c '! grep -E "\(release ([^ )]+)\1\)" <<<"$1"' _ "$(doctor)"
 expect doctor-workflow ok '^pass  .github/workflows/guard-fence.yml on origin/main defines guard-fence / fence$' -- doctor
 doctor > "$tmp/doctor-out"
-expect onboard-names-real-doctor-lines ok - -- bash -c 'grep -o "\`pass  [^\`]*\`" "$1" | tr -d "\`" | sed -e "s/<[^>]*>/.*/g" -e "s/\.\.\./.*/g" |
-  while IFS= read -r line; do grep -qE "^$line" "$2" || { echo "not in doctor output: $line"; exit 1; }; done' _ "$here/skills/guard-onboard/SKILL.md" "$tmp/doctor-out"
+expect onboard-names-real-doctor-lines ok - -- bash -c 'out=$1; shift; grep -ho "\`pass  [^\`]*\`" "$@" | tr -d "\`" | sed -e "s/<[^>]*>/.*/g" -e "s/\.\.\./.*/g" |
+  while IFS= read -r line; do grep -qE "^$line" "$out" || { echo "not in doctor output: $line"; exit 1; }; done' _ "$tmp/doctor-out" "$here/skills/guard-onboard/SKILL.md" "$here"/skills/guard-onboard/references/*.md
+expect onboard-doctor-lines-counted ok '^([6-9]|[1-9][0-9]+)$' -- bash -c 'grep -ho "\`pass  [^\`]*\`" "$@" | wc -l' _ "$here/skills/guard-onboard/SKILL.md" "$here"/skills/guard-onboard/references/*.md
 expect doctor-no-colour-in-pipe fail - -- grep -q $'\e' "$tmp/doctor-out"
 expect doctor-no-gh ok '^cannot check from here  whether guard-fence / fence has run on GitHub: gh is not on PATH$' -- doctor PATH="$(path_without gh)"
 expect doctor-cannot-is-not-pass ok '^13 passed, 0 failed, 2 cannot check from here$' -- doctor PATH="$(path_without gh)"
@@ -2131,6 +2132,14 @@ chmod 755 "$tmp/locked-home/.claude"
 expect hooks-unknown-agent fail 'invalid choice' -- "$guard" hooks install codex
 
 expect eval-analyze-unit ok '^OK' -- python3 -m unittest discover -s "$here/eval/tests"
+
+echo "== budget"
+expect budget-within ok '^budget: [0-9]+ files within their budgets$' -- "$here/tests/budget.sh"
+fx_budget=$(mktemp -d); mkdir -p "$fx_budget/tests" "$fx_budget/docs"; cp "$here/tests/budget.sh" "$fx_budget/tests/"
+printf 'a.md 3\nmissing.md 9\n' > "$fx_budget/docs/BUDGET"; echo 'one two three four' > "$fx_budget/a.md"
+expect budget-over fail '^budget: a.md has 4 words, over 3$' -- "$fx_budget/tests/budget.sh"
+expect budget-no-match fail '^budget: missing.md matches no file$' -- "$fx_budget/tests/budget.sh"
+rm -rf "$fx_budget"
 
 echo; echo "$pass passed, $fail failed$([ "$skipped" -eq 0 ] || echo ", $skipped skipped")"
 [ $fail -eq 0 ]
