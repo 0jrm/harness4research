@@ -613,8 +613,8 @@ def gate(rows, baseline, path, ran_all):
             print(f"gate: {row['id']} is new, {now}; add it to {path}")
         elif now == "HELD":
             print(f"gate: {row['id']} {before} -> HELD; set it to HELD in {path} in this pull request")
-        elif attacks[row["id"]].host:
-            print(f"gate: {row['id']} HELD -> {now}, a host row, not gated")
+        elif before != "HELD" or attacks[row["id"]].host:
+            print(f"gate: {row['id']} {before} -> {now}, not gated" + (", a host row" if before == "HELD" else ""))
         else:
             print(f"gate: {row['id']} HELD -> {now}")
             failed = True
