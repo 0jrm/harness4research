@@ -726,12 +726,14 @@ gate_static() {
   [ "$mem_kb" -le "$(gb_kb "$(card_or_default host_max_mem_gb 64)")" ] || fail "--mem=$mem_gb exceeds host_max_mem_gb=$(card_or_default host_max_mem_gb 64); ask for less"
 }
 
+# sibling <command>: prints another guard script as the protected branch's guard/run resolves it.
+sibling() { local runner; runner=$(git show "$base:guard/run" 2>/dev/null) && HPC_GUARD_LOCAL=0 bash -c "$runner" guard/run --show "$1"; }
 # gate_ripples: launch refuses when ripples for the run exits 1, as preflight does. Ripples calls this file only
 # through --here, --sacct, --handled and --checks, so there is no recursion. HPC_SPEND_RESERVE=1 skips the gate.
 gate_ripples() {
   local script out rc
   [ "${HPC_SPEND_RESERVE:-0}" != 1 ] || return 0
-  script=$(git show "$base:guard/bin/ripples.sh" 2>/dev/null) || fail "ripples could not run: no guard/bin/ripples.sh on $base; a human runs guard init --update"
+  script=$(sibling ripples) || fail "ripples could not run: guard/run on $base cannot give it; a human runs guard init --update"
   out=$(bash -c "$script" guard/bin/ripples.sh "$run_dir" 2>&1); rc=$?
   case $rc in
     0) ;;
@@ -856,7 +858,7 @@ cmd_launch() {
   put_once "$rdir/request" "$(request_text)" || fail "could not write $rdir/request"
   flock -u 9
   mkdir -p "$run_dir"
-  HPC_JOB_ID=$id bash -c "$(git show "$base:guard/bin/manifest.sh")" guard/bin/manifest.sh "$run_dir" "${cmd[@]}" >/dev/null 2>&1 \
+  HPC_JOB_ID=$id bash -c "$(sibling manifest)" guard/bin/manifest.sh "$run_dir" "${cmd[@]}" >/dev/null 2>&1 \
     || echo "launch: manifest not written for $run_dir" >&2
   spawn_supervisor "$rdir" -- "${cmd[@]}"
   for ((i = 0; i < START_WAIT * 10; i++)); do [ -f "$rdir/start" ] && break; sleep 0.1; done

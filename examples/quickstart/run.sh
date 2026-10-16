@@ -34,9 +34,12 @@ git checkout -q -b main
 printf '# quickstart project\n' > README.md
 git add README.md; git commit -q -m init; git push -q -u origin main
 git remote set-head origin -a >/dev/null
-"$harness/bin/guard" init "$dir/proj" --worktree "$dir/guard-init" > "$dir/init.log"
+# --offline vendors the scripts into guard/, so the walkthrough runs without a harness clone at the pin.
+"$harness/bin/guard" init "$dir/proj" --worktree "$dir/guard-init" --offline > "$dir/init.log"
 cd "$dir/guard-init"
-cat > guard/budget.card <<'CARD'
+pin=$(grep '^harness:' guard/budget.card)
+cat > guard/budget.card <<CARD
+$pin
 account: demo
 start_date: 2026-09-01
 stop_date: 2099-01-01

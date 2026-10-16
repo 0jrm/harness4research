@@ -13,6 +13,8 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$here/lib/config.sh"
 # shellcheck source=lib/github.sh
 . "$here/lib/github.sh"
+# shellcheck source=lib/vendor.sh
+. "$here/lib/vendor.sh"
 [ $# -le 1 ] || { echo "usage: guard doctor [repo]" >&2; exit 64; }
 repo=$(git -C "${1:-.}" rev-parse --show-toplevel 2>/dev/null) || { echo "guard doctor: ${1:-.} is not a git repository" >&2; exit 2; }
 step=https://github.com/0jrm/harness4research#
@@ -56,6 +58,28 @@ check_version() {
     project-older) result fail "$item: project older" "Propose the update with guard init $repo --update: ${step}updating-a-guarded-project" ;;
     harness-older) result fail "$item: harness older or on another branch" "Update this harness with git -C $here pull: ${step}updating-a-guarded-project" ;;
     unknown-install) result fail "$item: install commit unknown" "Propose the update with guard init $repo --update --force: ${step}updating-a-guarded-project" ;;
+  esac
+}
+
+# check_mode: where guard/run reads the scripts, and whether it can. Online, the harness clone is checked out at the
+# pin; offline, guard/harness-<pin>.sh on the base branch is what the harness at the pin writes.
+check_mode() {
+  local clone=${HPC_HARNESS:-$here} problem fix art=guard/harness-$p_pin.sh text fresh
+  case $p_mode in
+    bin) result pass "guard/run runs guard/bin/ on $base, as installed before the harness: pin" ;;
+    online) problem=$(pin_problem "$clone" "$p_pin")
+      if [ -z "$problem" ]; then result pass "online: guard/run reads the scripts from the harness clone $clone at harness: $p_pin"; return; fi
+      fix="Check out the pin: $(pin_fix "$clone" "$p_pin")"
+      harness_online || fix="This host cannot reach $(harness_origin). Vendor the scripts instead, from a clone that has $p_pin: bash <clone>/lib/vendor.sh $p_pin > guard/harness-$p_pin.sh, in a pull request a person merges"
+      result fail "online, harness: $p_pin on $base, but $problem" "$fix" ;;
+    offline) text=$(git -C "$repo" show "$base:$art")
+      fix="Rewrite it from a harness clone that has $p_pin: bash <clone>/lib/vendor.sh $p_pin > $art, in a pull request a person merges"
+      if [[ $(sed -n 2p <<<"$text") != "# harness: $p_pin, commit "* ]]; then result fail "offline: $art on $base does not name harness $p_pin" "$fix"
+      elif ! fresh=$(harness_artifact "$p_pin" 2>/dev/null); then
+        result cannot "whether $art on $base holds the scripts of harness $p_pin: this harness clone lacks $p_pin" \
+          "Run guard doctor from a harness clone that has $p_pin: $(pin_fix "$here" "$p_pin")"
+      elif [ "$fresh" = "$text" ]; then result pass "offline: guard/run reads the scripts from $art on $base, which matches the harness at $p_pin"
+      else result fail "offline: $art on $base differs from the harness at $p_pin" "$fix"; fi ;;
   esac
 }
 
@@ -275,6 +299,7 @@ check_skills
 if [ $p_guarded = 1 ]; then
   result pass "guard/run is on $base"
   check_version
+  check_mode
   if card=$(git -C "$repo" show "$base:guard/budget.card" 2>/dev/null); then check_card
   else card=""; result fail "$base has no guard/budget.card" "Propose the guard with guard init $repo: ${step}2-propose-the-guard"; fi
 else

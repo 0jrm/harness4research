@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
-# usage: guard/run <preflight|ripples|manifest|fence|code|launch> [args...]
-# Runs the script as it exists on the protected branch, so edits on a working branch have no effect.
-# HPC_GUARD_LOCAL=1 runs the working-tree copy instead, for the bootstrap before guard/ is merged.
+# usage: guard/run <preflight|ripples|manifest|fence|code|launch> [args...] | guard/run --show <command>
+# Runs the guard script of the harness release that the harness: line of guard/budget.card pins, reading the card from
+# the protected branch, so an edit on a working branch, in the harness clone's working tree or in a vendored file has
+# no effect. The pin is a release tag such as v7.0, or a full commit.
+#   offline: guard/harness-<pin>.sh is on the protected branch, and the script comes from it.
+#   online:  the script comes from the harness clone's object store at the pin, and the clone must be checked out at
+#            the pin. HPC_HARNESS names the clone; otherwise it is the clone behind `guard` on PATH.
+# A card without harness: belongs to a project installed before the pin, whose scripts are guard/bin/ on the protected
+# branch. HPC_GUARD_REF names the protected branch. HPC_GUARD_LOCAL=1 runs the working-tree copy instead (this working
+# tree's card and vendored file, or the clone's lib/guard/), for the bootstrap before guard/ is merged.
+# --show prints the script instead of running it, for a guard script that runs another.
 set -euo pipefail
+show=0; if [ "${1:-}" = --show ]; then show=1; shift; fi
 cmd=${1:-}; shift || true
 base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
 case $cmd in
@@ -12,13 +21,49 @@ case $cmd in
      echo "This project's guard is schema ${schema:-1} (guard/VERSION on $base). A command it lacks needs a human to run guard init --update." >&2
      exit 64 ;;
 esac
-top=$(git rev-parse --show-toplevel)
-if [ "${HPC_GUARD_LOCAL:-0}" = 1 ]; then exec bash "$top/guard/bin/$cmd.sh" "$@"; fi
-script=$(git show "$base:guard/bin/$cmd.sh" 2>/dev/null) \
-  || { echo "guard/bin/$cmd.sh is not on $base yet. Merge the guard PR, or set HPC_GUARD_LOCAL=1 for a first test." >&2; exit 2; }
-if grep -qE '^(<{7}|>{7}|\|{7})( |$)' <<<"$script" || ! bash -n <<<"$script" 2>/dev/null; then
-  echo "guard/bin/$cmd.sh on $base has unresolved conflicts or does not parse. A human fixes guard/ in a pull request." >&2; exit 2
+refuse() { echo "$*" >&2; exit 2; }
+# A bare repository, such as a forge's in its pre-receive hook, has no working tree; the script runs where it is.
+top=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+local_copy=${HPC_GUARD_LOCAL:-0}
+if [ "$local_copy" = 1 ]; then card=$(cat "$top/guard/budget.card" 2>/dev/null || true); where="the working tree"
+else card=$(git show "$base:guard/budget.card" 2>/dev/null || true); where=$base; fi
+pin=$(awk -F': *' '$1=="harness" {print $2; exit}' <<<"$card")
+name=guard/bin/$cmd.sh
+if [ -z "$pin" ] && [ "$local_copy" = 1 ]; then
+  script=$(cat "$top/$name" 2>/dev/null) || refuse "$name is not in the working tree, and guard/budget.card there has no harness: line."
+elif [ -z "$pin" ]; then
+  script=$(git show "$base:$name" 2>/dev/null) \
+    || refuse "$name is not on $base yet. Merge the guard PR, or set HPC_GUARD_LOCAL=1 for a first test."
+else
+  [[ $pin =~ ^(v[0-9][0-9A-Za-z._-]*|[0-9a-f]{40})$ ]] \
+    || refuse "guard/budget.card on $where pins harness: $pin, which is neither a release tag such as v7.0 nor a full commit. A human fixes it in a pull request."
+  name=lib/guard/$cmd.sh art=guard/harness-$pin.sh
+  if [ "$local_copy" = 1 ] && [ -f "$top/$art" ]; then bundle=$(cat "$top/$art")
+  elif [ "$local_copy" = 0 ] && bundle=$(git show "$base:$art" 2>/dev/null); then :
+  else
+    bundle=""; clone=${HPC_HARNESS:-}
+    if [ -z "$clone" ] && g=$(command -v guard); then clone=$(dirname "$(dirname "$(readlink -f "$g")")"); fi
+    [ -n "$clone" ] && git -C "$clone" rev-parse -q --verify HEAD >/dev/null 2>&1 \
+      || refuse "guard/run needs the harness at $pin: $art is not on $where, and no harness clone was found. Set HPC_HARNESS to a harness4research clone checked out at $pin, or install one with its install.sh."
+    if [ "$local_copy" = 1 ]; then
+      script=$(cat "$clone/$name" 2>/dev/null) || refuse "$clone has no $name in its working tree."
+    else
+      at=$(git -C "$clone" rev-parse HEAD); want=$(git -C "$clone" rev-parse -q --verify "$pin^{commit}" 2>/dev/null || true)
+      [ -n "$want" ] && [ "$at" = "$want" ] \
+        || refuse "The harness clone $clone is at ${at:0:12}, and guard/budget.card on $base pins harness: $pin. Check out the pin: git -C $clone fetch --tags && git -C $clone checkout $pin"
+      script=$(git -C "$clone" show "$want:$name" 2>/dev/null) || refuse "The harness at $pin has no $name. A human runs guard init --update."
+    fi
+  fi
+  if [ -n "$bundle" ]; then
+    script=$(awk -v m="#== $name" '$0 == m { on = 1; next } on && /^#== / { exit } on' <<<"$bundle")
+    [ -n "$script" ] || refuse "$art on $where holds no $name. A human runs guard init --update."
+    name="$name in $art"
+  fi
 fi
+if grep -qE '^(<{7}|>{7}|\|{7})( |$)' <<<"$script" || ! bash -n <<<"$script" 2>/dev/null; then
+  refuse "$name on $where has unresolved conflicts or does not parse. A human fixes guard/ in a pull request."
+fi
+if [ $show = 1 ]; then printf '%s\n' "$script"; exit 0; fi
 export HPC_CALLER_DIR=$PWD
 cd "$top"
 exec bash -c "$script" "guard/bin/$cmd.sh" "$@"

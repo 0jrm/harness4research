@@ -57,6 +57,13 @@ fi
 echo "command in $bindir"
 link "$here/bin/guard" "$bindir/guard"
 case ":$PATH:" in *":$bindir:"*) ;; *) echo "  add $bindir to PATH to call guard by name" ;; esac
+# shellcheck source=lib/vendor.sh
+. "$here/lib/vendor.sh"
+if harness_online; then
+  echo "mode online: this host reaches $(harness_origin), so a project's guard/run reads its scripts from this clone, checked out at the project's harness: pin"
+else
+  echo "mode offline: this host cannot reach $(harness_origin), so guard init writes the scripts into each project as guard/harness-<pin>.sh"
+fi
 
 cat <<'DONE'
 

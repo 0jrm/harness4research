@@ -102,7 +102,25 @@ expect archive-tag-exists ok 'archive/' -- git -C "$tmp/proj" tag -l 'archive/*/
 expect archive-no-push ok '^$' -- git ls-remote --tags "$tmp/origin.git"
 
 echo "== init"
-expect init-proposes ok 'guard/budget.card' -- "$guard" init "$tmp/proj" --worktree "$tmp/wt"
+# The pin guard init writes: the harness's release tag when HEAD is one, else its commit. guard/run reads the harness at
+# the pin from git, so these tests run the committed lib/guard/, never uncommitted edits.
+pin=$(git -C "$here" describe --exact-match --tags --match 'v[0-9]*' HEAD 2>/dev/null || git -C "$here" rev-parse HEAD)
+art=guard/harness-$pin.sh
+git -C "$here" diff --quiet HEAD -- lib/guard || echo "note: lib/guard/ has uncommitted edits, and guard/run runs the copy at HEAD"
+# set_script <command> <text>: puts <text> in place of lib/guard/<command>.sh in the working tree's vendored harness.
+set_script() {
+  TEXT=$2 awk -v m="#== lib/guard/$1.sh" '$0 == m { print; print ENVIRON["TEXT"]; skip = 1; next } skip && /^#== / { skip = 0 } !skip' "$art" > "$art.new" \
+    && mv "$art.new" "$art"
+}
+expect init-proposes ok 'guard/budget.card' -- bash -c 'set -o pipefail; "$1" init "$2" --worktree "$3" --offline | tee "$4"' _ \
+  "$guard" "$tmp/proj" "$tmp/wt" "$tmp/init.out"
+expect init-no-bin ok - -- test ! -e "$tmp/wt/guard/bin"
+expect init-pins-harness ok "^harness: $pin$" -- sed -n 1p "$tmp/wt/guard/budget.card"
+expect init-offline-artifact ok "^# harness: $pin, commit $(git -C "$here" rev-parse HEAD)\." -- sed -n 2p "$tmp/wt/$art"
+expect init-artifact-every-script ok '^6$' -- grep -c '^#== lib/guard/[a-z]*\.sh$' "$tmp/wt/$art"
+expect init-artifact-inert fail 'guard/run reads its scripts from this file' -- bash "$tmp/wt/$art"
+expect init-says-offline ok "^Mode: offline\. --offline was given, so guard/run reads the scripts from $art on the protected branch\.$" -- \
+  cat "$tmp/init.out"
 expect init-leaves-checkout ok '^main$' -- git -C "$tmp/proj" branch --show-current
 expect init-committed ok 'feat\(guard\)' -- git -C "$tmp/wt" log -1 --format=%s
 expect init-survey-file ok 'Survey of proj' -- cat "$tmp/wt/guard/SURVEY.md"
@@ -113,11 +131,12 @@ git clone -q "$tmp/agents-origin.git" "$tmp/agents" 2>/dev/null
 echo "# Our rules" > "$tmp/agents/AGENTS.md"
 git -C "$tmp/agents" add -A; git -C "$tmp/agents" commit -q -m init
 git -C "$tmp/agents" push -q -u origin HEAD:main; git -C "$tmp/agents" remote set-head origin -a >/dev/null
-expect init-agents-proposal ok '^     Merge .*/guard/AGENTS.proposed.md into your AGENTS.md, or delete it\.$' -- "$guard" init "$tmp/agents" --worktree "$tmp/agents-wt"
+expect init-agents-proposal ok '^     Merge .*/guard/AGENTS.proposed.md into your AGENTS.md, or delete it\.$' -- "$guard" init "$tmp/agents" --worktree "$tmp/agents-wt" --offline
 
 echo "== merge the guard, as the human would"
 cd "$tmp/wt" || exit 1
 cat > guard/budget.card <<CARD
+harness: $pin
 account: gom
 start_date: 2026-09-01
 stop_date: 2099-01-01
@@ -244,7 +263,7 @@ expect preflight-past-stop fail '^PREFLIGHT FAIL: past stop_date 2000-01-01; a h
 git reset -q --hard HEAD~1
 sed -i 's/max_core_hours: 10000/max_core_hours: 99999/' guard/budget.card; git commit -q -am "raise budget"
 expect preflight-card-edit fail 'guard/ differs' -- guard/run preflight "$R" job.sh
-printf '#!/usr/bin/env bash\necho SBATCH bypassed\n' > guard/bin/preflight.sh; git commit -q -am "neuter preflight"
+set_script preflight $'#!/usr/bin/env bash\necho SBATCH bypassed'; git commit -q -am "neuter preflight"
 expect run-uses-protected-copy fail 'guard/ differs' -- guard/run preflight "$R" job.sh
 echo stray > guard/untracked
 expect preflight-guard-remedy fail '^PREFLIGHT FAIL: guard/ differs from origin/main: [^;]*guard/untracked[^;]*; restore it with git restore --source=origin/main --staged --worktree -- guard, commit, and remove any untracked file under guard/$' -- guard/run preflight "$R" job.sh
@@ -280,7 +299,7 @@ mkdir -p "$R/incidents"; printf '# Incident 0\njob: 100\n' > "$R/incidents/0.md"
 expect preflight-unmerged-incident fail 'ripples reports job-states 100:FAILED' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
 expect preflight-handled-ripple-passes ok 'SBATCH .*--job-name=2026-09-29-demo' -- merged env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
-printf '#!/usr/bin/env bash\nexit 3\n' > guard/bin/ripples.sh; git commit -q -am "ripples errors"
+set_script ripples $'#!/usr/bin/env bash\nexit 3'; git commit -q -am "ripples errors"
 expect preflight-ripples-error-fails-closed fail '^PREFLIGHT FAIL: ripples could not run \(exit 3\); run guard/run ripples runs/2026-09-29-demo to see why$' -- env HPC_GUARD_REF=HEAD guard/run preflight "$R" job.sh
 git reset -q --hard HEAD~1
 
@@ -352,7 +371,7 @@ git add -A; git commit -q -m "run: incident 3"
 expect ripples-handled-cap fail 'RIPPLE.handled-failures.3 handled, over max_handled_failures=2' -- merged guard/run ripples "$R"
 git reset -q --hard "$pre"
 unset MOCK_SACCT_ROWS
-git switch -q -c marker; printf '#!/usr/bin/env bash\necho ran >> %s\n' "$tmp/marker" > guard/bin/launch.sh; git commit -q -am "launch that leaves a marker"
+git switch -q -c marker; set_script launch "$(printf '#!/usr/bin/env bash\necho ran >> %s' "$tmp/marker")"; git commit -q -am "launch that leaves a marker"
 expect ripples-slurm-skips-launch fail - -- bash -c 'env HPC_GUARD_REF=HEAD guard/run ripples "$1" >/dev/null; test -e "$2"' _ "$R" "$tmp/marker"
 git switch -q agent/run; git branch -q -D marker
 
@@ -1034,10 +1053,13 @@ git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
 old_rev=$(git -C "$here" rev-parse "$(git -C "$here" log -1 --format=%H -S'hypothesis: n/a' -- templates/runs/_template/report.md)^")
 old_install() {  # old_install: commit to main the guard files as the harness at $old_rev installed them
   git switch -q --detach "$good"
+  # That harness kept the scripts in the project, in guard/bin/, and wrote no harness: pin.
+  git rm -q "$art"; sed -i '/^harness:/d' guard/budget.card; mkdir -p guard/bin
   for f in guard/bin/preflight.sh guard/bin/ripples.sh guard/bin/manifest.sh guard/bin/fence.sh guard/run guard/README.md \
     runs/_template/question.card runs/_template/report.md; do git -C "$here" show "$old_rev:templates/$f" > "$f"; done
   git -C "$here" show "$old_rev:templates/github/workflows/guard-fence.yml" > .github/workflows/guard-fence.yml
   sed -i "s/^installer: .*/installer: $old_rev/; /^schema:/d" guard/VERSION
+  git add -A guard
 }
 old_install
 sed -i 's/-le 150 \]/-le 200 ]/' guard/bin/fence.sh
@@ -1057,7 +1079,7 @@ expect update-section-keeps-edit ok '^Question: our wording$' -- grep '^Question
 expect update-reports-edit ok '^  guard/bin/fence.sh$' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt8" --branch guard/again
 expect update-merged-new-rule ok 'hypothesis-line' -- cat "$tmp/wt7/guard/bin/fence.sh"
 expect update-kept-site-edit ok '-le 200 \]' -- cat "$tmp/wt7/guard/bin/fence.sh"
-expect update-scripts-current ok '^$' -- git -C "$tmp/wt7" diff --no-index --stat "$here/templates/guard/bin/preflight.sh" guard/bin/preflight.sh
+expect update-scripts-current ok '^$' -- cmp "$here/lib/guard/preflight.sh" "$tmp/wt7/guard/bin/preflight.sh"
 expect update-run-executable ok - -- test -x "$tmp/wt7/guard/run"
 expect update-workflow-fixed ok 'x-access-token' -- cat "$tmp/wt7/.github/workflows/guard-fence.yml"
 expect update-keeps-card ok '^account: gom$' -- cat "$tmp/wt7/guard/budget.card"
@@ -1089,10 +1111,82 @@ expect run-names-schema fail "guard is schema $(cat "$here/SCHEMA")" -- env HPC_
 git -C "$tmp/proj" worktree remove --force "$tmp/wt7"; git -C "$tmp/proj" branch -q -D guard/update
 git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
 
+echo "== harness pin"
+# pinned <dir> <online|offline> [env...]: a project guarded by this harness in that mode, its budget filled in and merged;
+# leaves the init output in <dir>.out and the shell in <dir>.wt on guard/init.
+pinned() {
+  local p=$1 m=$2; shift 2
+  git init -q --bare -b main "$p.git"; git clone -q "$p.git" "$p" 2>/dev/null
+  git -C "$p" checkout -q -b main; echo "# p" > "$p/README.md"; git -C "$p" add -A; git -C "$p" commit -q -m init
+  git -C "$p" push -q -u origin main; git -C "$p" remote set-head origin -a >/dev/null
+  env "$@" "$guard" init "$p" --worktree "$p.wt" "--$m" > "$p.out" 2>&1
+  git -C "$tmp/proj" show "$good:guard/budget.card" > "$p.wt/guard/budget.card"
+  git -C "$p.wt" commit -q -am "chore(guard): set budget"; git -C "$p.wt" push -q origin guard/init:main; git -C "$p.wt" fetch -q origin
+  cd "$p.wt" || return
+}
+pin_commit=$(git -C "$here" rev-parse HEAD)
+hc=$tmp/harness-clone
+git clone -q --shared "$here" "$hc" 2>/dev/null; git -C "$hc" checkout -q --detach "$pin_commit"
+mkdir -p "$tmp/hbin"; ln -s "$hc/bin/guard" "$tmp/hbin/guard"
+# no_reach <command...>: runs it with git allowed only local repositories, so the harness's origin is out of reach.
+no_reach() { env GIT_ALLOW_PROTOCOL=file "$@"; }
+O=$tmp/online
+pinned "$O" online
+expect online-init-no-bin ok - -- test ! -e guard/bin
+expect online-init-no-artifact ok - -- test ! -e "$art"
+expect online-init-says ok "^Mode: online\. --online was given, so guard/run reads the scripts from the harness clone at $pin; " -- cat "$O.out"
+expect online-runs-pin ok 'PASS	guard-untouched' -- env HPC_HARNESS="$hc" guard/run fence origin/main HEAD
+expect online-clone-on-path ok 'PASS	guard-untouched' -- env -u HPC_HARNESS PATH="$tmp/hbin:$PATH" guard/run fence origin/main HEAD
+expect online-no-clone fail 'no harness clone was found\. Set HPC_HARNESS' -- env -u HPC_HARNESS PATH="$(path_without guard)" guard/run fence origin/main HEAD
+printf '#!/usr/bin/env bash\necho FORGED\n' > "$hc/lib/guard/fence.sh"
+expect online-clone-edit-no-effect ok 'PASS	guard-untouched' -- env HPC_HARNESS="$hc" guard/run fence origin/main HEAD
+expect online-clone-edit-not-run ok - -- bash -c '! HPC_HARNESS="$1" guard/run fence origin/main HEAD | grep -q FORGED' _ "$hc"
+expect online-local-runs-clone-tree ok '^FORGED$' -- env HPC_HARNESS="$hc" HPC_GUARD_LOCAL=1 guard/run fence origin/main HEAD
+git -C "$hc" checkout -q -- lib/guard/fence.sh
+git -C "$hc" -c user.name=t -c user.email=t@t commit -q --allow-empty -m "another commit"
+expect online-wrong-pin fail "^The harness clone $hc is at [0-9a-f]{12}, and guard/budget.card on origin/main pins harness: $pin\. Check out the pin: git -C $hc fetch --tags && git -C $hc checkout $pin$" -- \
+  env HPC_HARNESS="$hc" guard/run fence origin/main HEAD
+expect online-wrong-pin-via-guard fail "Check out the pin: git -C $hc fetch --tags" -- env HPC_HARNESS="$hc" "$guard" fence origin/main HEAD
+expect version-online-wrong-pin ok "^mode online: harness $pin, from the clone $hc; the harness clone $hc is at [0-9a-f]{12}, not $pin: git -C $hc fetch --tags && git -C $hc checkout $pin$" -- \
+  env HPC_HARNESS="$hc" "$guard" version
+expect doctor-online-wrong-pin fail "^FAIL  online, harness: $pin on origin/main, but the harness clone $hc is at [0-9a-f]{12}, not $pin$" -- \
+  no_reach env HOME="$tmp/home" HPC_HARNESS="$hc" "$guard" doctor "$O"
+expect doctor-online-unreachable fail "^      This host cannot reach [^ ]+\. Vendor the scripts instead, from a clone that has $pin: bash <clone>/lib/vendor.sh $pin > $art, in a pull request a person merges$" -- \
+  no_reach env HOME="$tmp/home" HPC_HARNESS="$hc" "$guard" doctor "$O"
+git -C "$hc" checkout -q --detach "$pin_commit"
+expect version-online ok "^mode online: harness $pin, from the clone $hc$" -- env HPC_HARNESS="$hc" "$guard" version
+expect doctor-online ok "^pass  online: guard/run reads the scripts from the harness clone $hc at harness: $pin$" -- \
+  bash -c 'env HOME="$1" HPC_HARNESS="$2" "$3" doctor "$4"; true' _ "$tmp/home" "$hc" "$guard" "$O"
+expect pin-not-a-release fail '^guard/budget.card on HEAD pins harness: main, which is neither a release tag such as v7.0 nor a full commit\.' -- \
+  bash -c 'sed -i "s/^harness: .*/harness: main/" guard/budget.card && git commit -q -am pin && HPC_GUARD_REF=HEAD guard/run fence origin/main HEAD' _
+git reset -q --hard origin/main
+F=$tmp/offline
+pinned "$F" offline
+expect offline-init-no-bin ok - -- test ! -e guard/bin
+expect offline-init-says-unreachable ok "^Mode: offline\. --offline was given" -- cat "$F.out"
+expect offline-artifact-from-vendor ok - -- bash -c 'bash "$1/lib/vendor.sh" "$2" | cmp - "$3"' _ "$here" "$pin" "$art"
+expect offline-runs-artifact ok 'PASS	guard-untouched' -- env HPC_HARNESS="$hc" PATH="$(path_without guard)" guard/run fence origin/main HEAD
+set_script fence $'#!/usr/bin/env bash\necho FORGED'
+expect offline-edit-no-effect ok 'PASS	guard-untouched' -- guard/run fence origin/main HEAD
+expect offline-local-runs-edit ok '^FORGED$' -- env HPC_GUARD_LOCAL=1 guard/run fence origin/main HEAD
+git commit -q -am "an edited vendored harness"
+expect offline-committed-edit-no-effect fail 'FAIL	guard-untouched' -- guard/run fence origin/main HEAD
+expect offline-bare-repository ok 'PASS	guard-untouched' -- bash -c 'cd "$1.git" && HPC_GUARD_REF=main bash -c "$(git show main:guard/run)" guard/run fence main main' _ "$F"
+expect version-offline ok "^mode offline: harness $pin, from $art on origin/main$" -- "$guard" version
+expect doctor-offline ok "^pass  offline: guard/run reads the scripts from $art on origin/main, which matches the harness at $pin$" -- \
+  bash -c 'env HOME="$1" "$2" doctor "$3"; true' _ "$tmp/home" "$guard" "$F"
+git push -q origin HEAD:main; git fetch -q origin
+expect doctor-offline-differs fail "^FAIL  offline: $art on origin/main differs from the harness at $pin$" -- env HOME="$tmp/home" "$guard" doctor "$F"
+expect init-picks-offline ok "^Mode: offline\. This host cannot reach [^ ]+, so guard/run reads the scripts from guard/harness-" -- \
+  no_reach "$guard" init "$tmp/agents" --worktree "$tmp/agents-wt2" --branch guard/reach
+expect install-says-mode ok "^mode offline: this host cannot reach [^ ]+, so guard init writes the scripts into each project" -- \
+  no_reach env HOME="$tmp/ihome" "$here/install.sh" --skills-dir "$tmp/ihome/skills" --bin-dir "$tmp/ihome/bin"
+cd "$tmp/wt" || exit 1
+
 expect skill-states-schema ok - -- grep -q "describes guard schema $(cat "$here/SCHEMA")\." "$here/skills/safe-autonomous-hpc-science/SKILL.md"
 expect contract-names-required ok - -- bash -c 'for k in $(grep "<" "$1/templates/guard/budget.card" | cut -d: -f1); do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
 expect contract-names-every-key ok - -- bash -c 'for k in $(cut -d: -f1 "$1/templates/guard/budget.card"); do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
-expect envelope-vocabulary-pinned ok - -- bash -c 'a=$(sed -n "s/^readonly ENVELOPE_FIELDS=//p" "$1/templates/guard/bin/launch.sh"); b=$(sed -n "s/^fields=//p" "$1/templates/guard/bin/fence.sh"); [ -n "$a" ] && [ "$a" = "$b" ]' _ "$here"
+expect envelope-vocabulary-pinned ok - -- bash -c 'a=$(sed -n "s/^readonly ENVELOPE_FIELDS=//p" "$1/lib/guard/launch.sh"); b=$(sed -n "s/^fields=//p" "$1/lib/guard/fence.sh"); [ -n "$a" ] && [ "$a" = "$b" ]' _ "$here"
 expect contract-names-check-names ok - -- bash -c 'for k in gpu-hours host-supervision host-memory host-strays host-log-errors execution-within-envelope execution-ledger execution-history card-lineage; do grep -q "\`$k\`" "$1/docs/compatibility.md" || { echo "$k"; exit 1; }; done' _ "$here"
 
 echo "== merge policy without rulesets"
@@ -1104,7 +1198,7 @@ git -C "$P" remote set-url origin https://github.com/lab/policy.git
 free_plan='!Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)'
 policy_init() {  # policy_init <MOCK_GH_RULES> <args...>: guard init on lab/policy, fetched from the local bare repo
   env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="url.$P.git.insteadOf" GIT_CONFIG_VALUE_0=https://github.com/lab/policy.git \
-    MOCK_GH_TOKEN=github_pat_agent MOCK_GH_RULES="$1" "$guard" init "$P" "${@:2}"
+    MOCK_GH_TOKEN=github_pat_agent MOCK_GH_RULES="$1" "$guard" init "$P" --offline "${@:2}"
 }
 expect init-policy-rulesets ok - -- policy_init pull_request --worktree "$P.wt1"
 expect init-policy-rulesets-autonomous ok '^merge_policy: autonomous$' -- grep '^merge_policy:' "$P.wt1/guard/budget.card"
@@ -1132,7 +1226,7 @@ D=$tmp/doc
 git init -q --bare -b main "$D.git"; git clone -q "$D.git" "$D" 2>/dev/null
 git -C "$D" checkout -q -b main; echo "# d" > "$D/README.md"; git -C "$D" add -A; git -C "$D" commit -q -m init
 git -C "$D" push -q -u origin main; git -C "$D" remote set-head origin -a >/dev/null
-"$guard" init "$D" --worktree "$D.wt" >/dev/null 2>&1
+"$guard" init "$D" --worktree "$D.wt" --offline >/dev/null 2>&1
 git -C "$D" update-ref refs/remotes/origin/main guard/init
 git -C "$D" remote set-url origin https://github.com/lab/proj.git
 mkdir -p "$tmp/home/.agents/skills" "$tmp/home-bare"
@@ -1148,7 +1242,7 @@ expect doctor-remedy-links-readme fail '^      Replace each <placeholder> .*: ht
 git -C "$tmp/proj" show "$good:guard/budget.card" > "$D.wt/guard/budget.card"
 git -C "$D.wt" commit -q -am "chore(guard): set budget"; git -C "$D" update-ref refs/remotes/origin/main guard/init
 expect doctor-clean-card ok '^pass  guard/budget.card on origin/main has no placeholders$' -- doctor
-expect doctor-all-pass ok '^15 passed, 0 failed, 0 cannot check from here$' -- doctor
+expect doctor-all-pass ok '^16 passed, 0 failed, 0 cannot check from here$' -- doctor
 expect doctor-version ok '^pass  guard schema [0-9]+ \(release .*\) against harness schema [0-9]+ .*: current$' -- doctor
 expect doctor-version-once ok - -- bash -c '! grep -E "\(release ([^ )]+)\1\)" <<<"$1"' _ "$(doctor)"
 expect doctor-workflow ok '^pass  .github/workflows/guard-fence.yml on origin/main defines guard-fence / fence$' -- doctor
@@ -1158,7 +1252,7 @@ expect onboard-names-real-doctor-lines ok - -- bash -c 'out=$1; shift; grep -ho 
 expect onboard-doctor-lines-counted ok '^([6-9]|[1-9][0-9]+)$' -- bash -c 'grep -ho "\`pass  [^\`]*\`" "$@" | wc -l' _ "$here/skills/guard-onboard/SKILL.md" "$here"/skills/guard-onboard/references/*.md
 expect doctor-no-colour-in-pipe fail - -- grep -q $'\e' "$tmp/doctor-out"
 expect doctor-no-gh ok '^cannot check from here  whether guard-fence / fence has run on GitHub: gh is not on PATH$' -- doctor PATH="$(path_without gh)"
-expect doctor-cannot-is-not-pass ok '^13 passed, 0 failed, 2 cannot check from here$' -- doctor PATH="$(path_without gh)"
+expect doctor-cannot-is-not-pass ok '^14 passed, 0 failed, 2 cannot check from here$' -- doctor PATH="$(path_without gh)"
 expect doctor-gh-logged-out ok '^cannot check from here  whether main has an active ruleset requiring guard-fence / fence: gh is not logged in$' -- doctor MOCK_GH_TOKEN=
 expect doctor-not-github ok '^cannot check from here  .*: origin is not a github.com remote$' -- \
   doctor GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0="$D.git"
@@ -1790,7 +1884,7 @@ old_project() {
   git -C "$p" checkout -q -b main; echo "# p" > "$p/README.md"; git -C "$p" add -A; git -C "$p" commit -q -m init
   git -C "$p" push -q -u origin main; git -C "$p" remote set-head origin -a >/dev/null
   "$h/bin/guard" init "$p" --worktree "$p.wt" >/dev/null 2>&1
-  git -C "$tmp/proj" show "$good:guard/budget.card" > "$p.wt/guard/budget.card"
+  git -C "$tmp/proj" show "$good:guard/budget.card" | sed '/^harness:/d' > "$p.wt/guard/budget.card"
   printf 'runs/*/checks/*\n' > "$p.wt/guard/watch.list"
 }
 names() { { guard/run ripples "$1"; guard/run fence origin/main HEAD; } 2>/dev/null | cut -f2 | sort -u; }

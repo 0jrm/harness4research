@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# usage: guard init <repo> [--branch NAME] [--worktree DIR] [--update [--force]]
+# usage: guard init <repo> [--branch NAME] [--worktree DIR] [--online|--offline] [--update [--force]]
 # Surveys the repo, then proposes guard/ and its companions on a new branch in a separate worktree.
 # Never touches the repo's checked-out tree, never overwrites a file, never pushes.
+# The project holds no scripts: guard/budget.card's harness: line pins this harness's HEAD, its release tag when HEAD
+# is one. Online, guard/run reads the scripts from this clone at the pin. When this host cannot reach the harness's
+# origin (offline), init also writes guard/harness-<pin>.sh, the scripts at the pin. --online or --offline overrides.
 # --update three-way merges each installer-owned file, with the template this project was installed from
 # as the base, so a human's edits survive and an overlap becomes conflict markers. It adds template keys
 # that are new since that install and changes no other line of a human-owned file, except merge_policy: when GitHub
@@ -13,18 +16,23 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$here/lib/version.sh"
 # shellcheck source=lib/github.sh
 . "$here/lib/github.sh"
-repo=""; branch=guard/init; wt=""; update=0; force=0; agents_note=""
+# shellcheck source=lib/vendor.sh
+. "$here/lib/vendor.sh"
+repo=""; branch=guard/init; wt=""; update=0; force=0; agents_note=""; mode=""
 while [ $# -gt 0 ]; do
   case $1 in
     --branch) branch=$2; shift 2 ;;
     --worktree) wt=$2; shift 2 ;;
+    --online) mode=online; shift ;;
+    --offline) mode=offline; shift ;;
     --update) update=1; branch=guard/update; shift ;;
     --force) force=1; shift ;;
     -*) echo "unknown option $1" >&2; exit 64 ;;
     *) repo=$1; shift ;;
   esac
 done
-[ -n "$repo" ] || { echo "usage: guard init <repo> [--branch NAME] [--worktree DIR] [--update [--force]]" >&2; exit 64; }
+[ -n "$repo" ] || { echo "usage: guard init <repo> [--branch NAME] [--worktree DIR] [--online|--offline] [--update [--force]]" >&2; exit 64; }
+pin=""; [ $update = 1 ] || pin=$(harness_pin) || { echo "guard init pins the harness at a commit, and $here is not a git clone of harness4research." >&2; exit 2; }
 repo=$(cd "$repo" && git rev-parse --show-toplevel)
 name=$(basename "$repo")
 git -C "$repo" fetch -q origin 2>/dev/null || echo "note: could not fetch origin; using local refs" >&2
@@ -66,14 +74,16 @@ insert_line() {
   ' "$file" > "$tmp"
   mv "$tmp" "$file"
 }
-# merge_in <path under templates/> <dst>: three-way merge with the template at $from as the base.
+# merge_in <harness path> <dst> [<its path at an older install>]: three-way merge with that file at $from as the base.
 merge_in() {
-  local src=$1 dst=$2 b
-  [ -e "$wt/$dst" ] || { place "$t/$src" "$dst"; return; }
+  local src=$1 dst=$2 old=${3:-$1} b
+  [ -e "$wt/$dst" ] || { place "$here/$src" "$dst"; return; }
   b=$(mktemp)
-  if [ -z "$from" ] || ! git -C "$here" show "$from:templates/$src" > "$b" 2>/dev/null; then : > "$b"; unbased+=("$dst"); fi
+  if [ -z "$from" ] || ! { git -C "$here" show "$from:$src" || git -C "$here" show "$from:$old"; } > "$b" 2>/dev/null; then
+    : > "$b"; unbased+=("$dst")
+  fi
   [ -s "$b" ] && ! cmp -s "$b" "$wt/$dst" && edited+=("$dst")
-  if git merge-file --diff3 -L "$dst (yours)" -L "harness ${from:-unknown}" -L "harness $(harness_release)" "$wt/$dst" "$b" "$t/$src"; then
+  if git merge-file --diff3 -L "$dst (yours)" -L "harness ${from:-unknown}" -L "harness $(harness_release)" "$wt/$dst" "$b" "$here/$src"; then
     git -C "$wt" diff --quiet -- "$dst" || added+=("$dst")
   else conflicts+=("$dst"); fi
   rm -f "$b"
@@ -119,10 +129,28 @@ add_sections() {
   git -C "$wt" diff --quiet -- "$dst" || [[ " ${added[*]} " == *" $dst "* ]] || added+=("$dst")
 }
 t=$here/templates
+mode_note=""
+# pin_project: the harness: line names this harness's pin, and offline, guard/harness-<pin>.sh carries its scripts.
+pin_project() {
+  local card=$wt/guard/budget.card art=guard/harness-$pin.sh origin; origin=$(harness_origin)
+  if [ -z "$mode" ]; then
+    if harness_online; then mode=online; mode_note="This host reaches $origin"; else mode=offline; mode_note="This host cannot reach $origin"; fi
+  else mode_note="--$mode was given"; fi
+  if grep -q '^harness:' "$card"; then sed -i "s/^harness:.*/harness: $pin/" "$card"
+  else insert_line "$card" "harness: $pin" "harness:" "" "account:"; fi
+  [[ " ${added[*]} " == *" guard/budget.card "* ]] || added+=(guard/budget.card)
+  if [ "$mode" = offline ]; then
+    harness_artifact "$pin" > "$wt/$art" || { echo "could not write $art from $here" >&2; exit 2; }
+    added+=("$art")
+    mode_note="Mode: offline. $mode_note, so guard/run reads the scripts from $art on the protected branch."
+  else
+    mode_note="Mode: online. $mode_note, so guard/run reads the scripts from the harness clone at $pin; keep it checked out there, at $here or the clone HPC_HARNESS names."
+  fi
+}
 if [ $update = 0 ]; then
-  for f in preflight ripples manifest fence code launch; do place "$t/guard/bin/$f.sh" "guard/bin/$f.sh" replace; done
   place "$t/guard/run" guard/run replace
   place "$t/guard/budget.card" guard/budget.card
+  pin_project
   place "$t/guard/watch.list" guard/watch.list
   place "$t/guard/README.md" guard/README.md
   place "$t/github/workflows/guard-fence.yml" .github/workflows/guard-fence.yml
@@ -136,10 +164,15 @@ if [ $update = 0 ]; then
   place "$t/CLAUDE.md" CLAUDE.md
   "$here/lib/survey.sh" "$repo" > "$wt/guard/SURVEY.md"; added+=(guard/SURVEY.md)
 else
-  for f in preflight ripples manifest fence code launch; do merge_in "guard/bin/$f.sh" "guard/bin/$f.sh"; done
-  merge_in guard/run guard/run; chmod +x "$wt/guard/run"
-  merge_in guard/README.md guard/README.md
-  merge_in github/workflows/guard-fence.yml .github/workflows/guard-fence.yml
+  # A project installed before the pin keeps its scripts in guard/bin/ until the migration (plan item W2.3).
+  if [ -z "$p_pin" ]; then
+    for f in preflight ripples manifest fence code launch; do
+      merge_in "lib/guard/$f.sh" "guard/bin/$f.sh" "templates/guard/bin/$f.sh"
+    done
+  fi
+  merge_in templates/guard/run guard/run; chmod +x "$wt/guard/run"
+  merge_in templates/guard/README.md guard/README.md
+  merge_in templates/github/workflows/guard-fence.yml .github/workflows/guard-fence.yml
   add_keys guard/budget.card guard/budget.card 0
   add_keys runs/_template/question.card runs/_template/question.card 1
   add_keys runs/_template/report.md runs/_template/report.md 1
@@ -194,6 +227,7 @@ list "Sections added from the templates, to merge or drop in the pull request:" 
 list "Optional keys you may set:" "${optional[@]}"
 list "No recorded install commit, so these were merged as whole files:" "${unbased[@]}"
 [ -z "$policy_note" ] || { echo; echo "$policy_note"; }
+[ -z "$mode_note" ] || { echo; echo "$mode_note"; }
 if [ $update = 1 ]; then
   [[ " ${added[*]} " == *" .github/workflows/"* ]] && { echo; echo "Pushing a change under .github/workflows needs a token with the workflow scope: gh auth refresh -s workflow"; }
   [ -n "$from" ] && ! git -C "$here" diff --quiet "$from" HEAD -- templates/AGENTS.md \

@@ -39,7 +39,7 @@ else say UNCHECKED watched-paths "a human lists verifier, test and threshold pat
 # launch.sh runs only for a project that opted in or a run with a ledger, so a Slurm project pays nothing for it.
 launch=""; lh=$(get launch_hosts)
 if { [ -n "$lh" ] && [ "$lh" != none ] && [[ $lh != *"<"* ]]; } || git cat-file -e "HEAD:$run_dir/execution.tsv" 2>/dev/null; then
-  launch=$(git show "$base:guard/bin/launch.sh" 2>/dev/null)
+  launch=$(runner=$(git show "$base:guard/run" 2>/dev/null) && HPC_GUARD_LOCAL=0 bash -c "$runner" guard/run --show launch 2>/dev/null)
 fi
 launched() { bash -c "$launch" guard/bin/launch.sh "$@"; }
 # On a launch host, launch records answer sacct's row query, so the job checks below cover launched jobs too.

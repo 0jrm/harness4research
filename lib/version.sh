@@ -4,7 +4,9 @@
 h_schema=$(cat "$here/SCHEMA")
 
 # project_version <repo>: sets p_base, p_guarded (0 or 1), p_from (installer commit, may be empty or unknown), p_schema,
-# p_release (empty for a guard installed before release stamps).
+# p_release (empty for a guard installed before release stamps), p_pin (the harness: line of guard/budget.card, empty
+# before the pin) and p_mode: offline when guard/harness-<pin>.sh is on the base branch, online for another pin, and
+# bin for a project without a pin, whose scripts are guard/bin/.
 project_version() {
   local v
   p_base=$(git -C "$1" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
@@ -13,6 +15,11 @@ project_version() {
   p_from=$(awk -F': *' '$1=="installer" {print $2; exit}' <<<"$v")
   p_schema=$(awk -F': *' '$1=="schema" {print $2; exit}' <<<"$v"); p_schema=${p_schema:-1}
   p_release=$(awk -F': *' '$1=="release" {print $2; exit}' <<<"$v")
+  v=$(git -C "$1" show "$p_base:guard/budget.card" 2>/dev/null || true)
+  p_pin=$(awk -F': *' '$1=="harness" {print $2; exit}' <<<"$v")
+  if [ -z "$p_pin" ]; then p_mode=bin
+  elif git -C "$1" cat-file -e "$p_base:guard/harness-$p_pin.sh" 2>/dev/null; then p_mode=offline
+  else p_mode=online; fi
 }
 
 # skew, after project_version: prints current, project-older, harness-older, or unknown-install.

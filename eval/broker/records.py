@@ -368,9 +368,16 @@ class Records:
         current += "" if current.endswith("\n") else "\n"
         n = sum(1 for line in current.splitlines()[1:] if line.strip() and not line.startswith("#")) + 1
         new = current + "\t".join([f"x{n}", now(), row["field"], row["value"], row["why"], row["evidence"]]) + "\n"
-        fence = self.mirror.show("guard/bin/fence.sh")
-        if fence is None:
-            raise Refused("no guard/bin/fence.sh on main to check the row with")
+        # main's guard/run says where the fence comes from: the harness at the pin, or guard/bin/ before the pin.
+        runner = self.mirror.show("guard/run")
+        shown = runner and subprocess.run(
+            ["bash", "-c", runner, "guard/run", "--show", "fence"], cwd=self.mirror.path, capture_output=True, text=True,
+            env={"PATH": os.environ["PATH"], "HOME": self.mirror.path, "GIT_CONFIG_NOSYSTEM": "1",
+                 "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_DIR": self.mirror.path, "HPC_GUARD_REF": "refs/heads/main"})
+        if not shown or shown.returncode:
+            raise Refused("main's guard/run cannot give the fence to check the row with"
+                          + (f" ({shown.stderr.strip()[-200:]})" if shown else ""))
+        fence = shown.stdout
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "runs", run))
             for rel, data in ((path, new), (card, card_text)):

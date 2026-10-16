@@ -4,7 +4,7 @@ This directory holds the limits and checks that AI agents work under. A human ch
 
 - `budget.card` sets the computing budget. `guard/run preflight` reads it from the protected branch before each job.
 - `watch.list` names the verifier, test and threshold paths that agents must not edit.
-- `bin/` holds the scripts. `guard/run <command>` always runs the protected branch's copy.
+- `budget.card`'s `harness:` line pins the harness4research release the scripts come from. `guard/run <command>` reads the pin from the protected branch and runs that release's script: from the harness clone, checked out at the pin, or, on a host that cannot reach the harness, from `harness-<pin>.sh` in this directory. To update, a human changes the pin in a pull request; to roll back, reverts it.
 - `SURVEY.md` is the read-only inventory that `guard init` wrote. Delete it after the reset.
 
 Commands:

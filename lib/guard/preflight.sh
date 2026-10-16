@@ -116,7 +116,9 @@ if [ $explore = 0 ]; then
 fi
 
 if [ "${HPC_SPEND_RESERVE:-0}" != 1 ]; then
-  ripples=$(git show "$base:guard/bin/ripples.sh" 2>/dev/null) || fail "ripples could not run (no guard/bin/ripples.sh on $base); a human runs guard init --update"
+  # The protected branch's guard/run says where ripples comes from: the pinned harness, or guard/bin/.
+  runner=$(git show "$base:guard/run" 2>/dev/null) && ripples=$(HPC_GUARD_LOCAL=0 bash -c "$runner" guard/run --show ripples) \
+    || fail "ripples could not run (guard/run on $base cannot give it); a human runs guard init --update"
   rc=0; out=$(bash -c "$ripples" guard/bin/ripples.sh "$run_dir") || rc=$?
   [ $rc -ne 1 ] || fail "ripples reports $(awk -F'\t' '$1=="RIPPLE" {sub(/ +$/, "", $3); printf "%s%s %s", sep, $2, $3; sep=" | "}' <<<"$out"); fix the cause or record it in an incident, or set HPC_SPEND_RESERVE=1 for a diagnostic job"
   [ $rc -eq 0 ] || fail "ripples could not run (exit $rc); run guard/run ripples $run_dir to see why"
