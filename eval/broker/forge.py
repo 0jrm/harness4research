@@ -7,8 +7,8 @@ The evaluation has no GitHub, so the broker keeps the pull requests itself, in s
     reviews.tsv   the verdicts guard review records, which guard merge trusts; only the broker writes it
     log.jsonl     every request on the gh socket, its action and its outcome
 
-A pull request's head is its branch on origin, read when it is used. Its one check, guard-fence / fence, is main's
-guard/bin/fence.sh run on main...head, as the forge hook runs it on a push. The sandbox's gh is client.py, a pipe to
+A pull request's head is its branch on origin, read when it is used. Its one check, guard-fence / fence, is the fence
+main's guard/run runs on main...head, as the forge hook runs it on a push. The sandbox's gh is client.py, a pipe to
 the gh socket, which offers pr create, view, list, diff, checks and comment, api reads of pull requests, and pr-open
 (guard pr open). It refuses pr merge, auth, every other subcommand, and every api call that writes.
 
@@ -154,14 +154,16 @@ class Forge:
         if not sha:
             return "FAILURE", f"{pr['head']} is not on origin"
         self.mirror.fetch()
-        fence = self.mirror.show("guard/bin/fence.sh")
-        if fence is None:
-            return "SUCCESS", "main has no guard/bin/fence.sh"
+        # main's guard/run runs the fence of the harness its card pins, or guard/bin/fence.sh before the pin.
+        runner = self.mirror.show("guard/run")
+        if runner is None:
+            return "SUCCESS", "main has no guard/run"
         with tempfile.TemporaryDirectory() as tmp:
-            done = subprocess.run(["bash", "-c", fence, "guard/bin/fence.sh", "refs/heads/main", sha], cwd=tmp,
+            done = subprocess.run(["bash", "-c", runner, "guard/run", "fence", "refs/heads/main", sha], cwd=tmp,
                                   capture_output=True, text=True,
                                   env={"PATH": os.environ["PATH"], "GIT_DIR": self.mirror.path, "HOME": tmp,
-                                       "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"})
+                                       "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+                                       "HPC_GUARD_REF": "refs/heads/main"})
         fails = [line.split("\t")[-1] for line in done.stdout.splitlines() if line.startswith("FAIL")]
         if done.returncode:
             return "FAILURE", "; ".join(fails) or done.stderr.strip()[-200:] or f"exit {done.returncode}"

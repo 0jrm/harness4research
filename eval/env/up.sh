@@ -59,6 +59,12 @@ if [ -n "$harness" ]; then
   # Only what guard runs from. docs/, README.md and eval/ describe this evaluation, and an agent never reads them in
   # a real install either: its rules come from AGENTS.md and the skills.
   git -C "$harness" archive HEAD -- bin lib skills templates SCHEMA | tar -x -C "$ep/sandbox/harness"
+  # guard init pins the harness at a commit and guard/run reads it from git, so the copy is a clone of one commit
+  # holding only those files: the harness's history would hold eval/.
+  git -C "$ep/sandbox/harness" init -q --template= -b main
+  git -C "$ep/sandbox/harness" add -A
+  git -C "$ep/sandbox/harness" -c user.name=harness -c user.email=harness@localhost \
+    commit -q -m "harness4research $(git -C "$harness" rev-parse --short HEAD)"
   # Behind the broker, guard is client.py, which sends the record subcommands to the broker and runs the rest.
   if [ $broker = 1 ]; then ln -s "/opt/site/lib/$client" "$ep/sandbox/tools/bin/guard"
   else ln -s /opt/harness4research/bin/guard "$ep/sandbox/tools/bin/guard"; fi

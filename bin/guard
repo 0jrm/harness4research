@@ -11,21 +11,30 @@ case $cmd in
   needs-you) exec python3 "$here/lib/needs_you.py" "$@" ;;
   hooks) exec python3 "$here/lib/hooks.py" "$@" ;;
   preflight|ripples|manifest|fence|code|launch)
-    # Run the enclosing project's protected guard/run, never this harness's templates.
+    # Run the enclosing project's protected guard/run, never this harness's copy. Online, it reads this clone at the pin.
     base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
     runner=$(git show "$base:guard/run" 2>/dev/null) || {
       echo "guard $cmd runs inside a guarded project, and $(pwd) has no guard/run on $base." >&2
-      echo "Run guard init <repo> first. To try this harness's copy on its own: bash $here/templates/guard/bin/$cmd.sh" >&2
+      echo "Run guard init <repo> first. To try this harness's copy on its own: bash $here/lib/guard/$cmd.sh" >&2
       exit 2; }
-    exec bash -c "$runner" guard/run "$cmd" "$@" ;;
+    HPC_HARNESS=${HPC_HARNESS:-$here} exec bash -c "$runner" guard/run "$cmd" "$@" ;;
   version)
     # shellcheck source=lib/version.sh
     . "$here/lib/version.sh"
+    # shellcheck source=lib/vendor.sh
+    . "$here/lib/vendor.sh"
     echo "harness4research $(harness_release) schema $h_schema at $here, pstack $(git -C "$here/vendor/cursor-plugins" rev-parse --short HEAD 2>/dev/null || echo not-linked)"
     top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
     project_version "$top"
     [ $p_guarded = 1 ] || { echo "$top has no guard on $p_base"; exit 0; }
     echo "$(basename "$top") guard schema $p_schema, ${p_release:+release $p_release, }installed from ${p_from:-unknown}"
+    clone=${HPC_HARNESS:-$here}
+    case $p_mode in
+      offline) echo "mode offline: harness $p_pin, from guard/harness-$p_pin.sh on $p_base" ;;
+      online) problem=$(pin_problem "$clone" "$p_pin")
+        echo "mode online: harness $p_pin, from the clone $clone${problem:+; $problem: $(pin_fix "$clone" "$p_pin")}" ;;
+      bin) echo "mode none: no harness: pin on $p_base, so the scripts are guard/bin/ there" ;;
+    esac
     case $(skew) in
       current) echo "current" ;;
       project-older) if [ -n "$p_release" ]; then echo "project older: guard init $top --update"

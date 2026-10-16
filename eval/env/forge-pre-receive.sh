@@ -2,7 +2,7 @@
 # The protected repository's pre-receive hook, in place of a GitHub ruleset on main. It runs in gitsock.py's
 # receive-pack, outside the agent's sandbox, so the agent can neither edit it nor write the repository around it.
 #   - main cannot be deleted or force-pushed.
-#   - Once main carries guard/bin/fence.sh, an update to main must pass that fence, read from the old main, the way
+#   - Once main carries guard/run, an update to main must pass the fence that the old main's guard/run runs, the way
 #     the guard-fence check runs the base branch's copy. Before that, main is open, as in a repository without a guard.
 #   - Other branches are free.
 #   - Behind the broker (git config guard.records signed, with gpg.ssh.allowedSignersFile naming the owner's and the
@@ -55,8 +55,8 @@ while read -r old new ref; do
     if [ "$old" != "$zero" ] && ! git merge-base --is-ancestor "$old" "$new"; then
       echo "main is a protected branch: force pushes are refused."; log refuse-force "$ref" "$old" "$new"; status=1; continue
     fi
-    if [ "$old" != "$zero" ] && fence=$(git show "$old:guard/bin/fence.sh" 2>/dev/null); then
-      if ! out=$(bash -c "$fence" guard/bin/fence.sh "$old" "$new" 2>&1); then
+    if [ "$old" != "$zero" ] && runner=$(git show "$old:guard/run" 2>/dev/null); then
+      if ! out=$(HPC_GUARD_REF=$old HPC_GUARD_LOCAL=0 bash -c "$runner" guard/run fence "$old" "$new" 2>&1); then
         echo "main is a protected branch: the guard-fence check failed."
         grep -E '^(FAIL|WARN)' <<<"$out"
         log refuse-fence "$ref" "$old" "$new"; status=1; continue

@@ -37,7 +37,7 @@ git init -q -b main "$root/casts-loader"; echo 'def load(): pass' > "$root/casts
 git -C "$root/casts-loader" add -A; (cd "$root/casts-loader" && at 2026-09-01T09:00:00 "feat: loader"); loader=$(git -C "$root/casts-loader" rev-parse --short HEAD)
 git init -q --bare -b main "$root/casts-v4-training.git"; git clone -q "$root/casts-v4-training.git" "$proj" 2>/dev/null; cd "$proj"; git checkout -q -b main
 mkdir -p guard/bin runs/_template src jobs .github/workflows
-cp "$here"/templates/guard/bin/*.sh guard/bin/; cp "$here/templates/guard/run" "$here/templates/guard/watch.list" "$here/templates/guard/README.md" guard/
+cp "$here"/lib/guard/*.sh guard/bin/; cp "$here/templates/guard/run" "$here/templates/guard/watch.list" "$here/templates/guard/README.md" guard/
 cp "$here"/templates/runs/_template/* runs/_template/; cp "$here/templates/github/workflows/guard-fence.yml" .github/workflows/
 sed -e 's|^account: .*|account: gom|' -e 's|^start_date: .*|start_date: 2026-09-01|' -e 's|^stop_date: .*|stop_date: 2026-12-31|' \
     -e 's|^max_core_hours: .*|max_core_hours: 2000|' -e 's|^verification_reserve_core_hours: .*|verification_reserve_core_hours: 300|' \
