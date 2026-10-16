@@ -8,15 +8,16 @@ As of 2026-10-16. The plan is [plan-2026-10-16.md](plan-2026-10-16.md), the owne
 |---|---|
 | W0.1 audit gate, baseline | merged, #107 |
 | W0.2 CI gate job | script merged (#108); the workflow job waits for the owner's push (n47) |
-| W0.3 prerequisite checks | in review |
+| W0.3 prerequisite checks | merged, #109 |
 | W0.4 word budgets, rules | this change |
 | W0.5 `guard pr open`, v6.2 | next |
-| W1.1 broker increment 1 | in progress in its own session |
-| W1.2 to W5 | in order, after these |
+| W1.1 broker increment 1 | merged, #110 |
+| W1.2 records socket and signed cards | next after W0.5 |
+| W1.3 to W5 | in order |
 
 ## Audit
 
-29 held, 15 bypassed, 0 not applicable: `eval/audit/baseline.json`, from the laptop on 2026-10-16. `eval/audit/run.py --gate eval/audit/baseline.json` fails a pull request that turns a held row back.
+45 held, 5 bypassed, 0 not applicable: `eval/audit/baseline.json`, from the laptop on 2026-10-16 after W1.1 (29 and 15 before it). `eval/audit/run.py --gate eval/audit/baseline.json` fails a pull request that turns a held row back.
 
 ## What runs
 
