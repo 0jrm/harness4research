@@ -10,6 +10,8 @@ import sys
 # Variables that carry a credential or a route to one; none crosses into a sandbox.
 SECRETS = ("SSH_AUTH_SOCK", "SSH_AGENT_PID", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "ANTHROPIC_API_KEY",
            "OPENAI_API_KEY", "CURSOR_API_KEY", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "MUNGE_SOCKET")
+# What guard enter (lib/enter.py) puts in a model key variable when the broker's gateway adds the real key outside.
+PLACEHOLDER = "guard-gateway-adds-the-key"
 # Paths that never exist inside: munge's socket directory and the user's runtime directory (ssh-agent, dbus, gpg).
 ABSENT = ("/run/munge", "/var/run/munge", f"/run/user/{os.getuid()}")
 
@@ -66,7 +68,7 @@ def main():
         if f"{st.st_dev}:{st.st_ino}" == ident:
             failed.append(f"hidden: {path} is the host's own")
     for name in SECRETS:
-        if name in os.environ:
+        if name in os.environ and os.environ[name] != PLACEHOLDER:
             failed.append(f"env: {name} is set")
     try:
         with open("/proc/1/environ", "rb") as f:

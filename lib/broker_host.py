@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """usage: guard broker setup | status | stop
   setup    once per host: the state directory, the broker's signing key, the default agent profiles in
-           ~/.config/guard/agents/, and a self-test that starts a sandbox and runs the pre-flight probe in it
+           ~/.config/guard/agents/ and model upstreams in ~/.config/guard/models/, and a self-test that starts a
+           sandbox and runs the pre-flight probe in it
   status   whether the broker answers, and its sessions, live jobs and recent refusals; exit 1 when it is down
   stop     stops the broker; every session's sockets then refuse
 
@@ -14,13 +15,20 @@ directory /tmp/guard-$UID/s-<session>/ (mode 0700; GUARD_RUNTIME_DIR moves the p
 
     scheduler.sock   eval/broker/broker.py's scheduler verbs, one broker per project, against this host's Slurm by
                      absolute path; with no sbatch on the host it refuses every request
-    net.sock         when the agent's profile lists net: hosts, a CONNECT proxy to those hosts and no others, each
-                     connection logged with its byte counts
+    net.sock         a CONNECT proxy to the session's allowlist and no other host: net_allow: in the project's
+                     guard/budget.card as the broker's mirror of main has it (decision D4: PyPI and conda when the card
+                     does not say, none when main cannot be read), plus the profile's net: hosts; each connection
+                     logged with its host and byte counts, the traffic itself never opened
+    model.sock       in an unattended session (--no-tty) whose profile names model: NAME, lib/gateway.py's model
+                     gateway to the upstream in ~/.config/guard/models/NAME, which adds the key outside the sandbox,
+                     removes it from every reply, and logs each request (decision D3)
 
-Its state, which no sandbox sees: ${XDG_STATE_HOME:-~/.local/state}/guard/, holding key (the signing key),
-projects/<name>/ (each project's ledger, mirror and spool, as eval/broker lays them out), broker.log, sessions.jsonl,
-net.jsonl and refusals.jsonl. The sockets fail closed: with the broker down nothing answers, and a sandbox has no
-other route out."""
+A model file holds upstream: URL, key: FILE (beside it, mode 0600; none for a local vLLM) and header: authorization
+(sent as Bearer) or a header name such as x-api-key. Its state, which no sandbox sees:
+${XDG_STATE_HOME:-~/.local/state}/guard/, holding key (the signing key), projects/<name>/ (each project's ledger,
+mirror and spool, as eval/broker lays them out, and the origin pinned the first time the project was entered),
+broker.log, sessions.jsonl, net.jsonl, model.jsonl and refusals.jsonl. The sockets fail closed: with the broker down
+nothing answers, and a sandbox has no other route out."""
 import contextlib
 import hashlib
 import io
@@ -43,6 +51,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HARNESS = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(HARNESS, "eval", "broker"))
 import broker as scheduler  # noqa: E402  eval/broker/broker.py, reused as the scheduler socket
+import gateway  # noqa: E402  lib/gateway.py, the model gateway and the allowlist
 
 SOCKET_MAX = 104  # sun_path is 108 bytes on Linux; leave room for the terminating NUL and a margin
 
@@ -90,7 +99,7 @@ def peer_uid(conn):
 class Session:
     def __init__(self, sid, path, project, agent, net, pid):
         self.sid, self.path, self.project, self.agent, self.net, self.pid = sid, path, project, agent, net, pid
-        self.started, self.servers, self.record = time.time(), [], None
+        self.started, self.servers, self.record, self.model = time.time(), [], None, None
 
     def limits(self):
         """What lib/box.sh recorded for this session's sandbox: a scope's wall or prlimit's speed bump."""
@@ -102,8 +111,8 @@ class Session:
 
     def view(self):
         return {"session": self.sid, "dir": self.path, "project": self.project, "agent": self.agent,
-                "net": self.net, "pid": self.pid, "started": self.started, "record": self.record,
-                "limits": self.limits()}
+                "net": self.net, "model": self.model, "pid": self.pid, "started": self.started,
+                "record": self.record, "limits": self.limits()}
 
 
 class Connect(socketserver.BaseRequestHandler):
@@ -121,15 +130,17 @@ class Connect(socketserver.BaseRequestHandler):
                 return
             head += byte
         words = head.split(b"\r\n", 1)[0].decode("latin-1").split()
-        target = words[1] if len(words) == 3 and words[0] == "CONNECT" else ""
-        name, _, port = target.rpartition(":")
-        if target not in self.server.allowed or not port.isdigit():
-            why = f"{' '.join(words[:2]) or 'an empty request'} is not on the {self.server.agent} profile's net: list"
+        target = gateway.host_port(words[1]) if len(words) == 3 and words[0] == "CONNECT" else None
+        if target not in self.server.allowed:
+            said = " ".join(words[:2])[:200] or "an empty request"
+            why = (f"{said} is not on this session's allowlist" if words[:1] == ["CONNECT"] else
+                   f"{said}: the proxy takes CONNECT only")
             host.refused(self.server.sid, "net", why)
             conn.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
             return
+        name, _, port = target.rpartition(":")
         try:
-            upstream = socket.create_connection((name, int(port)), timeout=30)
+            upstream = socket.create_connection((name.strip("[]"), int(port)), timeout=30)
         except OSError as e:
             host.refused(self.server.sid, "net", f"CONNECT {target} failed: {e.strerror or e}")
             conn.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
@@ -176,11 +187,20 @@ class Host:
         """The scheduler broker for a project, made once; its ledger and spool outlive every session."""
         if path not in self.projects:
             name = f"{os.path.basename(path) or 'root'}-{hashlib.sha1(path.encode()).hexdigest()[:8]}"
-            cfg = {"session": name, "project": path, "paths": [[path, path]], "origin": origin(path),
-                   "slurm_bin": self.slurm_bin, "slurm_env": {}, "user": os.environ.get("USER", ""),
-                   "compute_bwrap": False}
             pdir = os.path.join(self.state, "projects", name)
             os.makedirs(pdir, exist_ok=True)
+            # The origin main is read from is pinned the first time: the clone's .git/config is the agent's to edit.
+            try:
+                with open(os.path.join(pdir, "config.json")) as f:
+                    pinned = json.load(f)["origin"]
+            except (OSError, ValueError, KeyError):
+                pinned = origin(path)
+            if pinned and not pinned.startswith(("ext::", "file://")) and ":" not in pinned.split("/", 1)[0] \
+                    and under(os.path.realpath(os.path.join(path, pinned)), path):
+                pinned = ""  # a repository inside the project is the agent's own
+            cfg = {"session": name, "project": path, "paths": [[path, path]], "origin": pinned,
+                   "slurm_bin": self.slurm_bin, "slurm_env": {}, "user": os.environ.get("USER", ""),
+                   "compute_bwrap": False}
             with open(os.path.join(pdir, "config.json"), "w") as f:
                 json.dump(cfg, f, indent=1)
             self.projects[path] = scheduler.Broker(pdir, cfg)
@@ -199,10 +219,12 @@ class Host:
             return {"rc": 1, "err": f"guard broker: {path} is too long for a socket path; set GUARD_RUNTIME_DIR "
                                     "to a short directory such as /tmp/guard-$UID\n"}
         os.mkdir(path, 0o700)
-        net = [h if ":" in h else h + ":443" for h in req.get("net") or []]
+        broker = self.project(project)
+        card, notes = self.allowlist(broker)
+        profile = [gateway.host_port(h) for h in req.get("net") or []]
+        net = list(dict.fromkeys(card + [h for h in profile if h]))
         session = Session(sid, path, project, str(req.get("agent")), net, req.get("pid"))
         session.record = os.path.join(private_dir(os.path.join(self.state, "limits")), f"s-{sid}.jsonl")
-        broker = self.project(project)
         sched = scheduler.Server(os.path.join(path, "scheduler.sock"), scheduler.Handler)
         sched.answer = lambda r: self.logged(sid, "scheduler", r, broker.handle(r))
         self.serve_socket(session, "scheduler", sched)
@@ -210,9 +232,38 @@ class Host:
             proxy = scheduler.Server(os.path.join(path, "net.sock"), Connect)
             proxy.host, proxy.allowed = self, set(net)
             self.serve_socket(session, "net", proxy)
+        if req.get("model"):
+            try:
+                self.serve_model(session, str(req["model"]))
+            except ValueError as e:
+                notes.append(f"no model gateway: {e}")
+                self.refused(sid, "model", str(e))
         self.sessions[sid] = session
         append(os.path.join(self.state, "sessions.jsonl"), {"opened": session.view()})
-        return {"rc": 0, **session.view()}
+        return {"rc": 0, **session.view(), "notes": notes}
+
+    def allowlist(self, broker):
+        """The hosts net_allow: names in guard/budget.card on the broker's mirror of main, which only a person's merge
+        changes; the default when the card does not say; none, with a note, when main cannot be read."""
+        try:
+            with broker.lock:
+                broker.mirror.fetch()
+                card = broker.mirror.show("guard/budget.card")
+        except Exception as e:  # noqa: BLE001  Refused, or git missing: either way no host is allowed
+            return [], [f"no package hosts this session: the broker cannot read guard/budget.card on main ({e})"]
+        hosts, bad = gateway.net_allow(card)
+        return hosts, [f"net_allow: on main has words that are not host[:port], ignored: {' '.join(bad)}"] if bad else []
+
+    def serve_model(self, session, name):
+        """The session's model.sock: lib/gateway.py's handler to the upstream in ~/.config/guard/models/NAME."""
+        spec = read_model(name)
+        server = gateway.UnixModelServer(os.path.join(session.path, "model.sock"), gateway.ModelHandler)
+        server.upstream, server.key, server.header = spec["upstream"], spec.get("key"), spec["header"]
+        server.upstream_timeout = 600
+        log = os.path.join(self.state, "model.jsonl")
+        server.record = lambda entry: append(log, {"session": session.sid, "model": name, **entry})
+        self.serve_socket(session, "model", server)
+        session.model = name
 
     def logged(self, sid, where, req, reply):
         if reply.get("rc"):
@@ -288,6 +339,39 @@ class Control(socketserver.StreamRequestHandler):
         except ValueError:
             reply = {"rc": 1, "err": "guard broker: a request is one JSON object\n"}
         self.wfile.write(json.dumps(reply).encode() + b"\n")
+
+
+def under(path, top):
+    return path == top or path.startswith(top.rstrip("/") + "/")
+
+
+def read_model(name):
+    """~/.config/guard/models/NAME as {upstream, header, key}; ValueError naming what is wrong."""
+    models = os.path.join(config_dir(), "models")
+    path = os.path.join(models, name)
+    if not name.replace("-", "").isalnum() or not os.path.isfile(path):
+        raise ValueError(f"no model {name} in {models}; guard broker setup writes the defaults")
+    spec = {"header": "authorization"}
+    with open(path) as f:
+        for line in f:
+            key, sep, value = line.split("#", 1)[0].partition(":")
+            if sep and key.strip() in ("upstream", "key", "header"):
+                spec[key.strip()] = value.strip()
+    if not spec.get("upstream", "").startswith(("http://", "https://")):
+        raise ValueError(f"{path} names no upstream: http(s)://...")
+    if spec.get("key"):
+        key_file = os.path.join(models, spec["key"])
+        try:
+            st = os.stat(key_file)
+            with open(key_file) as f:
+                spec["key"] = f.read().strip()
+        except OSError:
+            raise ValueError(f"no key for {name}: put it in {key_file}, mode 0600") from None
+        if st.st_uid != os.getuid() or st.st_mode & 0o077:
+            raise ValueError(f"{key_file} must be yours and mode 0600, so only you and the broker read it")
+        if not spec["key"]:
+            raise ValueError(f"{key_file} is empty")
+    return spec
 
 
 def origin(project):
@@ -420,7 +504,8 @@ def status():
     print(f"sessions: {len(reply['sessions'])}")
     for s in reply["sessions"]:
         print(f"  s-{s['session']}  {s['agent']}  {s['project']}  up {ago(s['started'])}, guard enter pid {s['pid']}"
-              + (f", net {' '.join(s['net'])}" if s["net"] else ""))
+              + (f", model gateway {s['model']}" if s.get("model") else "")
+              + (f", net {' '.join(s['net'])}" if s["net"] else ", no network"))
         print(f"    limits: {limits_said(s['limits'])}")
     print(f"live jobs: {len(reply['jobs'])}")
     for j in reply["jobs"]:
@@ -470,6 +555,20 @@ def setup():
             os.chmod(dst, 0o600)
             made.append(name)
     print(f"profiles in {agents}: " + ", ".join(made + [f"{k} (kept yours)" for k in kept]))
+    models = os.path.join(config_dir(), "models")
+    os.makedirs(models, mode=0o700, exist_ok=True)
+    said = []
+    for name in sorted(os.listdir(os.path.join(HARNESS, "templates", "models"))):
+        dst = os.path.join(models, name)
+        if not os.path.exists(dst):
+            shutil.copyfile(os.path.join(HARNESS, "templates", "models", name), dst)
+            os.chmod(dst, 0o600)
+        try:
+            spec = read_model(name)
+            said.append(f"{name} ({'key in place' if spec.get('key') else 'no key'})")
+        except ValueError as e:
+            said.append(f"{name} ({e})")
+    print(f"model upstreams in {models}: " + ", ".join(said))
     runtime = private_dir(runtime_dir())
     print(f"sockets: {runtime}/s-<session>/, mode 0700, outside the home so an NFS home never holds one")
     sbatch = shutil.which("sbatch")

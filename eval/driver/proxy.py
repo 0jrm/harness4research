@@ -25,37 +25,17 @@ the sandbox binds in place of a network (driver/netrelay.py carries the client's
   the token usage the reply reports, and the repairs it made to that request, with counts.
 
 The model host keeps no request bodies for shared traffic, so this log is the record of what the model saw and
-said. Standard library only.
+said. The forwarding is lib/gateway.py's, the broker's model gateway, with no key. Standard library only.
 """
 import argparse
-import http.client
 import http.server
-import os
-import socketserver
 import json
+import os
+import sys
 import threading
-import time
-import urllib.parse
 
-HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
-       "transfer-encoding", "upgrade", "content-length", "host", "accept-encoding"}
-
-
-def usage_of(text):
-    """The token usage a reply reports: the last usage object in a JSON body or in server-sent events."""
-    found = None
-    candidates = [text] + [line[5:].strip() for line in text.splitlines() if line.startswith("data:")]
-    for chunk in candidates:
-        try:
-            obj = json.loads(chunk)
-        except ValueError:
-            continue
-        if not isinstance(obj, dict):
-            continue
-        usage = obj.get("usage") or (obj.get("response") or {}).get("usage")
-        if usage:
-            found = usage
-    return found
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib"))
+import gateway  # noqa: E402  lib/gateway.py, the broker's model gateway
 
 
 def fold_developer(items):
@@ -101,94 +81,45 @@ def text_into_reasoning(items):
     return out
 
 
-class Handler(http.server.BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
+class Handler(gateway.ModelHandler):
+    """lib/gateway.py's handler, with the evaluation's repairs and every request and reply in full in the log."""
 
-    def log_message(self, fmt, *args):
-        pass
-
-    def forward(self):
+    def rewrite(self, body):
         cfg = self.server.cfg
-        started = time.time()
-        length = int(self.headers.get("Content-Length") or 0)
-        body = self.rfile.read(length) if length else b""
-        sent = body
-        request_json = None
-        repairs = {}
-        if body and "json" in (self.headers.get("Content-Type") or ""):
-            try:
-                request_json = json.loads(body)
-            except ValueError:
-                request_json = None
-            if isinstance(request_json, dict) and self.command == "POST":
-                if "model" in request_json:
-                    request_json["model"] = cfg.alias
-                if cfg.seed is not None and "seed" not in request_json:
-                    request_json["seed"] = cfg.seed
-                request_json.update(cfg.sampling)
-                items = request_json.get("input")
-                if cfg.fold_developer and isinstance(items, list):
-                    folded = fold_developer(items)
-                    repairs["fold_developer"] = sum(1 for i in items if i.get("type", "message") == "message"
-                                                    and i.get("role") == "developer")
-                    items = request_json["input"] = folded
-                if cfg.text_into_reasoning and isinstance(items, list):
-                    moved = text_into_reasoning(items)
-                    repairs["text_into_reasoning"] = len(items) - len(moved)
-                    repairs["mcp_merge"] = sum(1 for i in moved if str(i.get("id", "")).startswith("mcp_")) \
-                        - sum(1 for i in items if str(i.get("id", "")).startswith("mcp_"))
-                    request_json["input"] = moved
-                sent = json.dumps(request_json).encode()
-        up = urllib.parse.urlsplit(cfg.upstream)
-        headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
-        headers["Content-Length"] = str(len(sent))
-        conn = http.client.HTTPConnection(up.hostname, up.port or 80, timeout=cfg.timeout)
-        received = bytearray()
-        status = 502
+        self.request_json, self.repairs = None, {}
+        if not body or "json" not in (self.headers.get("Content-Type") or ""):
+            return body
         try:
-            conn.request(self.command, up.path.rstrip("/") + self.path, body=sent if sent else None, headers=headers)
-            resp = conn.getresponse()
-            status = resp.status
-            self.send_response(resp.status)
-            for k, v in resp.getheaders():
-                if k.lower() not in HOP:
-                    self.send_header(k, v)
-            self.send_header("Transfer-Encoding", "chunked")
-            self.end_headers()
-            while True:
-                chunk = resp.read1(65536)
-                if not chunk:
-                    break
-                received += chunk
-                self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
-                self.wfile.flush()
-            self.wfile.write(b"0\r\n\r\n")
-            self.wfile.flush()
-        except (OSError, http.client.HTTPException) as e:
-            received += f"proxy error: {e!r}".encode()
-            if status == 502:
-                try:
-                    self.send_error(502, "upstream unreachable")
-                except OSError:
-                    pass
-        finally:
-            conn.close()
-            text = received.decode(errors="replace")
-            entry = {"ts": started, "seconds": round(time.time() - started, 3), "method": self.command,
-                     "path": self.path, "status": status,
-                     "request": request_json if request_json is not None else body.decode(errors="replace"),
-                     "response": text, "usage": usage_of(text), "repairs": repairs}
-            with self.server.lock:
-                with open(cfg.log, "a") as f:
-                    f.write(json.dumps(entry) + "\n")
+            request_json = json.loads(body)
+        except ValueError:
+            return body
+        self.request_json = request_json
+        if not (isinstance(request_json, dict) and self.command == "POST"):
+            return body
+        if "model" in request_json:
+            request_json["model"] = cfg.alias
+        if cfg.seed is not None and "seed" not in request_json:
+            request_json["seed"] = cfg.seed
+        request_json.update(cfg.sampling)
+        items = request_json.get("input")
+        if cfg.fold_developer and isinstance(items, list):
+            folded = fold_developer(items)
+            self.repairs["fold_developer"] = sum(1 for i in items if i.get("type", "message") == "message"
+                                                 and i.get("role") == "developer")
+            items = request_json["input"] = folded
+        if cfg.text_into_reasoning and isinstance(items, list):
+            moved = text_into_reasoning(items)
+            self.repairs["text_into_reasoning"] = len(items) - len(moved)
+            self.repairs["mcp_merge"] = sum(1 for i in moved if str(i.get("id", "")).startswith("mcp_")) \
+                - sum(1 for i in items if str(i.get("id", "")).startswith("mcp_"))
+            request_json["input"] = moved
+        return json.dumps(request_json).encode()
 
-    do_GET = do_POST = do_DELETE = forward
-
-
-class UnixHTTPServer(socketserver.ThreadingUnixStreamServer):
-    def get_request(self):
-        conn, _ = super().get_request()
-        return conn, ("unix", 0)
+    def entry(self, entry, body, received):
+        request_json = getattr(self, "request_json", None)
+        return {**entry, "path": self.path,
+                "request": request_json if request_json is not None else body.decode(errors="replace"),
+                "response": received, "repairs": getattr(self, "repairs", {})}
 
 
 def main():
@@ -208,13 +139,21 @@ def main():
     if cfg.unix:
         if os.path.exists(cfg.unix):
             os.unlink(cfg.unix)
-        server = UnixHTTPServer(cfg.unix, Handler)
+        server = gateway.UnixModelServer(cfg.unix, Handler)
     else:
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         with open(cfg.port_file, "w") as f:
             f.write(str(server.server_address[1]))
     server.daemon_threads = True
     server.cfg, server.lock = cfg, threading.Lock()
+    server.upstream, server.key, server.header = cfg.upstream, None, "authorization"
+    server.upstream_timeout = cfg.timeout
+
+    def record(entry):
+        with server.lock:
+            with open(cfg.log, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+    server.record = record
     server.serve_forever()
 
 

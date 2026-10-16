@@ -32,7 +32,8 @@
 #                       terminal for job control, but only where the kernel refuses TIOCSTI (legacy_tiocsti 0)
 #   --probe             first run the pre-flight probe (box_probe.py) inside, and start nothing if one check fails
 #   --hide PATH         with --probe: a host path the sandbox must not reach
-#   --relay PORT        127.0.0.1:PORT inside carries each connection to /run/guard/net.sock, the broker's proxy
+#   --relay PORT[:NAME] 127.0.0.1:PORT inside carries each connection to /run/guard/NAME (default net.sock, the
+#                       broker's proxy; model.sock is its model gateway); repeatable
 #   --as BYTES|none     the address-space cap, per process
 #   --mem BYTES         the memory of all processes together, in the scope (default: half this host's, at most 32 GiB)
 #   --tasks N           the processes and threads allowed (default 512)
@@ -44,7 +45,7 @@ die() { echo "box.sh: $*" >&2; exit 64; }
 arity() { [ "$1" -ge "$2" ] || die "$3 takes $(($2 - 1)) value(s)"; }
 
 argv=("$@")
-user=${USER:-$(id -un)} host=$(hostname 2>/dev/null || uname -n) home=/ chdir="" tty=1 probe=0 relay="" print=0
+user=${USER:-$(id -un)} host=$(hostname 2>/dev/null || uname -n) home=/ chdir="" tty=1 probe=0 relays=() print=0
 as=$((32 << 30)) binds=() envs=() path=() hide=() ro_paths=(/usr /etc) socks=() home_src=""
 mem=$(($(awk '/^MemTotal:/ { print $2 }' /proc/meminfo) << 9)) tasks=512 record=""
 [ "$mem" -le $((32 << 30)) ] || mem=$((32 << 30))
@@ -66,7 +67,8 @@ while [ $# -gt 0 ]; do
     --no-tty) tty=0; shift ;;
     --probe) probe=1; shift ;;
     --hide) arity $# 2 "$1"; hide+=("$2"); shift 2 ;;
-    --relay) arity $# 2 "$1"; [[ $2 =~ ^[0-9]+$ ]] || die "--relay takes a port"; relay=$2; shift 2 ;;
+    --relay) arity $# 2 "$1"; [[ $2 =~ ^[0-9]+(:[a-z]+\.sock)?$ ]] || die "--relay takes PORT or PORT:NAME.sock"
+      relays+=("$2"); shift 2 ;;
     --as) arity $# 2 "$1"; as=$2; shift 2 ;;
     --mem) arity $# 2 "$1"; [[ $2 =~ ^[0-9]+$ ]] || die "--mem takes bytes"; mem=$2; shift 2 ;;
     --tasks) arity $# 2 "$1"; [[ $2 =~ ^[0-9]+$ ]] || die "--tasks takes a count"; tasks=$2; shift 2 ;;
@@ -150,7 +152,7 @@ args+=(
 )
 inner=(bash /run/box/inside.sh)
 [ $probe = 0 ] || inner+=(--probe)
-[ -z "$relay" ] || inner+=(--relay "$relay")
+for r in "${relays[@]}"; do inner+=(--relay "$r"); done
 inner+=(-- "$@")
 
 # The probe's checks, as NUL-separated key and value pairs: read-only paths, the sockets allowed, the home's inode,

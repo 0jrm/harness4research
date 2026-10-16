@@ -1,0 +1,11 @@
+# guard broker model upstream: Anthropic's API, for a profile's model: anthropic line. guard broker setup copies it to
+# ~/.config/guard/models/anthropic; edit that copy. The key stays outside every sandbox: put it in
+# ~/.config/guard/models/anthropic.key, mode 0600. The gateway sends it in the header below, drops the client's own
+# credential headers, and removes the key from every reply.
+#
+#   upstream: URL     where requests go, the only host the gateway reaches; a local vLLM is http://HOST:PORT/v1
+#   key: FILE         beside this file; leave the line out for an upstream with no key
+#   header: NAME      authorization (sent as Bearer KEY) or a header that takes the key itself, such as x-api-key
+upstream: https://api.anthropic.com
+key: anthropic.key
+header: x-api-key

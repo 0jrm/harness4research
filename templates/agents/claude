@@ -5,8 +5,12 @@
 #   seed-json: PATH KEY...   a JSON file under your home, copied once with only these top-level keys
 #   login: PATH              your CLI login, bound read-write so a refresh reaches your own copy; only in a session
 #                            you start without --no-tty (decision D3), never in an unattended one
-#   net: HOST[:PORT]         a host the broker's proxy lets this agent reach (port 443 by default); nothing else is
+#   net: HOST[:PORT]         a host the broker's proxy lets this agent reach (port 443 by default), beside the
+#                            project's net_allow: on main; nothing else is
 #   env: NAME=VALUE          a variable inside the sandbox
+#   model: NAME URL [KEY]    in an unattended session (--no-tty), the model through the broker's gateway to the
+#                            upstream in ~/.config/guard/models/NAME: the variable URL names the gateway, and KEY
+#                            gets a placeholder, since the gateway adds the real key outside (decision D3)
 binary: claude
 seed-json: .claude.json hasCompletedOnboarding lastOnboardingVersion oauthAccount userID installMethod firstStartTime
 seed-json: .claude/settings.json model theme
@@ -16,3 +20,4 @@ net: console.anthropic.com
 net: platform.claude.com
 env: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 env: DISABLE_AUTOUPDATER=1
+model: anthropic ANTHROPIC_BASE_URL ANTHROPIC_API_KEY
