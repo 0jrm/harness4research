@@ -629,6 +629,9 @@ def main():
     if "--help" in args or "-h" in args:
         print(__doc__)
         return
+    checked = subprocess.run([os.path.join(EVAL, "env", "prereq.sh"), "eval/audit/run.py"])
+    if checked.returncode:
+        sys.exit(checked.returncode)
     keep, markdown = "--keep" in args, "--markdown" in args
     json_path = args[args.index("--json") + 1] if "--json" in args else None
     gate_path = args[args.index("--gate") + 1] if "--gate" in args else None

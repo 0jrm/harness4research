@@ -4,6 +4,15 @@
 set -uo pipefail
 # git rebase --exec and git hooks export GIT_DIR, which would turn every throwaway repo below into the caller's own.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE
+# What the suite needs, checked before anything runs: one line with the fix, exit 64.
+prereq() { echo "tests/run.sh: $1" >&2; exit 64; }
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+command -v jq >/dev/null || prereq "needs jq; install it, for example sudo apt-get install jq"
+python3 -c 'import yaml' 2>/dev/null || prereq "needs PyYAML; install it, for example sudo apt-get install python3-yaml"
+[ "$(git -C "$here" rev-parse --is-shallow-repository)" = false ] ||
+  prereq "needs the full history; run git -C $here fetch --unshallow --tags"
+git -C "$here" rev-parse -q --verify "refs/tags/$(cat "$here/tests/oldest-supported")" >/dev/null ||
+  prereq "needs the release tags from $(cat "$here/tests/oldest-supported") on; run git -C $here fetch --tags"
 # Launch finds a job's processes host-wide by HPC_JOB_ID, and these tests reuse fixed job ids, so two suites on one
 # host would measure and kill each other's jobs. Where the host allows it, the suite runs as PID 1 of a private PID
 # namespace, and every process it leaves dies with it. unshare ignores INT and TERM, so this outer copy forwards them.
@@ -14,7 +23,6 @@ if [ -z "${HPC_TESTS_IN_NS:-}" ] && "${ns[@]}" true 2>/dev/null; then
   while :; do wait $u; rc=$?; kill -0 $u 2>/dev/null || exit $rc; done
 fi
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 guard=$here/bin/guard
 tmp=$(mktemp -d); cache=${XDG_CACHE_HOME:-$HOME/.cache}; mkdir -p "$cache"
 keep=$(mktemp -d "$cache/guard-tests.XXXXXX"); trap 'rm -rf "$tmp" "$keep"' EXIT

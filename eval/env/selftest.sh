@@ -6,6 +6,7 @@
 set -uo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 harness=$(cd "$here/../.." && pwd)
+"$here/prereq.sh" eval/env/selftest.sh || exit
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/s.XXXXXX"); ep=$tmp/s1
 trap '"$here/down.sh" "$ep" >/dev/null 2>&1; rm -rf "$tmp"' EXIT
 pass=0; fail=0
