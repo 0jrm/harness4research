@@ -132,7 +132,7 @@ expect broker-card-approved ok 'Submitted batch job' -- in_b 'guard/run prefligh
 expect records-approve-closed ok '	done	approve	Approve question card runs/big' -- cat "$b/state/broker/records/needs-you.tsv"
 expect broker-revoke ok 'revoked card/big' -- "$broker_py" revoke card "$b/state/broker" big
 expect broker-card-revoked fail 'card/big was revoked' -- in_b 'guard/run preflight runs/big job.sh'
-expect records-done-outside ok 'n1 done' -- "$broker_py" records done "$b/state/broker" n1
+expect records-done-outside ok 'n1 done' -- "$broker_py" records "done" "$b/state/broker" n1
 
 echo "== down"
 expect down ok - -- "$here/down.sh" "$ep"
