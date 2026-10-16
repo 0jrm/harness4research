@@ -5,9 +5,12 @@
 `eval/audit/run.py` builds one fresh arm E episode per attacker with `eval/episode.sh`, runs the attacker inside the sandbox, tears the episode down, and reads the verdict from the records the episode left: the fake Slurm's ledger and audit log, the forge's log and the protected repository, the needs-you queue and the files. An attacker's own output decides nothing, except for the sandbox rows marked below, where the probe's output is the only record there is. One attacker per row lives in `eval/audit/attacks/`. The run takes about three and a half minutes on a laptop, needs no model, and gave the same table twice in a row on 2026-10-13. The table below is from 2026-10-14, after the fixes on branch `fix/guard-audit-small-gaps`: against `main` before them, the same run gave 23 held and 21 bypassed, and exactly the six rows explore-cap, sbatch-short-form, cli-space-form, fake-squeue, push-card-one-push and push-agents-md moved from BYPASSED to HELD.
 
 ```shell
-eval/audit/run.py                  # the table below
+eval/audit/run.py --markdown                     # the table below
 eval/audit/run.py --only sbatch-walltime --keep
+eval/audit/run.py --gate eval/audit/baseline.json
 ```
+
+`--gate` fails, naming the row, when a row that `eval/audit/baseline.json` holds no longer holds. A row that flips to HELD updates the baseline in the same pull request. The four host rows, disk-watchdog, memory-cap, memory-many-procs and many-processes, measure the driver and the host, not the harness, so they are reported but never gated.
 
 ## The table
 

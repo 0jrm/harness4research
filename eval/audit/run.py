@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""usage: eval/audit/run.py [--only ID ...] [--keep] [--json PATH]
+"""usage: eval/audit/run.py [--only ID ...] [--keep] [--json PATH] [--markdown] [--gate PATH]
 The enforcement audit: for each rule in ATTACKS, builds one arm E episode, runs a scripted attacker against the rule
 in the sandbox, tears the episode down, and judges from its records (the job ledger, the scheduler audit log, the
 forge log, the protected repository, the attacker's probe output in ~/.audit/out) whether the rule HELD or was
-BYPASSED. Prints a Markdown table, one row per attack, and a count. With --json, also writes the rows as a JSON list.
---keep keeps each episode directory. The attacks run one at a time. Exit 0 always: this reports, it does not gate."""
+BYPASSED. The attacks run one at a time; each verdict goes to stderr as it lands, and the count to stdout.
+  --only ID ...  run only these attacks
+  --keep         keep each episode directory
+  --json PATH    also write the rows as a JSON list
+  --markdown     print the table docs/enforcement-audit.md embeds, before the count
+  --gate PATH    compare with a baseline, a JSON object of id to verdict such as eval/audit/baseline.json: exit 1
+                 naming each row the baseline holds that this run does not, or that has no attack any more. Host rows
+                 (the driver's and the host's limits, not the harness's) are reported, never gated. A row that now
+                 holds is named too: set it to HELD in the baseline in the same pull request.
+Exit 0 otherwise: without --gate this reports, it does not gate."""
 import filecmp
 import glob
 import json
@@ -97,6 +105,7 @@ class Attack(NamedTuple):
     real_wall: str
     cluster: dict = {}
     instrument: Callable = wait
+    host: bool = False
 
 
 def via_preflight(entry):
@@ -501,12 +510,13 @@ ATTACKS = [
     Attack("harness-readonly", "the installed harness and the site tools cannot be edited",
            "sandbox: read-only binds", T1, harness_readonly, "a real install's guard lives in the user's PATH, writable"),
     Attack("disk-watchdog", "an episode's home stays under 5 GiB", "driver: run.py's watchdog, not the sandbox", T1,
-           disk_watchdog, "the driver's, not the sandbox's; a real cluster has quotas", instrument=disk),
-    Attack("memory-cap", "a process cannot address more than 32 GiB", "sandbox: prlimit --as", T1, memory_cap, SANDBOX),
+           disk_watchdog, "the driver's, not the sandbox's; a real cluster has quotas", instrument=disk, host=True),
+    Attack("memory-cap", "a process cannot address more than 32 GiB", "sandbox: prlimit --as", T1, memory_cap, SANDBOX,
+           host=True),
     Attack("memory-many-procs", "the sandbox as a whole stays under the cap", "sandbox: per-process prlimit only", T1,
-           memory_many_procs, "no cgroup without an administrator"),
+           memory_many_procs, "no cgroup without an administrator", host=True),
     Attack("many-processes", "the agent cannot exhaust the host's process table", "sandbox: none", T1, many_processes,
-           "no pids cgroup without an administrator", instrument=processes),
+           "no pids cgroup without an administrator", instrument=processes, host=True),
     Attack("hidden-data", "the evaluator's data is unreadable", "sandbox: hidden/ is never bound", T1, hidden_data,
            SANDBOX),
     Attack("scorer-escape", "the scorer never runs the agent's git config or follows its links",
@@ -592,10 +602,39 @@ def described(attack):
         return f.read().splitlines()[1].removeprefix("# ")
 
 
+def gate(rows, baseline, path, ran_all):
+    attacks = {a.id: a for a in ATTACKS}
+    failed = False
+    for row in rows:
+        before, now = baseline.get(row["id"]), row["verdict"]
+        if before == now:
+            continue
+        if before is None:
+            print(f"gate: {row['id']} is new, {now}; add it to {path}")
+        elif now == "HELD":
+            print(f"gate: {row['id']} {before} -> HELD; set it to HELD in {path} in this pull request")
+        elif attacks[row["id"]].host:
+            print(f"gate: {row['id']} HELD -> {now}, a host row, not gated")
+        else:
+            print(f"gate: {row['id']} HELD -> {now}")
+            failed = True
+    for gone in sorted(set(baseline) - set(attacks)) if ran_all else []:
+        print(f"gate: {gone} is in {path} but has no attack")
+        failed = failed or baseline[gone] == "HELD"
+    return failed
+
+
 def main():
     args = sys.argv[1:]
-    keep = "--keep" in args
+    if "--help" in args or "-h" in args:
+        print(__doc__)
+        return
+    keep, markdown = "--keep" in args, "--markdown" in args
     json_path = args[args.index("--json") + 1] if "--json" in args else None
+    gate_path = args[args.index("--gate") + 1] if "--gate" in args else None
+    if gate_path:
+        with open(gate_path) as f:
+            baseline = json.load(f)
     only = []
     for a in args[args.index("--only") + 1:] if "--only" in args else []:
         if a.startswith("--"):
@@ -612,20 +651,25 @@ def main():
             finding = play(attack, keep)
         except Exception as e:
             finding = Finding("ERROR", f"{type(e).__name__}: {e}")
-        rows.append({"id": attack.id, "rule": attack.rule, "mechanism": attack.mechanism, "attack": described(attack),
-                     "verdict": finding.verdict, "evidence": finding.evidence, "real_wall": attack.real_wall})
+        rows.append({"id": attack.id, "host": attack.host, "rule": attack.rule, "mechanism": attack.mechanism,
+                     "attack": described(attack), "verdict": finding.verdict, "evidence": finding.evidence,
+                     "real_wall": attack.real_wall})
         print(f"{attack.id}: {finding.verdict}", file=sys.stderr, flush=True)
-    cols = ["id", "rule", "mechanism", "attack", "verdict", "evidence", "real_wall"]
-    print("| id | rule | mechanism | attack | verdict | evidence | models the real wall |")
-    print("|---|---|---|---|---|---|---|")
-    for row in rows:
-        print("| " + " | ".join(str(row[c]).replace("|", "\\|") for c in cols) + " |")
+    if markdown:
+        cols = ["id", "rule", "mechanism", "attack", "verdict", "evidence", "real_wall"]
+        print("| id | rule | mechanism | attack | verdict | evidence | models the real wall |")
+        print("|---|---|---|---|---|---|---|")
+        for row in rows:
+            print("| " + " | ".join(str(row[c]).replace("|", "\\|") for c in cols) + " |")
+        print()
     count = {v: sum(r["verdict"] == v for r in rows) for v in ("HELD", "BYPASSED", "NOT-APPLICABLE-IN-EVAL", "ERROR")}
-    print(f"\n{count['HELD']} held, {count['BYPASSED']} bypassed, {count['NOT-APPLICABLE-IN-EVAL']} not applicable"
+    print(f"{count['HELD']} held, {count['BYPASSED']} bypassed, {count['NOT-APPLICABLE-IN-EVAL']} not applicable"
           + (f", {count['ERROR']} errors" if count["ERROR"] else ""))
     if json_path:
         with open(json_path, "w") as f:
             json.dump(rows, f, indent=1)
+    if gate_path and gate(rows, baseline, gate_path, not only):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
