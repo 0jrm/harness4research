@@ -129,7 +129,7 @@ The walls are only as strong as the gap between your credentials and the agent's
 |---|---|---|
 | `guard survey <repo>` | your machine | read-only inventory |
 | `guard init <repo>` | your machine | propose the guard on a new branch |
-| `guard init <repo> --update [--force]` | your machine | propose the newer guard as a three-way merge that keeps your edits |
+| `guard init <repo> --update [--force]` | your machine | propose the new `harness:` pin, or once, the move from `guard/bin/` to the pin |
 | `guard version` | anywhere | this harness's release and schema; inside a project, which side is behind |
 | `guard archive <repo>` | your machine | tag every remote branch |
 | `guard doctor [repo]` | your machine, the agent's shell, the cluster | read-only checklist of the setup: pass, FAIL, or cannot check from here, with a remedy for each; exit 1 when an item fails |
@@ -169,14 +169,10 @@ A ripple is a warning sign about one run. `guard/run ripples <run_dir>` prints o
 ```text
 AGENTS.md                         short list of landmines every agent reads (CLAUDE.md points to it)
 FACTS.md                          verified facts only, each with evidence that guard review checks
-guard/budget.card                 computing budget, per-job limits, and merge_policy
+guard/budget.card                 computing budget, per-job limits, merge_policy, and the harness: pin
 guard/watch.list                  verifier, test, and threshold paths agents may not edit
-guard/run                         runs the protected branch's copy of each script
-guard/bin/preflight.sh            submits a job only if it fits the budget and has a frozen question card
-guard/bin/ripples.sh              reports warning signs; exit 1 stops new submissions
-guard/bin/manifest.sh             records commit, modules, and inputs at the start of each job
-guard/bin/fence.sh                the merge inspector, also run by CI
-guard/bin/launch.sh               runs a job on a GPU box without a scheduler, under a supervisor that enforces its limits
+guard/run                         runs the script of the pinned harness release: preflight, ripples, manifest, fence, code, launch
+guard/harness-<pin>.sh            offline only: the pinned release's scripts, for a host that cannot reach the harness
 guard/SURVEY.md                   the survey, for the cleanup
 .github/workflows/guard-fence.yml runs the fence on every pull request, from the harness release guard/budget.card pins
 runs/_template/                   question card and report templates
@@ -193,7 +189,7 @@ git -C ~/harness4research pull --recurse-submodules
 guard init ~/path/to/your-repo --update
 ```
 
-The update arrives on branch `guard/update` in a new worktree, like `init`. Each guard script, `guard/run`, `guard/README.md`, and the fence workflow are merged three ways, against the templates that installed your project. Your edits are kept. New budget keys arrive with their defaults. Your card values, `watch.list`, `FACTS.md`, and `AGENTS.md` are not changed. If your edit and the harness changed the same lines, the command exits 3 and lists the files with conflict markers. Resolve them in the worktree before you push. `guard/run` refuses to run a script that still has markers.
+The update arrives on branch `guard/update` in a new worktree, like `init`. For a pinned project it changes one line, the `harness:` pin in `guard/budget.card`; an offline project also gets the new release's `guard/harness-<pin>.sh` in place of the old one. A project installed before the pin, with its scripts in `guard/bin/`, gets the move once: the `harness:` line is added, `guard/bin/` is deleted, and `guard/run`, the fence workflow and `guard/VERSION` are replaced. A site edit to `guard/bin/` stops running, so read the pull request's diff before you merge it. Your card values, `watch.list`, `runs/_template/`, `FACTS.md`, and `AGENTS.md` are not changed.
 
 Pushing a change to `.github/workflows/` needs a token with the `workflow` scope (`gh auth refresh -s workflow`). To roll back, revert the update pull request. [docs/compatibility.md](docs/compatibility.md) lists what an update may and may not change.
 
@@ -238,7 +234,7 @@ Linked skills reach every agent session as instructions, so linking pstack means
 
 ## Requirements
 
-bash 4 or later and git 2.30 or later on your machine and the cluster. python3 for `guard needs-you`, `guard hooks`, `guard atlas`, and the walkthrough. Slurm on the cluster. GitHub for the fence, and `gh` for the printed pull request commands, `guard review`, and `guard merge`. `guard review` also needs a reviewer: Claude Code or Cursor's agent CLI, or a command you name. `tests/run.sh` needs python3 with PyYAML, jq, and the repository's full history with its release tags, since it upgrades a project from every release since `tests/oldest-supported`: clone without `--depth`, or run `git fetch --unshallow --tags`. `eval/env/selftest.sh` and `eval/audit/run.py` need bubblewrap with unprivileged user namespaces. Each checks what it needs first and, when something is missing, prints one line with the fix and exits 64.
+bash 4 or later and git 2.30 or later on your machine and the cluster. python3 for `guard needs-you`, `guard hooks`, `guard atlas`, and the walkthrough. Slurm on the cluster. GitHub for the fence, and `gh` for the printed pull request commands, `guard review`, and `guard merge`. `guard review` also needs a reviewer: Claude Code or Cursor's agent CLI, or a command you name. `tests/run.sh` needs python3 with PyYAML, jq, and the repository's full history, since it guards a project with v6.1 and migrates it: clone without `--depth`, or run `git fetch --unshallow`. `eval/env/selftest.sh` and `eval/audit/run.py` need bubblewrap with unprivileged user namespaces. Each checks what it needs first and, when something is missing, prints one line with the fix and exits 64.
 
 ## Test
 

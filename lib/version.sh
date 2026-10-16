@@ -22,8 +22,18 @@ project_version() {
   else p_mode=online; fi
 }
 
-# skew, after project_version: prints current, project-older, harness-older, or unknown-install.
+# skew, after project_version: prints current, project-older, harness-older, or unknown-install. A pinned project is
+# current while its pin's lib/guard/ and templates/ match this harness's HEAD, older when the pin is an earlier commit
+# of this harness, and harness-older when this harness lacks the pin or is behind it; guard/VERSION only records the install.
 skew() {
+  local c
+  if [ -n "$p_pin" ]; then
+    if [ "$p_schema" -gt "$h_schema" ] || ! c=$(git -C "$here" rev-parse -q --verify "$p_pin^{commit}" 2>/dev/null) \
+      || ! git -C "$here" merge-base --is-ancestor "$c" HEAD; then echo harness-older
+    elif git -C "$here" diff --quiet "$c" HEAD -- lib/guard templates; then echo current
+    else echo project-older; fi
+    return
+  fi
   case $p_from in ''|unknown) echo unknown-install; return ;; esac
   if [ "$p_schema" -gt "$h_schema" ] || ! git -C "$here" cat-file -e "$p_from^{commit}" 2>/dev/null \
     || ! git -C "$here" merge-base --is-ancestor "$p_from" HEAD; then echo harness-older

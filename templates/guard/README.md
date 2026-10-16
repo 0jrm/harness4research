@@ -19,6 +19,6 @@ Commands:
 
 Launch runs only on a host named in `budget.card`'s `launch_hosts`, by its short hostname as `hostname -s` prints it on that host, not an ssh alias. Its records live in `host_state_dir`; keep the default under `~/.local/state`, never a tmpfs such as `/tmp` on a host where `/tmp` is RAM-backed, or a reboot erases every record and the GPU-hour count.
 
-`VERSION` records the guard schema and the harness commit that installed this directory. To update, a human runs `guard init <repo> --update` from an up-to-date harness4research clone. It merges your edits with the new scripts and proposes the result on a branch. Revert that pull request to roll back.
+`VERSION` records the guard schema and the harness commit that installed this directory. To update, a human runs `guard init <repo> --update` from an up-to-date harness4research clone. It proposes the new `harness:` pin on a branch. Revert that pull request to roll back.
 
 Installed by harness4research. See its README for why each piece exists.

@@ -10,9 +10,7 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 command -v jq >/dev/null || prereq "needs jq; install it, for example sudo apt-get install jq"
 python3 -c 'import yaml' 2>/dev/null || prereq "needs PyYAML; install it, for example sudo apt-get install python3-yaml"
 [ "$(git -C "$here" rev-parse --is-shallow-repository)" = false ] ||
-  prereq "needs the full history; run git -C $here fetch --unshallow --tags"
-git -C "$here" rev-parse -q --verify "refs/tags/$(cat "$here/tests/oldest-supported")" >/dev/null ||
-  prereq "needs the release tags from $(cat "$here/tests/oldest-supported") on; run git -C $here fetch --tags"
+  prereq "needs the full history; run git -C $here fetch --unshallow"
 # Launch finds a job's processes host-wide by HPC_JOB_ID, and these tests reuse fixed job ids, so two suites on one
 # host would measure and kill each other's jobs. Where the host allows it, the suite runs as PID 1 of a private PID
 # namespace, and every process it leaves dies with it. unshare ignores INT and TERM, so this outer copy forwards them.
@@ -1021,95 +1019,37 @@ expect fence-legacy-report-modified ok 'PASS.hypothesis-line' -- guard/run fence
 
 echo "== init --update"
 git -C "$tmp/proj" fetch -q origin
-expect update-noop ok 'already current' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt3"
+expect update-noop ok "^The guard in proj is current at harness: $pin\. Nothing proposed\.$" -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt3"
 expect init-refuses-guarded fail 'already guarded' -- "$guard" init "$tmp/proj" --worktree "$tmp/wt6"
 expect version-current ok '^current$' -- "$guard" version
 expect version-release ok 'guard schema [0-9]+, release [^,]+, installed from ' -- "$guard" version
 good=$(git rev-parse origin/main)
-set_version() {  # set_version <sed expression>: commit an edited guard/VERSION straight to main
-  git switch -q --detach origin/main; sed -i "$1" guard/VERSION; git commit -q -am "version: $1"
+set_main() {  # set_main <file> <sed expression>: commit an edited <file> straight to main
+  git switch -q --detach origin/main; sed -i "$2" "$1"; git commit -q -am "$1: $2"
   git push -q origin HEAD:main; git -C "$tmp/proj" fetch -q origin
 }
-set_version 's/^installer: .*/installer: 0000000000000000000000000000000000000000/'
+reset_main() { git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin; }
+zeros=0000000000000000000000000000000000000000
+set_main guard/budget.card "s/^harness: .*/harness: $zeros/"
 expect version-harness-older ok '^harness older' -- "$guard" version
-expect update-refuses-unknown-installer fail 'does not contain the one that installed' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt6"
-expect update-force ok 'guard/VERSION' -- "$guard" init "$tmp/proj" --update --force --worktree "$tmp/wt6"
-expect update-force-records ok "^installer: $(git -C "$here" rev-parse HEAD)$" -- grep '^installer:' "$tmp/wt6/guard/VERSION"
+expect update-refuses-unknown-pin fail "does not contain the release proj pins \(harness: $zeros, schema" -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt6"
+expect update-force ok '^  guard/budget.card$' -- "$guard" init "$tmp/proj" --update --force --worktree "$tmp/wt6"
+expect update-force-pins ok "^harness: $pin$" -- grep '^harness:' "$tmp/wt6/guard/budget.card"
 git -C "$tmp/proj" worktree remove --force "$tmp/wt6"; git -C "$tmp/proj" branch -q -D guard/update
-git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
-set_version 's/^schema: .*/schema: 99/'
+reset_main
+set_main guard/VERSION 's/^schema: .*/schema: 99/'
 expect update-refuses-newer-schema fail 'schema 99' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt6"
-git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
-set_version '/^schema:/d'
-expect version-project-older ok '^project older' -- "$guard" version
-expect update-schema-1 ok 'guard/VERSION' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt6"
-expect update-writes-schema ok "^schema: $(cat "$here/SCHEMA")$" -- grep '^schema:' "$tmp/wt6/guard/VERSION"
-git -C "$tmp/proj" worktree remove --force "$tmp/wt6"; git -C "$tmp/proj" branch -q -D guard/update
-git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
-set_version '/^schema:/d; /^release:/d'
-expect version-no-release-stamp ok "^project older, installed before release stamps; run guard init $tmp/[^ ]+ --update$" -- "$guard" version
-expect version-no-release-header ok 'guard schema 1, installed from ' -- "$guard" version
-git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
-old_rev=$(git -C "$here" rev-parse "$(git -C "$here" log -1 --format=%H -S'hypothesis: n/a' -- templates/runs/_template/report.md)^")
-old_install() {  # old_install: commit to main the guard files as the harness at $old_rev installed them
-  git switch -q --detach "$good"
-  # That harness kept the scripts in the project, in guard/bin/, and wrote no harness: pin.
-  git rm -q "$art"; sed -i '/^harness:/d' guard/budget.card; mkdir -p guard/bin
-  for f in guard/bin/preflight.sh guard/bin/ripples.sh guard/bin/manifest.sh guard/bin/fence.sh guard/run guard/README.md \
-    runs/_template/question.card runs/_template/report.md; do git -C "$here" show "$old_rev:templates/$f" > "$f"; done
-  git -C "$here" show "$old_rev:templates/github/workflows/guard-fence.yml" > .github/workflows/guard-fence.yml
-  sed -i "s/^installer: .*/installer: $old_rev/; /^schema:/d" guard/VERSION
-  git add -A guard
-}
-old_install
-sed -i 's/-le 150 \]/-le 200 ]/' guard/bin/fence.sh
-sed -i 's/^Question: .*/Question: our wording/' runs/_template/report.md
-echo "custom_note: leave this" >> runs/_template/question.card
-git commit -q -am "an older install with site edits"; git push -q -f origin HEAD:main; git -C "$tmp/proj" fetch -q origin
-expect version-old-install ok '^project older' -- "$guard" version
-expect path-runs-project-copy ok 'PASS.guard-untouched' -- "$guard" fence origin/main HEAD
-expect path-not-harness-copy fail - -- bash -c '"$1" fence origin/main HEAD | grep -q hypothesis-line' _ "$guard"
+reset_main
+set_main guard/VERSION "s/^installer: .*/installer: $zeros/"
+expect version-pin-not-installer ok '^current$' -- "$guard" version
+reset_main
 git init -q "$tmp/plain"
 expect path-refuses-unguarded fail 'runs inside a guarded project' -- bash -c 'cd "$1" && "$2" ripples runs/x' _ "$tmp/plain" "$guard"
-expect update-from-old ok 'guard/bin/fence.sh' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt7"
-expect update-adds-section ok '^  runs/_template/report.md: ## Execution history$' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt9" --branch guard/sections
-expect update-section-placed ok '^## Deviations from the question card ## Execution history <one line per execution.tsv row, citing its id, .*> ## Spend $' -- \
-  bash -c 'awk "/^## Deviations/,/^## Spend/" "$1" | grep . | tr "\n" " "' _ "$tmp/wt9/runs/_template/report.md"
-expect update-section-keeps-edit ok '^Question: our wording$' -- grep '^Question:' "$tmp/wt9/runs/_template/report.md"
-expect update-reports-edit ok '^  guard/bin/fence.sh$' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt8" --branch guard/again
-expect update-merged-new-rule ok 'hypothesis-line' -- cat "$tmp/wt7/guard/bin/fence.sh"
-expect update-kept-site-edit ok '-le 200 \]' -- cat "$tmp/wt7/guard/bin/fence.sh"
-expect update-scripts-current ok '^$' -- cmp "$here/lib/guard/preflight.sh" "$tmp/wt7/guard/bin/preflight.sh"
-expect update-run-executable ok - -- test -x "$tmp/wt7/guard/run"
-expect update-workflow-fixed ok 'x-access-token' -- cat "$tmp/wt7/.github/workflows/guard-fence.yml"
-expect update-keeps-card ok '^account: gom$' -- cat "$tmp/wt7/guard/budget.card"
-expect update-adds-key ok '^max_handled_failures: 2$' -- cat "$tmp/wt7/guard/budget.card"
-expect update-skips-removed-key fail - -- grep '^explore_max_nodes' "$tmp/wt7/guard/budget.card"
-expect update-filled-setting ok '^setting: <dataset, geometry, code, and pinned commits; hosts, GPUs and memory limits go in execution.tsv>$' -- grep '^setting:' "$tmp/wt7/runs/_template/question.card"
-expect update-adds-envelope-keys ok '^deadline: <' -- grep '^deadline:' "$tmp/wt7/runs/_template/question.card"
-expect update-adds-run-defaults ok '^default_run_gpu_hours: 0$' -- grep '^default_run_gpu_hours:' "$tmp/wt7/guard/budget.card"
-expect update-adds-launch ok '^launch_hosts: none$' -- grep '^launch_hosts:' "$tmp/wt7/guard/budget.card"
-expect update-adds-merge-policy ok '^merge_policy: autonomous$' -- grep '^merge_policy:' "$tmp/wt7/guard/budget.card"
-expect update-adds-launch-script ok 'cmd_supervise' -- cat "$tmp/wt7/guard/bin/launch.sh"
-expect update-filled-note ok '^custom_note: leave this$' -- grep '^custom_note:' "$tmp/wt7/runs/_template/question.card"
-expect update-filled-hypothesis ok '^hypothesis: n/a$' -- sed -n 4p "$tmp/wt7/runs/_template/report.md"
-expect update-kept-question ok '^Question: our wording$' -- grep '^Question:' "$tmp/wt7/runs/_template/report.md"
-expect update-writes-version ok "^schema: $(cat "$here/SCHEMA")$" -- grep '^schema:' "$tmp/wt7/guard/VERSION"
-git -C "$tmp/proj" worktree remove --force "$tmp/wt7"; git -C "$tmp/proj" branch -q -D guard/update
-git -C "$tmp/proj" worktree remove --force "$tmp/wt8"; git -C "$tmp/proj" branch -q -D guard/again
-
-old_install
-sed -i 's/max_ch=$(need max_core_hours)/max_ch=$(need max_core_hours)  # site/' guard/bin/preflight.sh
-git commit -q -am "an older install with an overlapping edit"; git push -q -f origin HEAD:main; git -C "$tmp/proj" fetch -q origin
-expect update-conflicts fail '^CONFLICTS' -- "$guard" init "$tmp/proj" --update --worktree "$tmp/wt7"
-expect update-conflict-named ok '^<<<<<<< guard/bin/preflight.sh \(yours\)$' -- grep '^<<<<<<<' "$tmp/wt7/guard/bin/preflight.sh"
-expect update-conflict-others-clean ok 'hypothesis-line' -- cat "$tmp/wt7/guard/bin/fence.sh"
-git -C "$tmp/wt7" push -q origin guard/update:refs/heads/conflicted
-git fetch -q origin; git switch -q --detach "$good"
+git switch -q --detach "$good"
+set_script preflight $'<<<<<<< ours\nexit 0\n=======\nexit 1\n>>>>>>> theirs'; git commit -q -am "a vendored harness merged with conflicts"
+git push -q origin HEAD:refs/heads/conflicted; git fetch -q origin; git switch -q --detach "$good"
 expect run-refuses-conflicted fail 'unresolved conflicts or does not parse' -- env HPC_GUARD_REF=origin/conflicted guard/run preflight "$R" job.sh
 expect run-names-schema fail "guard is schema $(cat "$here/SCHEMA")" -- env HPC_GUARD_REF=origin/conflicted guard/run frobnicate
-git -C "$tmp/proj" worktree remove --force "$tmp/wt7"; git -C "$tmp/proj" branch -q -D guard/update
-git push -q -f origin "$good":main; git -C "$tmp/proj" fetch -q origin
 
 echo "== harness pin"
 # pinned <dir> <online|offline> [env...]: a project guarded by this harness in that mode, its budget filled in and merged;
@@ -1227,6 +1167,78 @@ pull_request 1 notes.md
 expect workflow-offline-vendored ok "^harness: $pin; the fence comes from vendored$" -- fence_job "$tmp/wf6" "$tmp/wf-offline" 1
 expect workflow-offline-passes ok 'PASS	guard-untouched' -- cat "$tmp/wf6"
 expect workflow-offline-no-checkout ok '^-- Check out harness4research at the pin: skipped$' -- cat "$tmp/wf6"
+
+echo "== update moves the pin"
+# old_pin: the commit before lib/guard/ last changed, so this harness's scripts differ from the ones it pins.
+old_pin=$(git -C "$here" rev-parse "$(git -C "$here" log -1 --format=%H -- lib/guard)^")
+pin_at() {  # pin_at <project> <pin>: commits to its main a card that pins <pin>, and offline, the vendored file renamed to match
+  local p=$1 old; cd "$p.wt" || return; git fetch -q origin; git switch -q --detach origin/main
+  old=$(sed -n 's/^harness: //p' guard/budget.card)
+  sed -i "s/^harness: .*/harness: $2/" guard/budget.card
+  [ ! -e "guard/harness-$old.sh" ] || git mv "guard/harness-$old.sh" "guard/harness-$2.sh"
+  git commit -q -am "pin $2"; git push -q origin HEAD:main; git fetch -q origin
+}
+changes() { git -C "$1" diff --name-status --no-renames origin/main HEAD | sort; }  # changes <worktree>: its proposal's files
+card_lines() { git -C "$1" diff -U0 origin/main HEAD -- guard/budget.card | grep '^[-+][^-+]' | tr '\n' ' '; }
+pin_at "$O" "$old_pin"
+expect version-pin-older ok '^project older: guard init ' -- "$guard" version
+expect update-pin-online ok '^  guard/budget.card$' -- bash -c 'set -o pipefail; "$1" init "$2" --update --worktree "$2.up" | tee "$2.up.out"' _ "$guard" "$O"
+expect update-pin-online-files ok '^M	guard/budget.card$' -- changes "$O.up"
+expect update-pin-online-one-line ok "^-harness: $old_pin \+harness: $pin $" -- card_lines "$O.up"
+expect update-pin-keeps-mode ok '^Mode: online\. The project is online, ' -- cat "$O.up.out"
+git -C "$O.up" push -q origin guard/update:main; git fetch -q origin
+expect update-pin-then-current ok 'Nothing proposed\.$' -- "$guard" init "$O" --update --worktree "$O.up2" --branch guard/again
+pin_at "$F" "$old_pin"
+expect update-pin-offline ok "^  $art$" -- "$guard" init "$F" --update --worktree "$F.up"
+expect update-pin-offline-files ok '^$' -- diff <(printf 'A\t%s\nD\t%s\nM\tguard/budget.card\n' "$art" "guard/harness-$old_pin.sh" | sort) <(changes "$F.up")
+expect update-pin-offline-one-line ok "^-harness: $old_pin \+harness: $pin $" -- card_lines "$F.up"
+expect update-pin-offline-artifact ok - -- bash -c 'bash "$1/lib/vendor.sh" "$2" | cmp - "$3"' _ "$here" "$pin" "$F.up/$art"
+
+echo "== v6.1 to v7 migration"
+# A project guarded by v6.1, at the commit its tag names, with its budget filled in and merged to main.
+v61=6f8fd7834c4d1ab5ad95b9216b6e1a87799aa82b
+git clone -q --shared --no-checkout "$here" "$tmp/h-v6.1" 2>/dev/null; git -C "$tmp/h-v6.1" checkout -q --detach "$v61"
+M=$tmp/v61
+git init -q --bare -b main "$M.git"; git clone -q "$M.git" "$M" 2>/dev/null
+git -C "$M" checkout -q -b main; echo "# p" > "$M/README.md"; git -C "$M" add -A; git -C "$M" commit -q -m init
+git -C "$M" push -q -u origin main; git -C "$M" remote set-head origin -a >/dev/null
+"$tmp/h-v6.1/bin/guard" init "$M" --worktree "$M.wt" >/dev/null 2>&1
+git -C "$tmp/proj" show "$good:guard/budget.card" | sed '/^harness:/d' > "$M.wt/guard/budget.card"
+git -C "$M.wt" commit -q -am "chore(guard): set budget"; git -C "$M.wt" push -q origin guard/init:main; git -C "$M.wt" fetch -q origin
+cd "$M.wt" || exit 1
+m61=$(git rev-parse origin/main)
+expect migrate-v61-bin ok '^mode none: no harness: pin on origin/main, so the scripts are guard/bin/ there$' -- "$guard" version
+expect version-project-older ok "^project older: guard init $M\.wt --update$" -- "$guard" version
+git switch -q --detach origin/main; sed -i '/^schema:/d; /^release:/d' guard/VERSION; git commit -q -am "an install before release stamps"
+git push -q origin HEAD:main; git fetch -q origin
+expect version-no-release-stamp ok "^project older, installed before release stamps; run guard init $tmp/[^ ]+ --update$" -- "$guard" version
+expect version-no-release-header ok 'guard schema 1, installed from ' -- "$guard" version
+expect update-schema-1 ok '^  guard/VERSION$' -- "$guard" init "$M" --update --online --worktree "$M.s1" --branch guard/s1
+expect update-writes-schema ok "^schema: $(cat "$here/SCHEMA")$" -- grep '^schema:' "$M.s1/guard/VERSION"
+git push -q -f origin "$m61":main; git fetch -q origin
+expect migrate-proposes ok '^  guard/bin/$' -- bash -c 'set -o pipefail; "$1" init "$2" --update --online --worktree "$2.up" | tee "$2.up.out"' _ "$guard" "$M"
+# The proposal is exactly: guard/bin/ deleted, the harness: line added, guard/run replaced, guard/VERSION rewritten, and
+# the workflow replaced when the template changed since v6.1.
+want=$( { git ls-tree -r --name-only origin/main guard/bin/ | sed 's/^/D\t/'; printf 'M\t%s\n' guard/VERSION guard/budget.card guard/run
+  git show origin/main:.github/workflows/guard-fence.yml | cmp -s - "$here/templates/github/workflows/guard-fence.yml" \
+    || printf 'M\t.github/workflows/guard-fence.yml\n'; } | sort)
+expect migrate-bin-had-scripts ok '^6$' -- bash -c 'grep -c "^D	guard/bin/" <<<"$1"' _ "$want"
+expect migrate-files-exact ok '^$' -- diff <(echo "$want") <(changes "$M.up")
+expect migrate-card-one-line ok "^\+harness: $pin $" -- card_lines "$M.up"
+expect migrate-run-is-shim ok - -- cmp "$here/templates/guard/run" "$M.up/guard/run"
+expect migrate-run-executable ok - -- test -x "$M.up/guard/run"
+expect migrate-writes-version ok "^installer: $(git -C "$here" rev-parse HEAD)$" -- grep '^installer:' "$M.up/guard/VERSION"
+expect migrate-says-bin-gone ok 'a site edit to guard/bin/ no longer runs' -- cat "$M.up.out"
+expect migrate-offline-adds-artifact ok '^$' -- bash -c '"$1" init "$2" --update --offline --worktree "$2.off" --branch guard/off >/dev/null &&
+  diff <( { echo "$3"; printf "A\t%s\n" "$4"; } | sort) <(git -C "$2.off" diff --name-status --no-renames origin/main HEAD | sort)' _ "$guard" "$M" "$want" "$art"
+git -C "$M.up" push -q origin guard/update:main; git fetch -q origin; git switch -q --detach origin/main
+expect migrate-runs-pin ok - -- bash -c '[ "$(HPC_HARNESS="$1" guard/run --show fence)" = "$(git -C "$2" show "$3:lib/guard/fence.sh")" ]' _ "$hc" "$here" "$pin_commit"
+expect migrate-fence-passes ok 'PASS	guard-untouched' -- env HPC_HARNESS="$hc" guard/run fence origin/main HEAD
+expect migrate-version-current ok '^current$' -- env HPC_HARNESS="$hc" "$guard" version
+expect migrate-once ok 'Nothing proposed\.$' -- "$guard" init "$M" --update --worktree "$M.up2" --branch guard/again
+git revert --no-edit HEAD >/dev/null; git push -q origin HEAD:main; git fetch -q origin
+expect migrate-rollback ok '^mode none: ' -- "$guard" version
+expect migrate-rollback-runs-bin ok 'PASS	guard-untouched' -- env PATH="$(path_without guard)" guard/run fence origin/main HEAD
 cd "$tmp/wt" || exit 1
 
 expect skill-states-schema ok - -- grep -q "describes guard schema $(cat "$here/SCHEMA")\." "$here/skills/safe-autonomous-hpc-science/SKILL.md"
@@ -1921,72 +1933,6 @@ expect review-batch-usage fail '^usage: guard review <pr number> \| guard review
 "$guard" config set reviewer_cmd_proprietary "$tmp/fake-reviewer" >/dev/null; "$guard" config set review_small_lines "" >/dev/null
 cd "$tmp/wt" || exit 1
 
-echo "== upgrade from each supported release"
-# old_project <tag> <dir>: a project guarded by the harness at <tag>, with the budget filled in and merged to main.
-old_project() {
-  local tag=$1 p=$2 h=$tmp/h-$1
-  [ -d "$h" ] || { git clone -q --shared --no-checkout "$here" "$h"; git -C "$h" checkout -q --detach "$tag"; }
-  git init -q --bare -b main "$p.git"; git clone -q "$p.git" "$p" 2>/dev/null
-  git -C "$p" checkout -q -b main; echo "# p" > "$p/README.md"; git -C "$p" add -A; git -C "$p" commit -q -m init
-  git -C "$p" push -q -u origin main; git -C "$p" remote set-head origin -a >/dev/null
-  "$h/bin/guard" init "$p" --worktree "$p.wt" >/dev/null 2>&1
-  git -C "$tmp/proj" show "$good:guard/budget.card" | sed '/^harness:/d' > "$p.wt/guard/budget.card"
-  printf 'runs/*/checks/*\n' > "$p.wt/guard/watch.list"
-}
-names() { { guard/run ripples "$1"; guard/run fence origin/main HEAD; } 2>/dev/null | cut -f2 | sort -u; }
-placeholders() { grep '<' "$1" | cut -d: -f1 | sort; }
-upgrade_from() {
-  local tag=$1 p=$tmp/p-$1 c=compat-$1 old_names
-  old_project "$tag" "$p"; cd "$p.wt" || return
-  sed -i 's/^exec sbatch "\$@"/exec sbatch --qos=normal "$@"/' guard/bin/preflight.sh
-  sed -i 's/runs-on: ubuntu-latest/runs-on: self-hosted/' .github/workflows/guard-fence.yml
-  mkdir -p runs/legacy; cp runs/_template/question.card runs/_template/report.md runs/legacy/
-  git add -A; git commit -q -m "budget, site edits, and a legacy run"; git push -q origin HEAD:main; git fetch -q origin
-  old_names=$(names runs/legacy)
-  if git -C "$here" diff --quiet "$tag" HEAD -- templates; then
-    expect "$c-current" ok 'already current' -- "$guard" init "$p" --update --worktree "$p.up"
-    cd "$tmp/wt" || return; return
-  fi
-  expect "$c-update" ok 'Changed:' -- "$guard" init "$p" --update --worktree "$p.up"
-  expect "$c-card-kept" ok '^account: gom$' -- cat "$p.up/guard/budget.card"
-  if git -C "$here" show "$tag:templates/guard/budget.card" | grep -q '^max_handled_failures:'; then
-    expect "$c-no-readded-key" fail - -- grep '^max_handled_failures:' "$p.up/guard/budget.card"
-  else expect "$c-key-added" ok '^max_handled_failures: 2$' -- cat "$p.up/guard/budget.card"; fi
-  expect "$c-port-kept" ok 'exec sbatch --qos=normal' -- cat "$p.up/guard/bin/preflight.sh"
-  expect "$c-workflow-fixed" ok 'x-access-token' -- cat "$p.up/.github/workflows/guard-fence.yml"
-  expect "$c-workflow-edit-kept" ok 'runs-on: self-hosted' -- cat "$p.up/.github/workflows/guard-fence.yml"
-  expect "$c-no-conflicts" fail - -- grep -rlE '^(<{7}|>{7}) ' "$p.up/guard" "$p.up/.github"
-  expect "$c-schema" ok "^schema: $(cat "$here/SCHEMA")$" -- cat "$p.up/guard/VERSION"
-  # A key the install's template already had and the project's card lacks was removed on purpose, so it stays out.
-  if git -C "$here" show "$tag:templates/guard/budget.card" | grep -q '^merge_policy:'; then
-    expect "$c-merge-policy-not-readded" fail - -- grep '^merge_policy:' "$p.up/guard/budget.card"
-  else expect "$c-merge-policy" ok '^merge_policy: autonomous$' -- cat "$p.up/guard/budget.card"; fi
-  expect "$c-lineage-keys" ok '^spawned_from: <' -- grep -A1 '^supersedes: <' "$p.up/runs/_template/question.card"
-  git -C "$p.up" push -q origin guard/update:main; git fetch -q origin; git switch -q -c agent origin/main
-  mkdir -p runs/r; cp runs/_template/question.card runs/r/
-  printf '#!/bin/bash\n#SBATCH --time=01:00:00\n#SBATCH --nodes=1\n' > job.sh; git add -A; git commit -q -m "run: r"
-  expect "$c-preflight-ok" ok 'SBATCH --qos=normal .*--account=gom' -- guard/run preflight runs/r job.sh
-  expect "$c-ripples-clean" ok - -- bash -c 'out=$(guard/run ripples runs/r) && ! grep -vE "^(PASS|UNCHECKED)	" <<<"$out"'
-  sed -i '/^|---|---|---|---|---|$/a | rows | 3 | `runs/legacy/rows.csv` | 1 | abc1234 |' runs/legacy/report.md
-  echo 3 > runs/legacy/rows.csv; git add -A; git commit -q -m "edit the legacy report"
-  expect "$c-fence-legacy" ok - -- bash -c 'out=$(guard/run fence origin/main HEAD) && ! grep -q "^FAIL" <<<"$out"'
-  expect "$c-check-names-kept" ok '^$' -- comm -23 <(echo "$old_names") <(names runs/legacy)
-  expect "$c-no-new-required" ok '^$' -- comm -23 <(placeholders "$here/templates/guard/budget.card") \
-    <(git -C "$here" show "$tag:templates/guard/budget.card" | placeholders /dev/stdin)
-  git switch -q --detach origin/main; git revert --no-edit HEAD >/dev/null; git push -q origin HEAD:main; git fetch -q origin
-  expect "$c-rollback" ok '^$' -- diff <(echo "$old_names") <(names runs/legacy)
-  if git -C "$here" show "$tag:templates/guard/bin/ripples.sh" | grep -qE '^rows=\$\(sacct'; then
-    old_project "$tag" "$p-sacct"; cd "$p-sacct.wt" || return
-    sed -i 's/^rows=$(sacct \(.*\)JobID,JobName,State/rows=$(sacct \1JobID,JobName%60,State/' guard/bin/ripples.sh
-    git add -A; git commit -q -m "site: longer job names"; git push -q origin HEAD:main
-    expect "$c-sacct-port-conflicts" fail '^CONFLICTS' -- "$guard" init "$p-sacct" --update --worktree "$p-sacct.up"
-  fi
-  cd "$tmp/wt" || return
-}
-oldest=$(cat "$here/tests/oldest-supported")
-releases=$(git -C "$here" tag -l 'v*' --contains "$oldest" --merged HEAD 2>/dev/null)
-if [ -z "$releases" ]; then fail=$((fail+1)); echo "FAIL compat-releases (no tags from $oldest; fetch them with git fetch --tags)"; fi
-for tag in $releases; do upgrade_from "$tag"; done
 echo "== atlas"
 fx=$(mktemp -d "$here/.atlas-fixture.XXXXXX"); trap 'rm -rf "$tmp" "$fx"' EXIT
 mkdir -p "$tmp/atlas"; bash "$here/tests/atlas-fixture.sh" "$fx" > "$tmp/atlas/env.sh"
