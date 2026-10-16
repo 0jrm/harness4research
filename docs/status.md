@@ -49,7 +49,7 @@ Nothing. Our vLLM server on skynet has been stopped since 2026-10-14. W1.4 has m
 
 ## Releases
 
-v6.2 (7126a73) and v7.0 (4281354) are tagged. RCC runs v6.2 (checkpoint 0 done); its move to v7.0 is checkpoint 3 (n57), when the owner asks.
+v6.2 (7126a73) and v7.0 (4281354) are tagged. RCC's reinstall on v6.2 is checkpoint 0 (n50), still open; its move to v7.0 is checkpoint 3 (n57), when the owner asks.
 
 ## Deviations from the plan
 
