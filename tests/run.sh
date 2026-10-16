@@ -1749,7 +1749,8 @@ expect batch-refused-done ok - -- bash -c '! "$1" needs-you find --kind approve 
 expect merge-single-unchanged fail '^FAIL  guard review has no verdict for pull request #16$' -- batch env "$guard" merge 16
 
 fresh; now=$(date -u +%FT%TZ)
-PRS=$(prs_json "$now" "${all[@]}")
+pending11='map(if .number == 11 then .statusCheckRollup[0] += {status: "IN_PROGRESS", conclusion: null} else . end)'
+PRS=$(prs_json "$now" "${all[@]}" | jq -c "$pending11")
 batch "$guard" ship > "$tmp/batch.out" 2>&1
 expect ship-not-due ok '^guard ship: 5 pull request\(s\) wait \(#11 #14 #15 #16 #17\)\. The batch is due in about 24 hour\(s\), when the oldest is 24 hours old, or once 8 wait\. guard ship --now runs it now\.$' -- cat "$tmp/batch.out"
 expect ship-not-due-no-review fail - -- test -e "$bt_reviews"
@@ -1766,6 +1767,10 @@ batch "$guard" ship > "$tmp/batch.out" 2>&1
 expect ship-due-by-age ok '^merged #11 as abc11de$' -- cat "$tmp/batch.out"
 expect ship-due-summary ok '^tiers: records 1, small 1, large 0, human 0$' -- cat "$tmp/batch.out"
 expect ship-due-merged-small ok '^merged #14 as abc14de$' -- cat "$tmp/batch.out"
+fresh; PRS=$(prs_json "$now" 11:rec 14:s1)
+batch "$guard" ship > "$tmp/batch.out" 2>&1
+expect ship-due-by-green-records ok '^guard ship: due now: green records pull request\(s\) #11 need no model\.$' -- cat "$tmp/batch.out"
+expect ship-green-records-merged ok '^merged #11 as abc11de$' -- cat "$tmp/batch.out"
 fresh; PRS=$(prs_json "$now" 11:rec 14:s1)
 expect ship-now ok '^merged #14 as abc14de$' -- batch "$guard" ship --now
 expect ship-nothing ok '^guard ship: nothing waits for review or merge\.$' -- batch env MOCK_GH_PRS='[]' "$guard" ship

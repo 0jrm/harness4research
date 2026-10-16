@@ -12,7 +12,7 @@ description: >-
 
 # Review and merge
 
-The agent that wrote a change neither reviews nor merges it by hand. `guard ship` reviews and merges the open pull requests together, a few times a day: it approves record-only ones without a model, reviews small ones several to a session, and runs `guard review` on large ones. Each model review judges the diff against the user's own words in a fresh session that never saw the implementer's reasoning, and a merge happens only when the merge policy, credentials, ruleset, checks and review all allow it. A new question card or a change to `guard/` always goes to a human as a 🩺 item, and so does any merge the gate refuses. A run's records ride one pull request from its `run/<run_id>` branch; never open one for a single record.
+The agent that wrote a change neither reviews nor merges it by hand. `guard ship` reviews and merges the open pull requests together, at once for a green record-only one, else within `ship_interval_hours`: it approves record-only ones without a model, reviews small ones several to a session, and large ones alone. Each model review judges the diff against the user's words in a fresh session that never saw the implementer's reasoning; a merge needs the merge policy, credentials, ruleset, checks and review to allow it. A new question card, a change to `guard/`, and any merge the gate refuses go to a human as 🩺 items. A run's records ride one pull request from its `run/<run_id>` branch; never open one for a single record. Independent changes may run in parallel worktrees, one pull request each, never stacked.
 
 ## Steps
 
@@ -30,7 +30,7 @@ The agent that wrote a change neither reviews nor merges it by hand. `guard ship
 
    It writes the brief where `guard review` reads it (shared by every worktree, never committed), pushes, opens the pull request and prints its URL; `--item W1.2` titles it `[W1.2] <title>`. The user's words stay on this machine: it refuses a body that repeats a line of the request, and they never go in a comment. A rerun prints the open pull request's URL and changes nothing.
 4. Run `guard ship`.
-   - When the batch is not due, it says which pull requests wait and when it runs. Tell the user and stop; the merge can wait up to a day.
+   - When the batch is not due, it says which pull requests wait and when it runs. Tell the user and stop.
    - When it runs, it ends with a summary: the count per tier, each verdict, each merge commit. Relay the summary and every 🩺 block it printed, then stop.
    - Exit 2 means it refused to start, or no reviewer could run (`reviewer unavailable:`, this host's problem, which `guard doctor` names; tell the user). Do what its message says, then rerun.
    - Run `guard ship --now` only when the user asks for the batch now.

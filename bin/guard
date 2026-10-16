@@ -58,8 +58,9 @@ In any git repository, guarded or not:
   merge --batch       runs merge on every pull request approved at its head, and queues one item for the refusals
   pr open --title TITLE --request FILE --plan FILE --test CMD --body FILE [--item ID] [--scope FILE] [--base BRANCH]
                       writes the branch's brief from the user's words, pushes the branch, opens its pull request
-  ship [--now]        review --batch, then merge --batch, once review_batch_max pull requests wait or the oldest
-                      is ship_interval_hours old; until then it refreshes the question card digest
+  ship [--now]        review --batch, then merge --batch, at once when a records pull request is green, else once
+                      review_batch_max pull requests wait or the oldest is ship_interval_hours old; until then it
+                      refreshes the question card digest
 
 Inside a guarded project, guard <command> runs the project's guard/run from the protected branch:
   preflight, ripples, manifest, fence, code
