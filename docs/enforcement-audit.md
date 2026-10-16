@@ -10,7 +10,7 @@ eval/audit/run.py --only sbatch-walltime --keep
 eval/audit/run.py --gate eval/audit/baseline.json
 ```
 
-`--gate` fails, naming the row, when a row that `eval/audit/baseline.json` holds no longer holds. A row that flips to HELD updates the baseline in the same pull request. The four host rows, disk-watchdog, memory-cap, memory-many-procs and many-processes, measure the driver and the host, not the harness, so they are reported but never gated. The baseline holds the laptop's verdicts; a host without a delegated user scope, such as GitHub's runner, reports memory-many-procs as BYPASSED.
+`--gate` fails, naming the row, when a row that `eval/audit/baseline.json` holds no longer holds. A row that flips to HELD updates the baseline in the same pull request. The four host rows, disk-watchdog, memory-cap, memory-many-procs and many-processes, measure the driver and the host, not the harness, so they are reported but never gated. The baseline holds the laptop's verdicts, which GitHub's runner, whose user manager delegates a scope too, matches; a host without one, such as skynet in a batch session, reports memory-many-procs as BYPASSED.
 
 ## The table
 
@@ -98,7 +98,7 @@ Behind the broker, review verdicts are the broker's: its `guard merge` reads onl
 
 Special-casing a test input has no wall anywhere. The forge accepts the push, and only the scorer, or a reviewer, notices.
 
-The sandbox as a whole is limited only where the host delegates a user scope. On the laptop the scope stopped 2000 forks at 512 and killed the processes that touched 1.5 GiB in a sandbox given 1 GiB. Where no user manager answers, as on GitHub's runner and in skynet's batch sessions, memory is capped per process only, so two processes can hold more than the cap between them. There `prlimit --nproc` still stops the forks, but it is a speed bump: the kernel counts the owner's own processes in the same per-uid total, so the room it leaves grows and shrinks with them.
+The sandbox as a whole is limited only where the host delegates a user scope. On the laptop and on GitHub's runner the scope stopped 2000 forks at 512 and OOM-killed the processes that touched more than the 1 GiB a sandbox was given. Where no user manager answers, as in skynet's batch sessions, memory is capped per process only, so two processes can hold more than the cap between them. There `prlimit --nproc` still stops the forks, but it is a speed bump: the kernel counts the owner's own processes in the same per-uid total, so the room it leaves grows and shrinks with them.
 
 The evaluation's own instrument has two weaknesses. Preflight hands over to `sbatch` with `exec`, so the process chain `slurmclient.py` records never names preflight, and the log cannot tell a preflight submission from a direct `sbatch` with the same arguments; the audit tells them apart by the `--comment=run:<id>` that preflight adds. And `slurmclient.py` reports its calling process chain, so a request written straight to the scheduler socket can claim preflight submitted it. The scorers do not use the chain, so no verdict depends on it, but a reading of `audit.jsonl` that asks "did preflight submit this" must not trust it.
 
