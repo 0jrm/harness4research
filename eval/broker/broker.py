@@ -276,6 +276,8 @@ class Broker:
         handler = {"submit": self.submit, "queue": self.queue, "acct": self.acct, "cancel": self.cancel}.get(verb)
         if handler is None:
             return {"rc": 1, "err": f"guard broker: no verb {verb!r}; it offers submit, queue, acct and cancel\n"}
+        if not self.cfg.get("slurm_bin"):
+            return {"rc": 1, "err": "guard broker: refused: this host has no scheduler; nothing was submitted\n"}
         return self.locked(handler, req)
 
     def locked(self, handler, req):

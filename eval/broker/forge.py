@@ -438,33 +438,27 @@ class Forge:
             raise Refused(f"no pull request #{number}")
         return hit[0]
 
-    def reviewer_argv(self, worktree, ask, args_file):
-        """bwrap for the reviewer: the head at /review, a home in memory, the model socket, the configured read-only
-        binds, and nothing of the forge, the broker or the agent."""
+    def reviewer_argv(self, worktree, ask):
+        """lib/box.sh for the reviewer: the head at /review, a home in memory, the model socket, the configured
+        read-only binds, and nothing of the forge, the broker or the agent; the probe checks that first."""
         r = self.cfg.get("reviewer") or {}
-        args = ["--unshare-all", "--die-with-parent", "--new-session", "--hostname", "reviewer",
-                "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin", "--symlink", "usr/sbin", "/sbin",
-                "--symlink", "usr/lib", "/lib", "--ro-bind", "/etc", "/etc", "--proc", "/proc", "--dev", "/dev",
-                "--tmpfs", "/tmp", "--tmpfs", "/run", "--dir", "/tmp/home", "--bind", worktree, "/review"]
-        if os.path.exists("/lib64"):
-            args += ["--symlink", "usr/lib64", "/lib64"]
+        argv = [os.path.join(REPO, "lib", "box.sh"), "--no-tty", "--hostname", "reviewer", "--user", "reviewer",
+                "--tmp-home", "/tmp/home", "--bind", worktree, "/review"]
         if r.get("passwd"):
-            args += ["--ro-bind", r["passwd"], "/etc/passwd"]
+            argv += ["--ro", r["passwd"], "/etc/passwd"]
         model = r.get("model_socket")
         if model and os.path.exists(model) and stat.S_ISSOCK(os.stat(model).st_mode):
-            args += ["--bind", model, "/run/model/proxy.sock"]
+            argv += ["--sock", model, "/run/model/proxy.sock"]
         for src, dst in r.get("binds", []):
-            args += ["--ro-bind", src, dst]
-        path = ":".join([*r.get("path", []), "/usr/local/bin", "/usr/bin", "/bin"])
-        env = {"HOME": "/tmp/home", "USER": "reviewer", "LOGNAME": "reviewer", "LANG": "C.UTF-8", "PATH": path,
-               "GIT_AUTHOR_NAME": "guard reviewer", "GIT_AUTHOR_EMAIL": "reviewer@guard.invalid",
+            argv += ["--ro", src, dst]
+        for d in r.get("path", []):
+            argv += ["--path", d]
+        env = {"GIT_AUTHOR_NAME": "guard reviewer", "GIT_AUTHOR_EMAIL": "reviewer@guard.invalid",
                "GIT_COMMITTER_NAME": "guard reviewer", "GIT_COMMITTER_EMAIL": "reviewer@guard.invalid",
                **{k: str(v) for k, v in r.get("env", {}).items()}}
-        args += ["--clearenv", *[x for k, v in env.items() for x in ("--setenv", k, v)], "--chdir", "/review"]
-        with open(args_file, "w") as f:
-            f.write("".join(a + "\0" for a in args))
-        return lambda fd: ["prlimit", f"--fsize={4 << 30}", f"--as={32 << 30}", "bwrap", "--args", str(fd), "--",
-                           "bash", "-c", r["cmd"] + ' "$@"', "reviewer", ask]
+        argv += [x for k, v in env.items() for x in ("--env", f"{k}={v}")]
+        argv += ["--chdir", "/review", "--probe", "--hide", self.dir, "--hide", os.path.expanduser("~")]
+        return argv + ["--", "bash", "-c", r["cmd"] + ' "$@"', "reviewer", ask]
 
     def review(self, number):
         """One round of the configured reviewer on the pull request's head, in its own sandbox; the verdict goes to
@@ -497,8 +491,6 @@ class Forge:
             outcome = self.round(pr, sha, text, wt, log)
         finally:
             shutil.rmtree(wt, ignore_errors=True)
-            if os.path.exists(wt + ".args"):
-                os.unlink(wt + ".args")
         if outcome is None:
             return 2
         head, verdict, reason = outcome
@@ -537,12 +529,11 @@ class Forge:
             f.write(f"{prompt}\n## This pull request\n\n#{number}, branch {pr['head']} into main, head {sha}. Round 1 "
                     f"of 1.\n\n## Brief\n\n{brief}\n## Diff\n\n```diff\n{diff}```\n")
         ask = "Read .guard-review/prompt.md and follow it. End your reply with the VERDICT line it describes."
-        argv = self.reviewer_argv(wt, ask, wt + ".args")
+        argv = self.reviewer_argv(wt, ask)
         timeout = int((self.cfg.get("reviewer") or {}).get("timeout", 1800))
-        with open(wt + ".args", "rb") as fa, open(log, "w") as out, open(log + ".err", "w") as err:
+        with open(log, "w") as out, open(log + ".err", "w") as err:
             try:
-                rc = subprocess.run(argv(fa.fileno()), stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                    timeout=timeout, pass_fds=(fa.fileno(),)).returncode
+                rc = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=timeout).returncode
             except subprocess.TimeoutExpired:
                 rc = "timeout"
         with open(log) as f:

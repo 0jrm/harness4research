@@ -2252,6 +2252,78 @@ expect hooks-unknown-agent fail 'invalid choice' -- "$guard" hooks install codex
 
 expect eval-analyze-unit ok '^OK' -- python3 -m unittest discover -s "$here/eval/tests"
 
+echo "== guard enter and guard broker"
+# An owner's home with what no sandbox may see, a project, and a host without sbatch; the broker runs detached, with
+# its state in that home and its sockets under $tmp/rt.
+eh=$tmp/enter-home ep_=$tmp/enter-proj
+mkdir -p "$eh/.ssh" "$eh/.config/gh" "$ep_"; echo canary-key > "$eh/.ssh/id_ed25519"; echo login > "$eh/.fakelogin"
+printf '{"keep": 1, "drop": "secret"}\n' > "$eh/seed.json"
+git init -q "$ep_"
+en() { env HOME="$eh" GUARD_RUNTIME_DIR="$tmp/rt" GUARD_BROKER_LAUNCH=detached GH_TOKEN=gho_owner \
+  PATH="$(path_without sbatch)" "$guard" "$@"; }
+expect enter-usage fail '^guard enter: usage: guard enter <project>' -- en enter "$ep_"
+expect broker-usage fail 'usage: guard broker setup' -- en broker
+expect broker-status-down fail '^guard broker: not running' -- en broker status
+# The host's read-only /opt mounts before a project, a home or a git directory under it, and at one path the
+# writable bind comes after it and wins.
+mount_order='import sys; sys.path.insert(0, sys.argv[1] + "/lib"); import enter
+flat = enter.mounts("/opt/home/u", sys.argv[2], sys.argv[3], [], False, sys.argv[2])
+dst = flat[2::3]
+print(" ".join(d for d in dst if d.startswith("/opt")), *[k for k, d in zip(flat[0::3], dst) if d == sys.argv[3]])'
+expect enter-mount-order ok '^/opt /opt/proj /opt/home/u --bind$' -- python3 -c "$mount_order" "$here" "$tmp" /opt/proj
+expect enter-mount-same-path ok '^/opt /opt /opt/home/u --ro-try --bind$' -- python3 -c "$mount_order" "$here" "$tmp" /opt
+if ! bwrap --unshare-user --ro-bind / / true 2>/dev/null; then
+  skip enter-sandbox "bwrap cannot make a user namespace on this host"
+else
+  expect enter-before-setup fail 'run guard broker setup once' -- en enter "$ep_" -- true
+  expect broker-setup ok '^self-test: a fresh sandbox passed the pre-flight probe$' -- en broker setup
+  expect broker-setup-profiles ok '^claude codex cursor-agent$' -- bash -c 'ls "$1" | paste -sd " "' _ "$tmp/xdg/guard/agents"
+  expect broker-setup-again ok 'claude \(kept yours\)' -- en broker setup
+  printf 'binary: true\nlogin: .fakelogin\nseed-json: seed.json keep\nnet: 127.0.0.1:%s\nenv: FAKE_AGENT=1\n' 9 \
+    > "$tmp/xdg/guard/agents/fake"
+  expect enter-refuses-home fail 'holds your home' -- en enter "$eh/.." -- true
+  expect enter-refuses-secret fail 'overlaps .*/\.ssh' -- en enter "$eh/.ssh" -- true
+  expect enter-unknown-profile fail '^guard enter: no profile nope' -- en enter "$ep_" --agent nope -- true
+  expect enter-runs ok '^inside$' -- en enter "$ep_" -- bash -c 'echo inside'
+  expect enter-starts-broker ok '^guard broker: running' -- en broker status
+  expect enter-exit-code fail - -- en enter "$ep_" -- bash -c 'exit 3'
+  expect enter-project-writable ok - -- en enter "$ep_" -- touch "$ep_/made-inside"
+  expect enter-project-written ok - -- test -f "$ep_/made-inside"
+  expect enter-real-paths ok "^$eh $ep_\$" -- en enter "$ep_" -- bash -c 'echo "$HOME $PWD"'
+  expect enter-no-owner-files ok '^none$' -- en enter "$ep_" -- bash -c 'ls ~/.ssh ~/.config/gh ~/.fakelogin 2>/dev/null || echo none'
+  expect enter-no-token ok '^unset empty$' -- en enter "$ep_" -- bash -c 'echo "${GH_TOKEN:-unset} $(tr -d "\0" < /proc/1/environ | wc -c | sed "s/^0$/empty/")"'
+  expect enter-no-network ok '^lo$' -- en enter "$ep_" -- bash -c 'tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d " "'
+  expect enter-harness-readonly fail 'Read-only file system' -- en enter "$ep_" -- touch "$here/bin/guard"
+  expect enter-broker-state-hidden fail - -- en enter "$ep_" -- test -e "$eh/.local/state/guard/key"
+  expect enter-sockets ok '^scheduler.sock$' -- en enter "$ep_" -- ls /run/guard
+  expect enter-stand-in ok '^/run/guard-bin/sbatch$' -- en enter "$ep_" -- bash -c 'command -v sbatch'
+  expect enter-no-scheduler fail 'this host has no scheduler' -- en enter "$ep_" -- squeue
+  expect broker-status-refusal ok 'scheduler: queue' -- en broker status
+  expect enter-profile-login ok '^login 1$' -- en enter "$ep_" --agent fake -- bash -c 'echo "$(cat ~/.fakelogin) $FAKE_AGENT"'
+  expect enter-profile-seed ok '^\{"keep": 1\}$' -- bash -c 'tr -d " \n" < "$1/.local/share/guard/homes/fake/seed.json" | sed "s/:/: /"' _ "$eh"
+  expect enter-no-tty-no-login ok 'no CLI login is bound for fake' -- en enter "$ep_" --agent fake --no-tty -- bash -c 'test ! -s ~/.fakelogin'
+  # The proxy lets the profile's one host through and refuses every other, and the relay carries both from inside.
+  python3 -c 'import socket, time; s = socket.create_server(("127.0.0.1", 0)); open("'"$tmp"'/port", "w").write(str(s.getsockname()[1])); s.listen(); time.sleep(60)' & lsn=$!
+  for _ in $(seq 50); do [ -s "$tmp/port" ] && break; sleep 0.1; done
+  sed -i "s/^net: .*/net: 127.0.0.1:$(cat "$tmp/port")/" "$tmp/xdg/guard/agents/fake"
+  connect='import socket, sys; s = socket.create_connection(("127.0.0.1", 3128)); s.sendall(b"CONNECT %s HTTP/1.1\r\n\r\n" % sys.argv[1].encode()); print(s.recv(100).split(b"\r\n")[0].decode())'
+  expect enter-net-allowed ok '^HTTP/1.1 200 ' -- en enter "$ep_" --agent fake -- python3 -c "$connect" "127.0.0.1:$(cat "$tmp/port")"
+  expect enter-net-refused ok '^HTTP/1.1 403 ' -- en enter "$ep_" --agent fake -- python3 -c "$connect" example.com:443
+  expect enter-net-env ok '^http://127.0.0.1:3128$' -- en enter "$ep_" --agent fake -- bash -c 'echo "$HTTPS_PROXY"'
+  kill $lsn 2>/dev/null
+  expect broker-status-net ok 'net: CONNECT example.com:443 is not on the fake profile' -- en broker status
+  mkdir -p "$ep_/.claude"; echo '{"env": {"GH_TOKEN": "x", "EDITOR": "vi"}}' > "$ep_/.claude/settings.local.json"
+  expect enter-warns-planted-token ok 'warning: .*settings.local.json sets GH_TOKEN, inside the project' -- en enter "$ep_" -- true
+  rm -rf "$ep_/.claude"
+  mkdir -p "$tmp/hidden-x"
+  expect box-probe-refuses fail 'probe: hidden: .*hidden-x is the host.s own' -- "$here/lib/box.sh" --no-tty --ro "$tmp/hidden-x" "$tmp/hidden-x" --probe --hide "$tmp/hidden-x" -- true
+  expect box-probe-nothing-started ok '^70$' -- bash -c '"$1" --no-tty --ro "$2" "$2" --probe --hide "$2" -- touch "$3/started" 2>/dev/null; echo $?' _ "$here/lib/box.sh" "$tmp/hidden-x" "$tmp"
+  expect box-probe-nothing-started-file fail - -- test -e "$tmp/started"
+  expect broker-stop ok '^guard broker: stopped' -- en broker stop
+  expect broker-down-after-stop fail '^guard broker: not running' -- en broker status
+  expect broker-launch-unknown fail 'GUARD_BROKER_LAUNCH=bogus is not one of systemd, tmux, detached' -- env HOME="$eh" GUARD_RUNTIME_DIR="$tmp/rt" GUARD_BROKER_LAUNCH=bogus "$guard" enter "$ep_" -- true
+fi
+
 echo "== plan status"
 ps=$tmp/plan-status; mkdir -p "$ps/docs"; git init -q "$ps/repo"
 printf '# Plan\n\n## Workstreams\n\n| id | change | check |\n|---|---|---|\n| W9.1 | `a/b.sh`: first item | x |\n| W9.2 | second item | y |\n| W9.3 | third item | z |\n\n## Not in scope\n\n| W9.9 | not an item | n |\n' > "$ps/docs/plan-2099-01-01.md"

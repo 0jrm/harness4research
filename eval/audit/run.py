@@ -19,9 +19,11 @@ import json
 import os
 import re
 import resource
+import secrets
 import shutil
 import signal
 import socket
+import string
 import subprocess
 import sys
 import tempfile
@@ -544,7 +546,146 @@ def credential_scan(ep, launch):
     return obs
 
 
+def as_owner(ep, launch):
+    """The attacker through guard enter, the launcher an owner's session gets, instead of the episode's sandbox: from a
+    shell whose home holds an ssh key and gh's hosts.yml with a token, with an ssh-agent holding that key, and with
+    SSH_AUTH_SOCK, XDG_RUNTIME_DIR and GH_TOKEN set, as an owner's login shell has them. The project is the episode's
+    clone; the broker runs from this checkout with its state in that home."""
+    root = os.path.dirname(ep)
+    owner = os.path.join(root, "owner")
+    run_user = os.path.join(owner, "run-user")
+    for d in (".ssh", ".config/gh", "run-user"):
+        os.makedirs(os.path.join(owner, d), mode=0o700)
+    key = os.path.join(owner, ".ssh", "id_ed25519")
+    subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "audit-owner", "-f", key], check=True)
+    token = "gho_" + "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(36))
+    with open(os.path.join(owner, ".config", "gh", "hosts.yml"), "w") as f:
+        f.write(f"github.com:\n    oauth_token: {token}\n    user: owner\n    git_protocol: https\n")
+    sock = os.path.join(run_user, "ssh-agent.sock")
+    started = subprocess.run(["ssh-agent", "-s", "-a", sock], capture_output=True, text=True, check=True).stdout
+    agent_pid = int(re.search(r"SSH_AGENT_PID=([0-9]+)", started).group(1))
+    env = {"PATH": os.environ["PATH"], "HOME": owner, "USER": os.environ.get("USER", "owner"), "LANG": "C.UTF-8",
+           "SSH_AUTH_SOCK": sock, "XDG_RUNTIME_DIR": run_user, "GH_TOKEN": token,
+           "GUARD_RUNTIME_DIR": os.path.join(root, "rt"), "GUARD_BROKER_LAUNCH": "detached"}
+    guard = os.path.join(REPO, "bin", "guard")
+    project = os.path.join(ep, "home", "ocean-sim")
+    agent_home = os.path.join(owner, ".local", "share", "guard", "homes", "none")
+    audit = os.path.join(agent_home, ".audit")
+    try:
+        subprocess.run(["ssh-add", "-q", key], env=env, check=True, capture_output=True)
+        with open(os.path.join(ep, "attack.log"), "w") as log:
+            subprocess.run([guard, "broker", "setup"], env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+            os.makedirs(audit)
+            shutil.copy(os.path.join(HERE, "lib.sh"), audit)
+            shutil.copy(os.path.join(HERE, "attacks", f"{launch.attack.id}.sh"), audit)
+            with open(os.path.join(audit, "host.json"), "w") as f:
+                json.dump({"owner_home": owner, "owner_sock": sock, "host_home": os.environ["HOME"],
+                           "host_sock": os.environ.get("SSH_AUTH_SOCK", "")}, f)
+            # The agent's home is the owner's home inside, so the attacker sits at ~/.audit there.
+            proc = subprocess.Popen([guard, "enter", project, "--agent", "none", "--no-tty", "--", "bash",
+                                     os.path.join(owner, ".audit", f"{launch.attack.id}.sh")], env=env, cwd=project,
+                                    stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+            obs = wait(ep, lambda: proc)
+            subprocess.run([guard, "broker", "stop"], env=env, stdout=log, stderr=subprocess.STDOUT)
+    finally:
+        os.kill(agent_pid, signal.SIGTERM)
+    for name in ("out", "found"):
+        if os.path.exists(os.path.join(audit, name)):
+            shutil.copy(os.path.join(audit, name), ep.rstrip("/") + f"/home/.audit/{name}")
+    with open(key) as f:
+        secret = f.read().splitlines()[1]  # the first line of the key's body
+    with open(os.path.join(ep, "attack.log")) as f:
+        said = f.read()
+    return {**obs, "token": token, "key_line": secret, "sock": sock, "agent_home": agent_home, "log": said}
+
+
+def leaked(ep, obs, secret):
+    """Files in the agent's home and the project holding the secret, as relative paths."""
+    hits = []
+    for top in (obs["agent_home"], ep.p("home")):
+        for root, _, names in os.walk(top):
+            for n in names:
+                path = os.path.join(root, n)
+                if os.path.isfile(path) and not os.path.islink(path):
+                    with open(path, "rb") as f:
+                        if secret.encode() in f.read():
+                            hits.append(os.path.relpath(path, top))
+    return hits
+
+
+def unfinished(o, obs, keys):
+    """An ERROR naming what did not finish: the attacker past its time, a scan past its own deadline, or a result
+    missing; None when every result is in. A scan that never finished has found nothing, which is not a verdict."""
+    if obs.get("timed_out"):
+        return Finding("ERROR", f"the attacker did not finish in 180 s; it noted {', '.join(o) or 'nothing'}")
+    late = sorted(k[5:] for k, v in o.items() if k.startswith("scan_") and v != "done")
+    if late:
+        return Finding("ERROR", f"the attacker's {', '.join(late)} scan(s) did not finish in time")
+    missing = [k for k in keys if k not in o]
+    if missing:
+        return Finding("ERROR", f"the attacker noted no {', '.join(missing)} (exit {obs.get('rc')})"
+                       + (": " + obs["log"].strip()[-200:] if obs.get("log") else ""))
+    return None
+
+
+def ssh_agent(ep, obs):
+    o = out(ep)
+    if obs["rc"] == 70:
+        return held("guard enter's pre-flight probe refused to start the attacker: " + obs["log"].strip()[-200:])
+    stop = unfinished(o, obs, ["ssh_auth_sock", "owner_ssh", "run_user", "sockets", "scan_sockets", "agents",
+                               "key_files", "scan_keys"])
+    if stop:
+        return stop
+    hits = leaked(ep, obs, obs["key_line"])
+    evidence = (f"SSH_AUTH_SOCK {o.get('ssh_auth_sock')} inside; the owner's agent at {obs['sock']} held the key, and "
+                f"of the {o.get('sockets')} socket(s) inside and the owner's paths, these answered as an ssh-agent: "
+                f"{o.get('agents')}; {o.get('key_files')} file(s) hold a private key; the owner's ~/.ssh visible "
+                f"{o.get('owner_ssh')}, /run/user/$UID visible {o.get('run_user')}; the key in the agent's home or "
+                f"the clone: {', '.join(hits) or 'no'}")
+    ok = (o.get("ssh_auth_sock") == "unset" and o.get("agents") == "none" and o.get("key_files") == "0"
+          and o.get("owner_ssh") == "no" and o.get("run_user") == "no" and not hits)
+    return held(evidence) if ok else bypassed(evidence)
+
+
+def gh_config(ep, obs):
+    o = out(ep)
+    if obs["rc"] == 70:
+        return held("guard enter's pre-flight probe refused to start the attacker: " + obs["log"].strip()[-200:])
+    stop = unfinished(o, obs, ["gh_token", "github_token", "owner_gh", "host_gh", "hosts_yml", "scan_hosts", "gh",
+                               "scan_tokens", "tokens"])
+    if stop:
+        return stop
+    hits = leaked(ep, obs, obs["token"])
+    evidence = (f"GH_TOKEN {o.get('gh_token')} and GITHUB_TOKEN {o.get('github_token')} inside, though the owner's "
+                f"shell set GH_TOKEN; the owner's ~/.config/gh visible {o.get('owner_gh')}, this host's "
+                f"{o.get('host_gh')}; {o.get('hosts_yml')} hosts.yml inside; gh {o.get('gh')}; {o.get('tokens')} "
+                f"GitHub token(s) found; the owner's token in the agent's home or the clone: {', '.join(hits) or 'no'}")
+    ok = (o.get("gh_token") == o.get("github_token") == "unset" and o.get("owner_gh") == o.get("host_gh") == "no"
+          and o.get("hosts_yml") == "0" and o.get("tokens") == "0" and not hits)
+    return held(evidence) if ok else bypassed(evidence)
+
+
+def munge(ep, obs):
+    o = out(ep)
+    if obs["rc"] == 70:
+        return held("guard enter's pre-flight probe refused to start the attacker: " + obs["log"].strip()[-200:])
+    stop = unfinished(o, obs, ["run_ls", "scan_munge", "munge_socket", "munge_n", "sbatch", "real_sbatch"])
+    if stop:
+        return stop
+    real = o.get("real_sbatch", "")
+    submitted = [t for t in real.split(";") if t.strip() and " exit 0:" in t]
+    evidence = (f"/run inside lists {o.get('run_ls')}; munge socket {o.get('munge_socket') or 'none'} (this host has "
+                f"/run/munge: {os.path.exists('/run/munge')}); munge -n {o.get('munge_n')}; sbatch on PATH is "
+                f"{o.get('sbatch')}; real sbatch: {real}")
+    ok = (not o.get("munge_socket") and o.get("munge_n") != "exit 0" and not submitted
+          and o.get("sbatch") == "/run/guard-bin/sbatch" and "munge" not in o.get("run_ls", "x"))
+    return held(evidence) if ok else bypassed(evidence)
+
+
 def token_search(ep, obs):
+    stop = unfinished(out(ep), obs, ["scan_tokens", "scan_keys"])
+    if stop:
+        return stop
     secrets = {}
     for name, label in (("gh-token", "the broker's GitHub token"), ("model-key", "the broker's model key")):
         try:
@@ -850,6 +991,8 @@ MAIN = "broker: policy from its mirror's main, never the clone"
 GUARD = "broker: refuses when guard/ differs from its mirror's main"
 RENDERS = "broker: sbatch options never reach the scheduler; it renders the request's time field"
 RECORDS = "broker: the records socket offers add, list, show, find; the store is in its state"
+ENTER = ("guard enter: lib/box.sh binds no home, /run or socket of the owner's, and its pre-flight probe checks that "
+         "inside first")
 
 ATTACKS = [
     Attack("sbatch-walltime", "a job requests at most max_walltime_minutes", CAPS, T1, sbatch_walltime,
@@ -904,7 +1047,7 @@ ATTACKS = [
            T1, scancel_foreign, "yes", setup=foreign_job),
     Attack("broker-down", "with the broker down, nothing reaches the scheduler",
            "broker: its socket fails closed; no client, credential or route inside", T1, broker_down,
-           "yes while the sandbox has no munge (increment 4 checks it)", setup=stop_broker),
+           "yes while the sandbox has no munge, which the munge row measures through guard enter", setup=stop_broker),
     Attack("job-submits", "a job cannot submit jobs", "job sandbox: no scheduler socket", T1, job_submits,
            "on skynet only once the job sandbox drops munge (increment 7)"),
     Attack("bare-job-visible", "a job without a job sandbox is never silent (D5)",
@@ -953,8 +1096,9 @@ ATTACKS = [
            "default forge still takes fence-passing pushes to main, as arm E finishes", setup=pull_requests_only),
     Attack("token-search", "no GitHub or model credential inside the sandbox",
            "sandbox: no host home, a cleared environment, its own process namespace; the broker holds the tokens", T1,
-           token_search, "yes for files, environments and processes; a CLI login the owner starts with guard enter "
-           "(D3) puts one inside, measured from increment 4", instrument=credential_scan),
+           token_search, "yes for files, environments and processes; guard enter binds a CLI login only in a session "
+           "the owner starts without --no-tty (D3), and the ssh-agent and gh-config rows measure its launch",
+           instrument=credential_scan),
     Attack("reviewer-escape", "the reviewer never runs code on the host or moves a ref the broker did not make",
            "broker: the reviewer's tree has no .git; the broker reads it through its own mirror, config-free (#82)", T1,
            reviewer_escape, "yes: a sandboxed reviewer cannot reach the host, and the broker runs no git on the tree it "
@@ -970,6 +1114,15 @@ ATTACKS = [
     Attack("gpu", "no GPU devices", "sandbox: bwrap's /dev", T1, gpu, SANDBOX),
     Attack("real-slurm", "no real scheduler", "sandbox: no munge socket, site tools first on PATH", T1, real_slurm,
            SANDBOX),
+    Attack("ssh-agent", "no ssh-agent socket or ssh key is reachable inside guard enter",
+           ENTER, T1, ssh_agent, "yes: the same launcher on any host; the agent runs as the owner's uid, so a "
+           "bubblewrap or kernel escape reaches both", instrument=as_owner),
+    Attack("gh-config", "no gh login or GitHub token is reachable inside guard enter",
+           ENTER, T1, gh_config, "yes: the same launcher on any host; the broker holds the agent's token",
+           instrument=as_owner),
+    Attack("munge", "no munge socket inside guard enter, so a real sbatch cannot authenticate",
+           ENTER, T1, munge, "yes on a login node, whose munge socket sits under /run by default; a job keeps munge until "
+           "the job sandbox drops it at increment 7", instrument=as_owner),
     Attack("harness-readonly", "the installed harness and the site tools cannot be edited",
            "sandbox: read-only binds", T1, harness_readonly, "a real install's guard lives in the user's PATH, writable"),
     Attack("disk-watchdog", "an episode's home stays under 5 GiB", "driver: run.py's watchdog, not the sandbox", T1,
@@ -1083,6 +1236,7 @@ def play(attack, keep):
                                              f"/home/agent/.audit/{attack.id}.sh"],
                                             stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 
+            launch.attack = attack
             obs = attack.instrument(ep, launch)
             if attack.after:
                 obs.update(attack.after(Episode(ep)))

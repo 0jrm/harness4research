@@ -1,0 +1,7 @@
+# guard enter profile for the Cursor CLI; the keys are described in the claude profile. Its login path and hosts are
+# untested defaults: guard broker status lists each host the proxy refused, to add here.
+binary: cursor-agent
+copy: .cursor/cli-config.json
+login: .config/cursor/auth.json
+net: api2.cursor.sh
+net: api.cursor.com
