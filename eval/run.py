@@ -23,13 +23,24 @@ The config is the question card's machine part:
             "text_into_reasoning": true},             and the agent's past text inside its reasoning
   "scaffold": {"name": "codex", "release_dir": "~/.codex/packages/standalone/releases/<version>",
                "context_window": 65536, "timeout_minutes": 30, "parallel": 4, "disable_features": [...]},
-  "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E"], "seeds": [1, 2],
+  "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E", "E-nobroker"],
+             "arm_variants": {"E-nobroker": ["control"]},   optional: the variants an arm runs, else all of them
+             "seeds": [1, 2],
              "order_seed": 20261010}                 the cases run in an order shuffled with this seed, so that
 }                                                      arm and family do not move with the time of day or the server
+
+The arms (ARMS below): A, no harness; E, the full harness behind the evaluation's broker (episode.sh E --broker);
+E-nobroker, the same harness without the broker (episode.sh E). E-nobroker exists to measure task success with the
+broker against without, so the first run's config gives it the controls only.
 
 Before the first episode it checks the question card, refuses one that is not frozen, and writes run.json in
 results_dir with the card's sha256 and commit, the harness commit and the config; a resumed run must match it.
 --unfrozen skips the check for a smoke run and says so in run.json and in every verdict.
+
+A frozen run also refuses to start without eval/env/.site-venv (built by eval/env/site-python.sh), or with one whose
+numpy, pandas, scikit-learn or scipy differ from eval/env/site-requirements.txt. run.json and every verdict record
+the Python the sandbox offered as "python": the venv's path and those versions, or, with no venv (an --unfrozen run
+only), "source": "host" with the host python3's versions. A resumed run must offer the same.
 
 A rerun resumes: it skips every case whose latest verdict has no "error". A case whose latest verdict has one (a
 failure of episode.sh, score.py or the model check, the harness's failures and not outcomes) runs again; a client
@@ -50,7 +61,8 @@ An interrupt (Ctrl-C, SIGTERM or SIGHUP) does the same and exits 130; a second o
 running episodes unrecorded and their processes alive.
 
 Each verdict line holds the scorer's verdict plus the costs: requests, input and output tokens, the largest
-prompt, wall seconds, the client's exit code, and whether the episode hit its time limit.
+prompt, wall seconds, the client's exit code, and whether the episode hit its time limit; and the case's arm,
+whether it ran behind the broker ("broker"), and the Python offered ("python").
 """
 import concurrent.futures
 import hashlib
@@ -72,6 +84,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RELAY_PORT = 18080   # inside each sandbox's own network namespace, so every episode can use it
 MAX_HOME_GB = 5      # an episode whose home grows past this is killed, checked every 2 s; the tasks need megabytes
 MIN_FREE_GB = 100    # below this much free under episodes_dir, no episode starts and running ones are killed
+SITE_VENV = os.path.join(HERE, "env", ".site-venv")   # sandbox.sh offers it at /opt/site/python when it exists
+SITE_PACKAGES = ("numpy", "pandas", "scikit-learn", "scipy")
+HOST_PATH = "/usr/local/bin:/usr/bin:/bin"            # the host's /usr, which the sandbox binds read-only
+
+
+class Arm(NamedTuple):
+    """What episode.sh builds for an arm: its harness arm, and whether the sandbox reaches the scheduler, the
+    records and gh only through the evaluation's broker."""
+    harness: str
+    broker: bool
+
+
+ARMS = {"A": Arm("A", broker=False), "E": Arm("E", broker=True), "E-nobroker": Arm("E", broker=False)}
 
 
 def expand(path):
@@ -81,6 +106,76 @@ def expand(path):
 def git(*args):
     out = subprocess.run(["git", "-C", os.path.dirname(HERE), *args], capture_output=True, text=True)
     return out.stdout.strip() if out.returncode == 0 else None
+
+
+def matrix_cases(m):
+    """Every case (family, variant, arm, seed) of the config's matrix, in the order shuffled with order_seed. An arm
+    runs the variants arm_variants gives it, else all of them; without arm_variants the cases and their order are
+    those of itertools.product."""
+    unknown = [a for a in m["arms"] if a not in ARMS]
+    if unknown:
+        sys.exit(f"run.py: unknown arm {', '.join(unknown)}; the arms are {', '.join(ARMS)}")
+    arm_variants = m.get("arm_variants", {})
+    for arm, variants in arm_variants.items():
+        if arm not in m["arms"] or not set(variants) <= set(m["variants"]):
+            sys.exit(f"run.py: arm_variants names {arm}: {variants}, not an arm of the matrix with its variants")
+    every = [(f, v, a, s) for f, v, a, s in itertools.product(m["families"], m["variants"], m["arms"], m["seeds"])
+             if v in arm_variants.get(a, m["variants"])]
+    random.Random(m["order_seed"]).shuffle(every)
+    return every
+
+
+def case_key(row):
+    return row["family"], row["variant"], row["arm"], row["seed"]
+
+
+def cases_left(every, verdicts):
+    """The cases of every, in its order, whose latest verdict is missing or has an error."""
+    latest = {}
+    if os.path.exists(verdicts):
+        with open(verdicts) as f:
+            for line in f:
+                r = json.loads(line)
+                latest[case_key(r)] = r
+    return [c for c in every if c not in latest or "error" in latest[c]]
+
+
+PROBE = """import json, platform, sys
+from importlib import metadata
+def version(name):
+    try:
+        return metadata.version(name)
+    except metadata.PackageNotFoundError:
+        return None
+print(json.dumps({"python": platform.python_version(), **{n: version(n) for n in sys.argv[1:]}}))"""
+
+
+def offered_python(venv=SITE_VENV):
+    """The Python the sandbox offers: the site venv and the versions of SITE_PACKAGES installed in it, or, when
+    there is none, the host's python3 and its own. Read from the packages' metadata, without importing them."""
+    if os.path.isdir(venv):
+        record, exe = {"source": "site", "path": venv, "sandbox_path": "/opt/site/python"}, venv + "/bin/python"
+    else:
+        exe = shutil.which("python3", path=HOST_PATH)
+        record = {"source": "host", "path": exe}
+    if not exe:
+        return {**record, "error": f"no python3 on {HOST_PATH}"}
+    out = subprocess.run([exe, "-I", "-s", "-c", PROBE, *SITE_PACKAGES], capture_output=True, text=True)
+    if out.returncode:
+        return {**record, "error": out.stderr.strip()[-200:]}
+    return {**record, **json.loads(out.stdout)}
+
+
+def require_site_python(python, requirements=os.path.join(HERE, "env", "site-requirements.txt")):
+    """Exits unless the sandbox offers the site venv with the pinned versions of SITE_PACKAGES."""
+    if python["source"] != "site":
+        sys.exit("run.py: no eval/env/.site-venv; a frozen run offers the pinned Python: build it once on this "
+                 "machine with eval/env/site-python.sh, or pass --unfrozen for a smoke run")
+    with open(requirements) as f:
+        pins = dict(line.strip().split("==", 1) for line in f if "==" in line)
+    wrong = [f"{n} {python.get(n)} (pinned {pins.get(n)})" for n in SITE_PACKAGES if python.get(n) != pins.get(n)]
+    if wrong:
+        sys.exit(f"run.py: {python['path']} offers {', '.join(wrong)}; remove it and rerun eval/env/site-python.sh")
 
 
 def frozen_card(path):
@@ -212,13 +307,14 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     if disk_free_gb(ep) < MIN_FREE_GB:
         return {"episode": ep, "error": f"disk: {disk_free_gb(ep):.0f} GiB free under episodes_dir, below "
                 f"{MIN_FREE_GB}", "stop_run": True}
-    built = subprocess.run([os.path.join(HERE, "episode.sh"), family, variant, arm, ep, "--seed", str(seed)],
-                           capture_output=True, text=True)
+    built = subprocess.run([os.path.join(HERE, "episode.sh"), family, variant, ARMS[arm].harness, ep, "--seed",
+                            str(seed)] + (["--broker"] if ARMS[arm].broker else []), capture_output=True, text=True)
     if built.returncode:
         subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
         return {"episode": ep, "error": "episode.sh: " + built.stderr.strip()[-300:]}
     meta = json.load(open(os.path.join(ep, "meta.json")))
-    meta["run_id"] = cfg["run_id"]
+    python = offered_python()
+    meta.update({"run_id": cfg["run_id"], "arm": arm, "broker": ARMS[arm].broker, "python": python})
     with open(os.path.join(ep, "meta.json"), "w") as f:
         json.dump(meta, f, indent=1)
     served = model_check(model)
@@ -275,7 +371,8 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     proxy.wait()
     subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
     scored = subprocess.run([sys.executable, os.path.join(HERE, "score.py"), ep], capture_output=True, text=True)
-    row = {"episode": os.path.basename(ep), **served.record(), "client_exit": rc, "timed_out": bool(timed_out),
+    row = {"episode": os.path.basename(ep), **served.record(), "python": python, "client_exit": rc,
+           "timed_out": bool(timed_out),
            "disk_kill": disk_kill,
            "wall_seconds": wall, **costs(log)}
     if not scored.returncode:
@@ -321,7 +418,10 @@ def main():
     limit = int(args[args.index("--limit") + 1]) if "--limit" in args else None
     unfrozen = "--unfrozen" in args
     card_sha = card_commit = None
+    every = matrix_cases(cfg["matrix"])
+    python = offered_python()
     if not unfrozen:
+        require_site_python(python)
         card_sha, card_commit = frozen_card(cfg["question_card"])
     served = model_check(cfg["model"])
     if served.mismatch:
@@ -333,23 +433,17 @@ def main():
         before = json.load(open(run_json))
         if before.get("card_sha256") != card_sha:
             sys.exit(f"run.py: {run_json} was started under card sha256 {before.get('card_sha256')}, not {card_sha}")
+        if "python" in before and before["python"] != python:
+            sys.exit(f"run.py: {run_json} was started with the Python {before['python']}, not {python}")
     else:
         with open(run_json, "w") as f:
             json.dump({"run_id": cfg["run_id"], "question_card": cfg.get("question_card"), "card_sha256": card_sha,
                        "card_commit": card_commit, "unfrozen": unfrozen, "harness_commit": git("rev-parse", "HEAD"),
                        "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **served.record(),
+                       "python": python, "arms": {a: ARMS[a]._asdict() for a in cfg["matrix"]["arms"]},
                        "config": cfg}, f, indent=1)
     verdicts = os.path.join(results, "verdicts.jsonl")
-    latest = {}
-    if os.path.exists(verdicts):
-        with open(verdicts) as f:
-            for line in f:
-                r = json.loads(line)
-                latest[(r["family"], r["variant"], r["arm"], r["seed"])] = r
-    m = cfg["matrix"]
-    every = list(itertools.product(m["families"], m["variants"], m["arms"], m["seeds"]))
-    random.Random(m["order_seed"]).shuffle(every)
-    cases = [c for c in every if c not in latest or "error" in latest[c]]
+    cases = cases_left(every, verdicts)
     print(f"skipping {len(every) - len(cases)} of {len(every)} cases, finished earlier", flush=True)
     cases = cases[:limit]
     parallel = cfg["scaffold"].get("parallel", 1)
@@ -374,7 +468,7 @@ def main():
                 family, variant, arm, seed = running.pop(fut)
                 row = fut.result()
                 row.update({"run_id": cfg["run_id"], "family": family, "variant": variant, "arm": arm,
-                            "seed": seed, "card_sha256": card_sha, "unfrozen": unfrozen})
+                            "broker": ARMS[arm].broker, "seed": seed, "card_sha256": card_sha, "unfrozen": unfrozen})
                 with open(verdicts, "a") as f:
                     f.write(json.dumps(row, sort_keys=True) + "\n")
                 n += 1
