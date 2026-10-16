@@ -58,6 +58,15 @@ if [ -f "$ep/sandbox/env" ]; then
   while IFS= read -r line; do [ -n "${line%%=*}" ] && box+=(--env "$line"); done < "$ep/sandbox/env"
 fi
 
+# Resource limits: lib/box.sh's defaults, or a row's own from sandbox/limits ("mem BYTES" or "tasks N" per line); which
+# applied, a scope or prlimit, goes to state/limits.jsonl, outside the sandbox.
+if [ -f "$ep/sandbox/limits" ]; then
+  while read -r key value; do
+    case $key in mem|tasks) box+=("--$key" "$value") ;; esac
+  done < "$ep/sandbox/limits"
+fi
+box+=(--record "$ep/state/limits.jsonl")
+
 if [ $job = 1 ]; then
   box+=(--ro "$SLURMD_SCRIPT" /run/slurm/job.sh)
   while IFS='=' read -r name value; do

@@ -90,11 +90,20 @@ def peer_uid(conn):
 class Session:
     def __init__(self, sid, path, project, agent, net, pid):
         self.sid, self.path, self.project, self.agent, self.net, self.pid = sid, path, project, agent, net, pid
-        self.started, self.servers = time.time(), []
+        self.started, self.servers, self.record = time.time(), [], None
+
+    def limits(self):
+        """What lib/box.sh recorded for this session's sandbox: a scope's wall or prlimit's speed bump."""
+        try:
+            with open(self.record) as f:
+                return json.loads(f.read().splitlines()[-1])
+        except (OSError, ValueError, IndexError):
+            return None
 
     def view(self):
         return {"session": self.sid, "dir": self.path, "project": self.project, "agent": self.agent,
-                "net": self.net, "pid": self.pid, "started": self.started}
+                "net": self.net, "pid": self.pid, "started": self.started, "record": self.record,
+                "limits": self.limits()}
 
 
 class Connect(socketserver.BaseRequestHandler):
@@ -192,6 +201,7 @@ class Host:
         os.mkdir(path, 0o700)
         net = [h if ":" in h else h + ":443" for h in req.get("net") or []]
         session = Session(sid, path, project, str(req.get("agent")), net, req.get("pid"))
+        session.record = os.path.join(private_dir(os.path.join(self.state, "limits")), f"s-{sid}.jsonl")
         broker = self.project(project)
         sched = scheduler.Server(os.path.join(path, "scheduler.sock"), scheduler.Handler)
         sched.answer = lambda r: self.logged(sid, "scheduler", r, broker.handle(r))
@@ -218,7 +228,7 @@ class Host:
             server.shutdown()
             server.server_close()
         shutil.rmtree(session.path, ignore_errors=True)
-        append(os.path.join(self.state, "sessions.jsonl"), {"closed": sid})
+        append(os.path.join(self.state, "sessions.jsonl"), {"closed": sid, "limits": session.limits()})
         return {"rc": 0}
 
     def reap(self):
@@ -383,6 +393,16 @@ def start():
     sys.exit(f"guard broker: started it ({how}) but it does not answer; see {log}")
 
 
+def limits_said(rec):
+    if not rec:
+        return "none recorded yet"
+    if rec["limits"] == "scope":
+        return (f"a systemd user scope, MemoryMax {rec['memory_max'] / 2**30:.1f} GiB, TasksMax {rec['tasks_max']}: "
+                "a wall for the sandbox as a whole")
+    return (f"prlimit ({rec['why']}): --nproc {rec['nproc']}, your {rec['yours']} plus {rec['tasks']}, a speed bump "
+            "since the kernel counts per uid; memory per process only")
+
+
 def ago(ts):
     s = int(time.time() - ts)
     return f"{s // 3600}h {s % 3600 // 60}m" if s >= 3600 else f"{s // 60}m {s % 60}s"
@@ -401,6 +421,7 @@ def status():
     for s in reply["sessions"]:
         print(f"  s-{s['session']}  {s['agent']}  {s['project']}  up {ago(s['started'])}, guard enter pid {s['pid']}"
               + (f", net {' '.join(s['net'])}" if s["net"] else ""))
+        print(f"    limits: {limits_said(s['limits'])}")
     print(f"live jobs: {len(reply['jobs'])}")
     for j in reply["jobs"]:
         print(f"  {j}")

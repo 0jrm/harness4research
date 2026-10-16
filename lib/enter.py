@@ -209,9 +209,9 @@ def main(argv):
         if not opened or opened.get("rc"):
             refuse(f"the broker did not open a session ({(opened or {}).get('err', 'no answer').strip()}); nothing "
                    "started")
-        sid, sock_dir = opened["session"], opened["dir"]
+        sid, sock_dir, record = opened["session"], opened["dir"], opened["record"]
     else:
-        sid, sock_dir = "print", os.path.join(host.runtime_dir(), "s-print")
+        sid, sock_dir, record = "print", os.path.join(host.runtime_dir(), "s-print"), None
     bindir = os.path.join(host.private_dir(host.runtime_dir()), f"b-{sid}")
     shutil.rmtree(bindir, ignore_errors=True)
     os.mkdir(bindir, 0o700)
@@ -238,6 +238,7 @@ def main(argv):
         cwd = os.path.realpath(os.getcwd())
         box += ["--chdir", cwd if under(cwd, project) else project]
         box += ["--no-tty"] if no_tty else []
+        box += ["--record", record] if record else []
         if show:
             box.append("--print")
         if no_tty and any(k == "login" for k, _ in entries):

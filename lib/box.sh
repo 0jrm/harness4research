@@ -9,6 +9,13 @@
 # binds it, so the host's home, ~/.ssh, ~/.config/gh, ~/.config/guard, /run/user/$UID (ssh-agent, dbus), /run/munge
 # (without which a real sbatch cannot authenticate), other sockets and the broker's state are all absent.
 #
+# Resources, all processes together (design increment 5): where systemd's user manager answers and delegates the
+# memory and pids controllers, the sandbox runs in a transient scope with MemoryMax, MemorySwapMax=0 and TasksMax, a
+# wall the kernel keeps for the sandbox as a whole. Elsewhere, as on skynet, whose user manager answers only in
+# interactive logins, prlimit --nproc caps processes and threads at your count now plus the allowance: a speed bump,
+# since the kernel counts them per uid, your own shells included, and memory stays capped per process only.
+# GUARD_BOX_LIMITS=prlimit picks the second where the first would apply. --record says which one applied.
+#
 # Options, applied in the order given; bind a parent before what goes inside it:
 #   --home DIR AT       DIR read-write at AT, and HOME=AT
 #   --tmp-home AT       an empty home in memory at AT
@@ -26,15 +33,21 @@
 #   --probe             first run the pre-flight probe (box_probe.py) inside, and start nothing if one check fails
 #   --hide PATH         with --probe: a host path the sandbox must not reach
 #   --relay PORT        127.0.0.1:PORT inside carries each connection to /run/guard/net.sock, the broker's proxy
-#   --as BYTES|none     the address-space cap
+#   --as BYTES|none     the address-space cap, per process
+#   --mem BYTES         the memory of all processes together, in the scope (default: half this host's, at most 32 GiB)
+#   --tasks N           the processes and threads allowed (default 512)
+#   --record FILE       append one JSON line saying which limits applied, outside the sandbox
 #   --print             print bwrap's arguments, one per line, instead of starting anything
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 die() { echo "box.sh: $*" >&2; exit 64; }
 arity() { [ "$1" -ge "$2" ] || die "$3 takes $(($2 - 1)) value(s)"; }
 
+argv=("$@")
 user=${USER:-$(id -un)} host=$(hostname 2>/dev/null || uname -n) home=/ chdir="" tty=1 probe=0 relay="" print=0
 as=$((32 << 30)) binds=() envs=() path=() hide=() ro_paths=(/usr /etc) socks=() home_src=""
+mem=$(($(awk '/^MemTotal:/ { print $2 }' /proc/meminfo) << 9)) tasks=512 record=""
+[ "$mem" -le $((32 << 30)) ] || mem=$((32 << 30))
 while [ $# -gt 0 ]; do
   case $1 in
     --home) arity $# 3 "$1"; binds+=(--bind "$2" "$3"); home=$3 home_src=$2; shift 3 ;;
@@ -55,12 +68,56 @@ while [ $# -gt 0 ]; do
     --hide) arity $# 2 "$1"; hide+=("$2"); shift 2 ;;
     --relay) arity $# 2 "$1"; [[ $2 =~ ^[0-9]+$ ]] || die "--relay takes a port"; relay=$2; shift 2 ;;
     --as) arity $# 2 "$1"; as=$2; shift 2 ;;
+    --mem) arity $# 2 "$1"; [[ $2 =~ ^[0-9]+$ ]] || die "--mem takes bytes"; mem=$2; shift 2 ;;
+    --tasks) arity $# 2 "$1"; [[ $2 =~ ^[0-9]+$ ]] || die "--tasks takes a count"; tasks=$2; shift 2 ;;
+    --record) arity $# 2 "$1"; record=$2; shift 2 ;;
     --print) print=1; shift ;;
     --) shift; break ;;
     *) die "unknown option $1 (see the usage at the top of lib/box.sh)" ;;
   esac
 done
 [ $# -gt 0 ] || die "usage: box.sh [options] -- <command...>"
+
+# Resource limits (see the top). Where a scope applies, this script runs again inside it, and that run checks the
+# scope's own cgroup before anything starts, so a scope that does not hold the limits starts nothing.
+mem=$((mem >> 20 << 20))
+scope=(-p MemoryMax="$mem" -p MemorySwapMax=0 -p TasksMax="$tasks") limits="" why=""
+in_cgroup() { cat "/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup)/$1" 2>/dev/null || echo none; }
+pick_limits() {  # sets limits to scope or prlimit, and why when prlimit
+  local cg ctl
+  limits=prlimit
+  if [ "${GUARD_BOX_LIMITS:-}" = prlimit ]; then why="GUARD_BOX_LIMITS=prlimit"; return; fi
+  command -v systemd-run > /dev/null || { why="no systemd-run on this host"; return; }
+  cg=$(systemctl --user show -p ControlGroup --value 2> /dev/null) && [ -n "$cg" ] \
+    || { why="no systemd user manager answers"; return; }
+  ctl=" $(cat "/sys/fs/cgroup$cg/cgroup.controllers" 2> /dev/null) "
+  [[ $ctl == *" memory "* && $ctl == *" pids "* ]] \
+    || { why="the user manager does not delegate the memory and pids controllers"; return; }
+  # OOMPolicy=continue kills only the process past the limit, not the whole sandbox; older systemd lacks it for scopes.
+  if systemd-run --user --scope --quiet --collect "${scope[@]}" -p OOMPolicy=continue -- true 2> /dev/null; then
+    scope+=(-p OOMPolicy=continue)
+  elif ! systemd-run --user --scope --quiet --collect "${scope[@]}" -- true 2> /dev/null; then
+    why="systemd-run --user --scope refused"; return
+  fi
+  limits=scope
+}
+if [ $print = 0 ] && [ -n "${GUARD_BOX_SCOPE:-}" ]; then
+  # Without swap accounting there is no memory.swap.max, which is fine only on a host with no swap to spill into.
+  swap=0; [ "$(wc -l < /proc/swaps)" -gt 1 ] || [ -e "/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup)/memory.swap.max" ] || swap=none
+  have="memory.max $(in_cgroup memory.max), memory.swap.max $(in_cgroup memory.swap.max), pids.max $(in_cgroup pids.max)"
+  want="memory.max $mem, memory.swap.max $swap, pids.max $tasks"
+  if [ "$have" != "$want" ]; then
+    echo "box.sh: the scope holds $have, not $want; nothing started" >&2
+    exit 70
+  fi
+  limits=scope
+elif [ $print = 0 ]; then
+  pick_limits
+  if [ "$limits" = scope ]; then
+    exec systemd-run --user --scope --quiet --collect "${scope[@]}" -- \
+      env GUARD_BOX_SCOPE=1 bash "${BASH_SOURCE[0]}" "${argv[@]}"
+  fi
+fi
 
 # /tmp and /run are in memory; cap them at 1 GiB each where bwrap can (0.10 and later). They mount before anything
 # bound under them.
@@ -109,6 +166,19 @@ done
 if [ $print = 1 ]; then printf '%s\n' "${args[@]}" -- "${inner[@]}"; exit 0; fi
 caps=(--fsize=$((4 << 30)))
 [ "$as" = none ] || caps+=(--as="$as")
+if [ "$limits" = prlimit ]; then
+  yours=$(ps -L -U "$(id -u)" -o lwp= | wc -l)
+  caps+=(--nproc=$((yours + tasks)))
+fi
+if [ -n "$record" ]; then
+  if [ "$limits" = scope ]; then
+    printf '{"ts": %s, "limits": "scope", "cgroup": "%s", "memory_max": %s, "swap_max": 0, "tasks_max": %s, "as": "%s"}\n' \
+      "$(date +%s)" "$(sed -n 's/^0:://p' /proc/self/cgroup)" "$mem" "$tasks" "$as"
+  else
+    printf '{"ts": %s, "limits": "prlimit", "why": "%s", "nproc": %s, "yours": %s, "tasks": %s, "as": "%s"}\n' \
+      "$(date +%s)" "$why" $((yours + tasks)) "$yours" "$tasks" "$as"
+  fi >> "$record"
+fi
 bwrap=$(command -v bwrap) prlimit=$(command -v prlimit)
 # bwrap stays in the sandbox as PID 1, where /proc/1 shows its arguments and environment to everything inside. So its
 # arguments, which name host paths, go through a file descriptor; the probe's through a pipe that inside.sh closes

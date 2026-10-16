@@ -2319,6 +2319,30 @@ else
   expect box-probe-refuses fail 'probe: hidden: .*hidden-x is the host.s own' -- "$here/lib/box.sh" --no-tty --ro "$tmp/hidden-x" "$tmp/hidden-x" --probe --hide "$tmp/hidden-x" -- true
   expect box-probe-nothing-started ok '^70$' -- bash -c '"$1" --no-tty --ro "$2" "$2" --probe --hide "$2" -- touch "$3/started" 2>/dev/null; echo $?' _ "$here/lib/box.sh" "$tmp/hidden-x" "$tmp"
   expect box-probe-nothing-started-file fail - -- test -e "$tmp/started"
+  # Resources: a scope where the user manager delegates memory and pids, else prlimit; either way --tasks caps forks,
+  # prlimit with a few to spare, since the count it starts from includes the ps that took it.
+  forks='import os
+n = 0
+for _ in range(100):
+    try:
+        pid = os.fork()
+    except OSError:
+        continue
+    if pid == 0:
+        os.execvp("sleep", ["sleep", "5"])
+    n += 1
+print("forked", n)'
+  expect box-tasks-capped ok '^forked ([0-9]|[1-5][0-9])$' -- "$here/lib/box.sh" --no-tty --tasks 40 --record "$tmp/limits.jsonl" -- python3 -c "$forks"
+  expect box-limits-record ok '"limits": "(scope|prlimit)".*"tasks.*40' -- tail -1 "$tmp/limits.jsonl"
+  nproc_inside='u=$(GUARD_BOX_LIMITS=prlimit "$1" --no-tty --tasks 40 --record "$2" -- bash -c "ulimit -u")
+n=$(tail -1 "$2" | sed -n "s/.*\"nproc\": \([0-9]*\).*/\1/p"); echo "inside $u, recorded $n"; [ "$u" = "$n" ]'
+  expect box-limits-prlimit ok '^inside [0-9]+, recorded [0-9]+$' -- bash -c "$nproc_inside" _ "$here/lib/box.sh" "$tmp/limits.jsonl"
+  expect box-limits-prlimit-why ok '"why": "GUARD_BOX_LIMITS=prlimit"' -- tail -1 "$tmp/limits.jsonl"
+  expect box-limits-usage fail '^box.sh: --tasks takes a count$' -- "$here/lib/box.sh" --tasks many -- true
+  en enter "$ep_" -- sleep 4 & slow=$!
+  for _ in $(seq 40); do en broker status 2>/dev/null | grep -q 'limits: [ap]' && break; sleep 0.1; done
+  expect broker-status-limits ok '^    limits: (a systemd user scope, MemoryMax .* TasksMax 512: a wall|prlimit .* a speed bump)' -- en broker status
+  wait "$slow"
   expect broker-stop ok '^guard broker: stopped' -- en broker stop
   expect broker-down-after-stop fail '^guard broker: not running' -- en broker status
   expect broker-launch-unknown fail 'GUARD_BROKER_LAUNCH=bogus is not one of systemd, tmux, detached' -- env HOME="$eh" GUARD_RUNTIME_DIR="$tmp/rt" GUARD_BROKER_LAUNCH=bogus "$guard" enter "$ep_" -- true
