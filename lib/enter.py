@@ -221,7 +221,7 @@ def main(argv):
         sid, sock_dir, net = opened["session"], opened["dir"], opened["net"]
         record = opened["record"]
         for note in opened.get("notes") or []:
-            print(f"guard enter: {note}", file=sys.stderr)
+            print(f"guard enter: warning: {note}", file=sys.stderr)
         if not opened.get("model"):
             model = []
     else:

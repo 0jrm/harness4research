@@ -2320,7 +2320,12 @@ else
   expect enter-net-env ok '^http://127.0.0.1:3128$' -- en enter "$ep_" --agent fake -- bash -c 'echo "$HTTPS_PROXY"'
   kill $lsn 2>/dev/null
   expect broker-status-net ok 'net: CONNECT example.com:443 is not on this session.s allowlist' -- en broker status
-  expect enter-net-no-card ok 'no package hosts this session: the broker cannot read guard/budget.card on main' -- en enter "$ep_" --agent fake -- true
+  # An origin inside the project is the agent's own repository, however it is spelled; one outside is kept.
+  inside_check='import sys; sys.path.insert(0, sys.argv[1] + "/lib"); import broker_host as b; p = sys.argv[2]
+print(" ".join(str(b.inside(u, p)) for u in (p + "/.mine.git", "file://" + p + "/.mine.git", "file://localhost" + p + "/.mine",
+      ".mine", "file:///tmp/../" + p + "/x.git", p + "/../elsewhere.git", "git@github.com:o/r.git", "https://h/r.git", "ext::x %S")))'
+  expect broker-origin-inside ok '^True True True True True False False False False$' -- python3 -c "$inside_check" "$here" "$ep_"
+  expect enter-net-no-card ok 'warning: no package hosts this session: the broker cannot read guard/budget.card on main' -- en enter "$ep_" --agent fake -- true
   # The model gateway: an upstream that echoes every header back, the key beside its model file, and a profile whose
   # model: line routes an unattended session through it. The key reaches the upstream and never the sandbox.
   echo_up='import http.server, json, sys

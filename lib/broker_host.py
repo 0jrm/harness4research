@@ -46,6 +46,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HARNESS = os.path.dirname(HERE)
@@ -195,8 +196,7 @@ class Host:
                     pinned = json.load(f)["origin"]
             except (OSError, ValueError, KeyError):
                 pinned = origin(path)
-            if pinned and not pinned.startswith(("ext::", "file://")) and ":" not in pinned.split("/", 1)[0] \
-                    and under(os.path.realpath(os.path.join(path, pinned)), path):
+            if inside(pinned, path):
                 pinned = ""  # a repository inside the project is the agent's own
             cfg = {"session": name, "project": path, "paths": [[path, path]], "origin": pinned,
                    "slurm_bin": self.slurm_bin, "slurm_env": {}, "user": os.environ.get("USER", ""),
@@ -343,6 +343,17 @@ class Control(socketserver.StreamRequestHandler):
 
 def under(path, top):
     return path == top or path.startswith(top.rstrip("/") + "/")
+
+
+def inside(url, project):
+    """Whether a git URL names a repository inside the project: a plain or relative path, or a file:// URL (file:///p,
+    file://localhost/p), as git would open it, with or without the .git it tries after the name."""
+    if url.startswith("file://"):
+        url = urllib.parse.unquote(urllib.parse.urlsplit(url).path)
+    elif not url or url.startswith("ext::") or ":" in url.split("/", 1)[0]:
+        return False  # empty, a transport helper, a URL with a scheme, or scp-like host:path
+    local = os.path.join(project, url.rstrip("/"))
+    return any(under(os.path.realpath(p), project) for p in (local, local + ".git"))
 
 
 def read_model(name):
