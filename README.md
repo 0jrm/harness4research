@@ -237,7 +237,7 @@ Linked skills reach every agent session as instructions, so linking pstack means
 
 ## Requirements
 
-bash 4 or later and git 2.30 or later on your machine and the cluster. python3 for `guard needs-you`, `guard hooks`, `guard atlas`, and the walkthrough. Slurm on the cluster. GitHub for the fence, and `gh` for the printed pull request commands, `guard review`, and `guard merge`. `guard review` also needs a reviewer: Claude Code or Cursor's agent CLI, or a command you name. `tests/run.sh` needs python3 with PyYAML, and jq.
+bash 4 or later and git 2.30 or later on your machine and the cluster. python3 for `guard needs-you`, `guard hooks`, `guard atlas`, and the walkthrough. Slurm on the cluster. GitHub for the fence, and `gh` for the printed pull request commands, `guard review`, and `guard merge`. `guard review` also needs a reviewer: Claude Code or Cursor's agent CLI, or a command you name. `tests/run.sh` needs python3 with PyYAML, jq, and the repository's full history with its release tags, since it upgrades a project from every release since `tests/oldest-supported`: clone without `--depth`, or run `git fetch --unshallow --tags`. `eval/env/selftest.sh` and `eval/audit/run.py` need bubblewrap with unprivileged user namespaces. Each checks what it needs first and, when something is missing, prints one line with the fix and exits 64.
 
 ## Test
 
