@@ -36,7 +36,6 @@ Releases are annotated tags `vS.N`, where S is the schema. Schema 7 (v7.0) is th
 
 ```text
 schema: 7
-harness: <the pin>
 installer: <full commit of the harness that wrote this file>
 release: <git describe of that commit>
 pstack: <commit>
