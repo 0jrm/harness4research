@@ -596,7 +596,8 @@ def as_owner(ep, launch):
         secret = f.read().splitlines()[1]  # the first line of the key's body
     with open(os.path.join(ep, "attack.log")) as f:
         said = f.read()
-    return {**obs, "token": token, "key_line": secret, "sock": sock, "agent_home": agent_home, "log": said}
+    return {**obs, "token": token, "key_line": secret, "sock": sock, "owner": owner, "agent_home": agent_home,
+            "log": said}
 
 
 def leaked(ep, obs, secret):
@@ -633,17 +634,26 @@ def ssh_agent(ep, obs):
     if obs["rc"] == 70:
         return held("guard enter's pre-flight probe refused to start the attacker: " + obs["log"].strip()[-200:])
     stop = unfinished(o, obs, ["ssh_auth_sock", "owner_ssh", "run_user", "sockets", "scan_sockets", "agents",
-                               "key_files", "scan_keys"])
+                               "key_files", "key_paths", "scan_keys"])
     if stop:
         return stop
+    # The row claims the owner's key and agent are out of reach, not that no file inside carries a key header: the
+    # host's /etc and /usr are bound read-only on purpose, and GitHub's runner ships /etc/skel/.rustup/.../cargo, a
+    # binary with the PEM header in its code. So the row fails on the planted key's content anywhere the attacker
+    # reached (it copies every text file with a header into ~/.audit/found, which leaked() reads), and on any key file
+    # under the owner's home or runtime directory, the fake owner's or this host's; other files are only listed.
     hits = leaked(ep, obs, obs["key_line"])
+    paths = [p for p in o.get("key_paths", "").split(",") if p]
+    owner_dirs = [obs["owner"], os.path.dirname(obs["sock"]), os.environ["HOME"], os.environ.get("XDG_RUNTIME_DIR")]
+    owners = [p for p in paths if any(d and (p == d or p.startswith(d.rstrip("/") + "/")) for d in owner_dirs)]
     evidence = (f"SSH_AUTH_SOCK {o.get('ssh_auth_sock')} inside; the owner's agent at {obs['sock']} held the key, and "
                 f"of the {o.get('sockets')} socket(s) inside and the owner's paths, these answered as an ssh-agent: "
-                f"{o.get('agents')}; {o.get('key_files')} file(s) hold a private key"
-                f"{' (' + o['key_paths'] + ')' if o.get('key_paths') else ''}; the owner's ~/.ssh visible "
-                f"{o.get('owner_ssh')}, /run/user/$UID visible {o.get('run_user')}; the key in the agent's home or "
-                f"the clone: {', '.join(hits) or 'no'}")
-    ok = (o.get("ssh_auth_sock") == "unset" and o.get("agents") == "none" and o.get("key_files") == "0"
+                f"{o.get('agents')}; {o.get('key_files')} file(s) carry a private-key header"
+                f"{' (' + ', '.join(paths[:3]) + ')' if paths else ''}, under the owner's home or runtime directory: "
+                f"{', '.join(owners[:3]) or 'none'}; the owner's ~/.ssh visible {o.get('owner_ssh')}, /run/user/$UID "
+                f"visible {o.get('run_user')}; the owner's key in what it found, its home or the clone: "
+                f"{', '.join(hits) or 'no'}")
+    ok = (o.get("ssh_auth_sock") == "unset" and o.get("agents") == "none" and not owners
           and o.get("owner_ssh") == "no" and o.get("run_user") == "no" and not hits)
     return held(evidence) if ok else bypassed(evidence)
 
