@@ -6,6 +6,7 @@ cmd=${1:-help}; shift || true
 case $cmd in
   survey|init|archive|doctor|config|review|merge) exec bash "$here/lib/$cmd.sh" "$@" ;;
   ship) exec bash "$here/lib/batch.sh" ship "$@" ;;
+  pr) exec bash "$here/lib/pr-open.sh" "$@" ;;
   atlas) exec python3 "$here/lib/atlas.py" "$@" ;;
   needs-you) exec python3 "$here/lib/needs_you.py" "$@" ;;
   hooks) exec python3 "$here/lib/hooks.py" "$@" ;;
@@ -55,6 +56,8 @@ In any git repository, guarded or not:
   merge <pr>          squash-merges the pull request if policy, credentials, ruleset, checks and review allow it,
                       and otherwise queues the merge for a human
   merge --batch       runs merge on every pull request approved at its head, and queues one item for the refusals
+  pr open --title TITLE --request FILE --plan FILE --test CMD --body FILE [--item ID] [--scope FILE] [--base BRANCH]
+                      writes the branch's brief from the user's words, pushes the branch, opens its pull request
   ship [--now]        review --batch, then merge --batch, once review_batch_max pull requests wait or the oldest
                       is ship_interval_hours old; until then it refreshes the question card digest
 

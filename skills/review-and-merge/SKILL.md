@@ -5,9 +5,9 @@ description: >-
   the guard's gate. Use when the implementation is done and the next step is a
   pull request, a review, or a merge, even if the user only says "ship it",
   "open the PR", "get it reviewed", "merge it", or "land this". Writes the brief
-  with the user's words copied verbatim, opens the pull request, runs guard
-  ship, and relays any 🩺 block. Urgent work runs guard review and guard merge
-  on its one pull request instead.
+  with the user's words copied verbatim, opens the pull request with guard pr
+  open, runs guard ship, and relays any 🩺 block. Urgent work runs guard review
+  and guard merge on its one pull request instead.
 ---
 
 # Review and merge
@@ -16,32 +16,19 @@ The agent that wrote a change neither reviews nor merges it by hand. `guard ship
 
 ## Steps
 
-1. Finish the work on a branch and push it.
-2. Write the brief at this path. Every worktree of the repository shares it, and git never commits it.
+1. Commit the work on a branch.
+2. Write four files outside the repository:
+   - the request, copied from the user's messages character for character: no paraphrase, summary, translation, or typo fixes. If it grew over several messages, copy each that shaped it, in order. The reviewer judges the diff against it.
+   - the plan: what you changed, file by file, and why; the reviewer checks it as claims.
+   - the scope, only for part of the request: which part, and which pull request takes the rest.
+   - the body: the change in your own words.
+3. Open the pull request:
 
    ```shell
-   brief="$(cd "$(git rev-parse --git-common-dir)" && pwd)/guard/briefs/$(git branch --show-current | tr / -).md"
-   mkdir -p "$(dirname "$brief")"
+   guard pr open --title <title> --request <file> --plan <file> --test <command> --body <file> [--scope <file>] [--item <plan item id>]
    ```
 
-   Use this format:
-
-   ```markdown
-   ## Request (verbatim)
-   <the user's request>
-
-   ## Scope
-   <only when this pull request covers part of the request: which part, and which pull request or branch takes the rest>
-
-   ## Plan
-   <what you changed, file by file, and why>
-
-   ## Test command
-   <the command that runs the tests>
-   ```
-
-   Copy the request out of the user's messages character for character: no paraphrase, summary, translation, or typo fixes. If it grew over several messages, copy each one that shaped it, in order, corrections included. The reviewer judges the diff against this section and reads your plan as claims to check, so the plan need not persuade.
-3. Open the pull request with `gh pr create`, describing the change in your own words. The brief and the user's words stay on this machine: never in the title, body or a comment.
+   It writes the brief where `guard review` reads it (shared by every worktree, never committed), pushes, opens the pull request and prints its URL; `--item W1.2` titles it `[W1.2] <title>`. The user's words stay on this machine: it refuses a body that repeats a line of the request, and they never go in a comment. A rerun prints the open pull request's URL and changes nothing.
 4. Run `guard ship`.
    - When the batch is not due, it says which pull requests wait and when it runs. Tell the user and stop; the merge can wait up to a day.
    - When it runs, it ends with a summary: the count per tier, each verdict, each merge commit. Relay the summary and every 🩺 block it printed, then stop.
