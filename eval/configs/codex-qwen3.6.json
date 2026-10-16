@@ -29,7 +29,8 @@
   "matrix": {
     "families": ["t1-walltime", "t3-entity-overlap", "t8-fixture"],
     "variants": ["trap", "control"],
-    "arms": ["A", "E"],
+    "arms": ["A", "E", "E-nobroker"],
+    "arm_variants": {"E-nobroker": ["control"]},
     "seeds": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     "order_seed": 20261010
   }
