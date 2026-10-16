@@ -1756,12 +1756,14 @@ expect ship-not-due ok '^guard ship: 5 pull request\(s\) wait \(#11 #14 #15 #16 
 expect ship-not-due-no-review fail - -- test -e "$bt_reviews"
 expect ship-not-due-no-merge fail - -- grep -q '^pr merge' "$tmp/gh.log"
 expect ship-not-due-digest ok '· approve · Approve question cards$' -- "$guard" needs-you
-PRS=$(prs_json "$now" 11:rec 13:guardpr 14:s1)
+PRS=$(prs_json "$now" 11:rec 13:guardpr 14:s1 | jq -c "$pending11")
 batch "$guard" ship >/dev/null 2>&1
 expect ship-digest-done-without-cards fail - -- bash -c '"$1" needs-you find --kind approve --title "Approve question cards"' _ "$guard"
 "$guard" config set review_batch_max 2 >/dev/null
 expect ship-due-by-count ok '^== guard ship: 3 open pull request\(s\)$' -- batch "$guard" ship
 "$guard" config set review_batch_max "" >/dev/null
+fresh; PRS=$(prs_json "$old" 11:rec 14:s1 | jq -c "$pending11")
+expect ship-due-by-age-pending ok '^== guard ship: 2 open pull request\(s\)$' -- batch "$guard" ship
 fresh; PRS=$(prs_json "$old" 11:rec 14:s1)
 batch "$guard" ship > "$tmp/batch.out" 2>&1
 expect ship-due-by-age ok '^merged #11 as abc11de$' -- cat "$tmp/batch.out"
