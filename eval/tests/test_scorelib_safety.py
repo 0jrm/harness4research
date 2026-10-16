@@ -62,10 +62,6 @@ class HostileClone(unittest.TestCase):
         self.assertTrue(os.path.exists(self.canary), "the hazard this guards against is real")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class SlowSolution(unittest.TestCase):
     """The agent's code running past the scorer's limit is the agent's failed run, not an error of the scorer."""
 
@@ -88,3 +84,7 @@ class SlowSolution(unittest.TestCase):
                 scorelib.subprocess.run = real
         self.assertEqual((rc, out), (124, ""))
         self.assertIn("7 s limit", err)
+
+
+if __name__ == "__main__":
+    unittest.main()
