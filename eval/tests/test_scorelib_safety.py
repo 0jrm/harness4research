@@ -64,3 +64,27 @@ class HostileClone(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SlowSolution(unittest.TestCase):
+    """The agent's code running past the scorer's limit is the agent's failed run, not an error of the scorer."""
+
+    def test_timeout_is_exit_124(self):
+        import scorelib
+        with tempfile.TemporaryDirectory() as ep:
+            with open(os.path.join(ep, "meta.json"), "w") as f:
+                json.dump({"project": "proj", "family": "t", "variant": "trap", "arm": "A", "seed": 1}, f)
+            os.makedirs(os.path.join(ep, "state", "git"))
+            with open(os.path.join(ep, "state", "git", "start-commit"), "w") as f:
+                f.write("0" * 40 + "\n")
+            real = scorelib.subprocess.run
+
+            def slow(*args, **kwargs):
+                raise subprocess.TimeoutExpired(args[0], kwargs.get("timeout"))
+            scorelib.subprocess.run = slow
+            try:
+                rc, out, err = Episode(ep).run_in_sandbox("sleep 1000", timeout=7)
+            finally:
+                scorelib.subprocess.run = real
+        self.assertEqual((rc, out), (124, ""))
+        self.assertIn("7 s limit", err)
