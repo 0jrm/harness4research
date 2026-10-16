@@ -1153,8 +1153,9 @@ expect doctor-version ok '^pass  guard schema [0-9]+ \(release .*\) against harn
 expect doctor-version-once ok - -- bash -c '! grep -E "\(release ([^ )]+)\1\)" <<<"$1"' _ "$(doctor)"
 expect doctor-workflow ok '^pass  .github/workflows/guard-fence.yml on origin/main defines guard-fence / fence$' -- doctor
 doctor > "$tmp/doctor-out"
-expect onboard-names-real-doctor-lines ok - -- bash -c 'grep -o "\`pass  [^\`]*\`" "$1" | tr -d "\`" | sed -e "s/<[^>]*>/.*/g" -e "s/\.\.\./.*/g" |
-  while IFS= read -r line; do grep -qE "^$line" "$2" || { echo "not in doctor output: $line"; exit 1; }; done' _ "$here/skills/guard-onboard/SKILL.md" "$tmp/doctor-out"
+expect onboard-names-real-doctor-lines ok - -- bash -c 'out=$1; shift; grep -ho "\`pass  [^\`]*\`" "$@" | tr -d "\`" | sed -e "s/<[^>]*>/.*/g" -e "s/\.\.\./.*/g" |
+  while IFS= read -r line; do grep -qE "^$line" "$out" || { echo "not in doctor output: $line"; exit 1; }; done' _ "$tmp/doctor-out" "$here/skills/guard-onboard/SKILL.md" "$here"/skills/guard-onboard/references/*.md
+expect onboard-doctor-lines-counted ok '^([6-9]|[1-9][0-9]+)$' -- bash -c 'grep -ho "\`pass  [^\`]*\`" "$@" | wc -l' _ "$here/skills/guard-onboard/SKILL.md" "$here"/skills/guard-onboard/references/*.md
 expect doctor-no-colour-in-pipe fail - -- grep -q $'\e' "$tmp/doctor-out"
 expect doctor-no-gh ok '^cannot check from here  whether guard-fence / fence has run on GitHub: gh is not on PATH$' -- doctor PATH="$(path_without gh)"
 expect doctor-cannot-is-not-pass ok '^13 passed, 0 failed, 2 cannot check from here$' -- doctor PATH="$(path_without gh)"
