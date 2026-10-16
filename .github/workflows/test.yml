@@ -19,7 +19,13 @@ jobs:
       - name: Install shellcheck, PyYAML and jq
         run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck python3-yaml jq
       - name: Lint
-        run: shellcheck -S warning bin/guard install.sh lib/*.sh templates/guard/run templates/guard/bin/*.sh tests/run.sh tests/atlas-fixture.sh tests/mock-bin/* examples/quickstart/run.sh examples/quickstart/job.sh examples/quickstart/checks/* eval/env/*.sh
+        # The tracked files these patterns match, so a pattern that matches nothing, such as templates/guard/bin
+        # once its scripts move to lib/guard, drops out instead of failing.
+        run: |
+          git ls-files -z -- bin/guard install.sh 'lib/*.sh' 'lib/guard/*.sh' templates/guard/run 'templates/guard/bin/*.sh' \
+            tests/run.sh tests/atlas-fixture.sh 'tests/mock-bin/*' examples/quickstart/run.sh \
+            examples/quickstart/job.sh 'examples/quickstart/checks/*' 'eval/env/*.sh' eval/audit/ci.sh \
+            | xargs -0 shellcheck -S warning
       - name: Compile Python
         run: python3 -m py_compile lib/*.py eval/env/*.py
       - name: End-to-end tests
@@ -30,3 +36,21 @@ jobs:
           sudo apt-get install -y -q bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           eval/env/selftest.sh
+  audit:
+    # The enforcement audit, on pull requests that touch what it measures: fails when a row the baseline holds
+    # no longer holds, and puts the table in the job summary. eval/audit/ci.sh decides whether anything changed.
+    needs: test
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install bubblewrap
+        # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, and bubblewrap needs them.
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Enforcement audit gate
+        run: eval/audit/ci.sh origin/${{ github.base_ref }}
