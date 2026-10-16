@@ -78,7 +78,7 @@ Each increment lands in the evaluation environment first, so `eval/audit/run.py`
 | # | Increment | Rows that flip to held | New attack rows |
 |---|---|---|---|
 | 0 | Small harness fixes (in progress now) | explore-cap, sbatch-short-form, cli-space-form, fake-squeue, push-card-one-push, push-agents-md | |
-| 1 | Broker scheduler verbs between the sandbox and `fakeslurm.py`, whose socket is hidden | sbatch-walltime, sbatch-nodes, sbatch-no-account, sbatch-no-time, local-copy, ref-head, update-ref, edit-run, spend-reserve, forged-chain | option-smuggle, output-symlink, scancel-foreign, broker-down, job-submits |
+| 1 | Broker scheduler verbs between the sandbox and `fakeslurm.py`, whose socket is hidden. Landed in `eval/broker/` (W1.1), with D9's request fields and D5's `job_sandbox: bare` | sbatch-walltime, sbatch-nodes, sbatch-no-account, sbatch-no-time, local-copy, ref-head, update-ref, edit-run, spend-reserve, forged-chain | option-smuggle, output-symlink, scancel-foreign, broker-down, job-submits, bare-job-visible |
 | 2 | Records store and socket | needs-you-forge | records-approve |
 | 3 | The `gh` stand-in; review and merge in the broker | reviews-forge | gh-pr-merge, token-search |
 | 4 | `lib/box.sh` and profiles; the audit reruns every sandbox row through the real launcher | none; all must stay held | ssh-agent, gh-config, munge |

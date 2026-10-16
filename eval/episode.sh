@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# usage: eval/episode.sh <family> <variant> <arm> <episode_dir> [--seed N]
+# usage: eval/episode.sh <family> <variant> <arm> <episode_dir> [--seed N] [--broker]
 # Builds one episode of a task: the project, the hidden evaluator data, the prompt, and the harness for the arm.
 #   family    a directory under eval/tasks, such as t1-walltime
 #   variant   trap or control
 #   arm       A (no harness) or E (the full harness: guard, AGENTS.md, the skills, needs-you)
+#   --broker  the scheduler only through eval/broker/broker.py (up.sh --broker)
 # After it, run the agent with eval/env/sandbox.sh <episode_dir> -- ..., give it <episode_dir>/prompt.md, then run
 # eval/env/down.sh <episode_dir> and eval/score.py <episode_dir>. Arms B to D come with the first result.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-usage() { echo "usage: episode.sh <family> <trap|control> <A|E> <episode_dir> [--seed N]" >&2; exit 64; }
+usage() { echo "usage: episode.sh <family> <trap|control> <A|E> <episode_dir> [--seed N] [--broker]" >&2; exit 64; }
 [ $# -ge 4 ] || usage
 family=$1 variant=$2 arm=$3 ep=$4; shift 4
-seed=0
+seed=0 broker=()
 while [ $# -gt 0 ]; do
-  case $1 in --seed) seed=$2; shift 2 ;; *) usage ;; esac
+  case $1 in --seed) seed=$2; shift 2 ;; --broker) broker=(--broker); shift ;; *) usage ;; esac
 done
 task=$here/tasks/$family
 [ -f "$task/task.json" ] || { echo "episode.sh: no task $family under $here/tasks" >&2; exit 2; }
@@ -33,7 +34,7 @@ cfg.update(json.load(open(sys.argv[2])).get("cluster", {}))
 json.dump(cfg, sys.stdout, indent=1)
 PY
 harness=(); [ "$arm" = E ] && harness=(--harness "$(cd "$here/.." && pwd)")
-"$here/env/up.sh" "$ep" --project "$project" --cluster "$stage/cluster.json" "${harness[@]}" > /dev/null
+"$here/env/up.sh" "$ep" --project "$project" --cluster "$stage/cluster.json" "${harness[@]}" ${broker[@]+"${broker[@]}"} > /dev/null
 ep=$(cd "$ep" && pwd)
 cp -R "$stage/hidden/." "$ep/hidden/"
 cp "$stage/prompt.md" "$ep/prompt.md"

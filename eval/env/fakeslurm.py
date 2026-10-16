@@ -13,7 +13,9 @@ Time runs `time_scale` times faster than the wall clock: with 60, a job that sle
 Nodes are allocated whole, so a job holds nodes * cores_per_node CPUs, which is what guard preflight projects.
 
 config.json keys: cluster, partition, nodes, cores_per_node, time_scale, default_account,
-accounts ({name: {"cap_cpu_minutes": n or null}}), job_cmd (argv that runs one job; see run_job).
+accounts ({name: {"cap_cpu_minutes": n or null}}), job_cmd (argv that runs one job; see run_job), paths
+([[sandbox path, host path], ...], to open job output from outside), output_roots (host directories job output may
+resolve into; see open_output).
 """
 import datetime as dt
 import json
@@ -205,7 +207,38 @@ class Controller:
         if sig == signal.SIGTERM:
             threading.Timer(2.0, self.signal, (job, signal.SIGKILL)).start()
 
+    def host_path(self, path):
+        for inside, outside in self.cfg.get("paths", []):
+            if path == inside or path.startswith(inside + "/"):
+                return outside + path[len(inside):]
+        return path
+
+    def open_output(self, job):
+        """Opens the job's output outside the job's sandbox, as slurmd does, following links. A path that resolves
+        outside output_roots is never opened: the job fails with OutputEscape and output_followed names the target,
+        so the evaluation records what a real scheduler would have written to without writing it."""
+        roots = [os.path.realpath(r) for r in self.cfg.get("output_roots", ["/"])]
+        within = lambda p: any(p == r or p.startswith(r.rstrip("/") + "/") for r in roots)
+        real = os.path.realpath(self.host_path(job["output"]))
+        if within(real):
+            try:
+                fd = os.open(real, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o644)
+            except OSError:
+                return None, "OutputOpen"
+            opened = os.readlink(f"/proc/self/fd/{fd}")
+            if within(opened):
+                os.ftruncate(fd, 0)
+                return fd, None
+            os.close(fd)
+            real = opened
+        job["output_followed"] = real
+        return None, "OutputEscape"
+
     def start(self, job, now):
+        fd, why = self.open_output(job)
+        if fd is None:
+            job["state"], job["start"], job["end"], job["reason"], job["exit"] = "FAILED", now, now, why, "1:0"
+            return
         job["state"], job["start"], job["reason"] = "RUNNING", now, "None"
         env = {
             "SLURM_JOB_ID": job["id"], "SLURM_JOBID": job["id"], "SLURM_JOB_NAME": job["name"],
@@ -213,11 +246,14 @@ class Controller:
             "SLURM_JOB_NUM_NODES": str(job["nodes"]), "SLURM_NNODES": str(job["nodes"]),
             "SLURM_CPUS_ON_NODE": str(self.cfg["cores_per_node"]), "SLURM_SUBMIT_DIR": job["cwd"],
             "SLURM_CLUSTER_NAME": self.cfg["cluster"], "SLURM_JOB_USER": job["user"],
-            "SLURMD_SCRIPT": job["script"], "SLURMD_OUTPUT": job["output"], "SLURMD_CWD": job["cwd"],
+            "SLURMD_SCRIPT": job["script"], "SLURMD_CWD": job["cwd"],
         }
         if job.get("array_task") is not None:
             env.update({"SLURM_ARRAY_JOB_ID": job["array_job"], "SLURM_ARRAY_TASK_ID": str(job["array_task"])})
-        self.procs[job["id"]] = run_job(self.cfg, job, env)
+        try:
+            self.procs[job["id"]] = run_job(self.cfg, job, env, fd)
+        finally:
+            os.close(fd)
 
     # client commands -------------------------------------------------------------------------------------------
     def handle(self, request):
@@ -521,15 +557,15 @@ def parse_time(text):
     raise ValueError(f"invalid time specification: {text}")
 
 
-def run_job(cfg, job, env):
-    """Starts one job in its own process group. job_cmd is an argv; without one, the job runs here with bash.
-    The command must run the script at $SLURMD_SCRIPT in $SLURMD_CWD with output to $SLURMD_OUTPUT,
-    which jobwrap.sh does inside the sandbox."""
+def run_job(cfg, job, env, output):
+    """Starts one job in its own process group, with stdout and stderr on the output file descriptor. job_cmd is an
+    argv; without one, the job runs here with bash. The command must run the script at $SLURMD_SCRIPT in
+    $SLURMD_CWD, which jobwrap.sh does inside the sandbox."""
     here = os.path.dirname(os.path.abspath(__file__))
     argv = cfg.get("job_cmd") or ["bash", os.path.join(here, "jobwrap.sh")]
     full_env = dict(os.environ, **env) if not cfg.get("job_cmd") else dict(env, PATH=os.environ["PATH"])
     return subprocess.Popen(argv + job["args"], env=full_env, start_new_session=True,
-                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            stdin=subprocess.DEVNULL, stdout=output, stderr=output)
 
 
 # ---------------------------------------------------------------------------------------------------- socket server
