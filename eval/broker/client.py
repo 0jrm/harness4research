@@ -1,16 +1,27 @@
 #!/usr/bin/env python3
-"""The sandbox's sbatch, squeue, sacct, scancel and sacctmgr, by the name they are called under, when the episode
-runs behind the broker. Each sends one request to the broker's socket and prints the reply.
+"""The sandbox's sbatch, squeue, sacct, scancel, sacctmgr and guard, by the name they are called under, when the
+episode runs behind the broker. Each sends one request to one of the broker's sockets and prints the reply.
 
 sbatch never reaches the scheduler: it turns its options and the script's #SBATCH lines into the broker's request
 fields and refuses an option it cannot map. A request names its run with --comment=run:<id>, which guard/run
-preflight adds, so a bare sbatch call is refused. Only the broker decides what the scheduler sees."""
+preflight adds, so a bare sbatch call is refused. Only the broker decides what the scheduler sees.
+
+guard needs-you, guard ledger and guard card go to the records socket; every other guard subcommand runs the
+installed guard. The records socket offers add, list, show and find, so guard needs-you ack, done and dismiss are
+refused there:
+
+    guard needs-you [--remind] | add --kind K --title T [...] | find --kind K --title T | show <id>
+    guard ledger add <run_id> <field> <value> [--why W] [--evidence E] | list <run_id>
+    guard card add <run_id> <card file> | show <run_id> | list"""
+import argparse
 import json
 import os
 import socket
 import sys
 
 SOCKET = "/run/guard/scheduler.sock"
+RECORDS = "/run/guard/records.sock"
+GUARD = "/opt/harness4research/bin/guard"
 
 # sbatch option -> request field. Later values win, the command line over #SBATCH lines, as sbatch reads them.
 FIELDS = {"time": "time", "nodes": "nodes", "ntasks": "tasks", "cpus-per-task": "cpus_per_task", "mem": "mem",
@@ -91,11 +102,77 @@ def sbatch_request(args):
             "fields": fields, "parsable": bool(opts.get("parsable"))}
 
 
-def ask(request):
+def records_request(args):
+    """One records request from guard needs-you, guard ledger or guard card arguments."""
+    store, rest = args[0], args[1:]
+    if store == "needs-you" and (not rest or rest[0].startswith("-")):
+        return {"verb": "list", "store": store, "remind": "--remind" in rest}
+    verb, rest = (rest[0], rest[1:]) if rest else ("list", [])
+    p = argparse.ArgumentParser(prog=f"guard {store} {verb}")
+    if store == "needs-you" and verb == "add":
+        for name in ("kind", "title"):
+            p.add_argument(f"--{name}", required=True)
+        for name in ("why", "expect", "worry", "undo", "source"):
+            p.add_argument(f"--{name}", default="")
+        p.add_argument("--path", action="append", default=[])
+        p.add_argument("--run", action="append", default=[])
+        p.add_argument("--update", action="store_true")
+        return {"verb": verb, "store": store, "item": vars(p.parse_args(rest))}
+    if store == "needs-you" and verb == "find":
+        p.add_argument("--kind", required=True)
+        p.add_argument("--title", required=True)
+        return {"verb": verb, "store": store, **vars(p.parse_args(rest))}
+    if store == "needs-you" and verb == "show":
+        p.add_argument("id")
+        return {"verb": verb, "store": store, **vars(p.parse_args(rest))}
+    if store == "ledger" and verb == "add":
+        for name in ("run", "field", "value"):
+            p.add_argument(name)
+        p.add_argument("--why", default="")
+        p.add_argument("--evidence", default="")
+        return {"verb": verb, "store": store, **vars(p.parse_args(rest))}
+    if store == "card" and verb == "add":
+        p.add_argument("run")
+        p.add_argument("file")
+        a = p.parse_args(rest)
+        try:
+            with open(a.file) as f:
+                return {"verb": verb, "store": store, "run": a.run, "text": f.read()}
+        except OSError as e:
+            raise Refused(f"cannot read {a.file}: {e.strerror}")
+    if store == "card" and verb == "list" and not rest:
+        return {"verb": verb, "store": store}
+    if verb in ("list", "show") and store in ("ledger", "card") and len(rest) == 1:
+        return {"verb": verb, "store": store, "run": rest[0]}
+    # Anything else, such as done, ack, dismiss or approve, goes as it is, and the broker refuses what it does not offer.
+    return {"verb": verb, "store": store, "args": rest}
+
+
+def guard(args):
+    if not args or args[0] not in ("needs-you", "ledger", "card"):
+        os.execv(GUARD, [GUARD, *args])
+    try:
+        request = records_request(args)
+    except Refused as e:
+        sys.stderr.write(f"guard {args[0]}: refused: {e}\n")
+        return 2
+    reply = ask(request, RECORDS)
+    if request.get("remind") and "--format" in args and "claude-hook" in args:
+        if reply.get("out"):
+            sys.stdout.write(json.dumps({"systemMessage": reply["out"].strip()}) + "\n")
+        return 0
+    sys.stdout.write(reply.get("out", ""))
+    sys.stderr.write(reply.get("err", ""))
+    return reply.get("rc", 1)
+
+
+def ask(request, path=SOCKET):
     conn = socket.socket(socket.AF_UNIX)
     try:
-        conn.connect(SOCKET)
+        conn.connect(path)
     except OSError as e:
+        if path == RECORDS:
+            return {"rc": 1, "err": f"guard broker unreachable ({e.strerror}); nothing was recorded\n"}
         return {"rc": 1, "err": f"guard broker unreachable ({e.strerror}); nothing was submitted, and nothing else "
                                 f"reaches the scheduler from here\n"}
     with conn:
@@ -105,6 +182,8 @@ def ask(request):
 
 
 def main(cmd, args):
+    if cmd == "guard":
+        return guard(args)
     verbs = {"squeue": "queue", "sacct": "acct", "scancel": "cancel"}
     try:
         if cmd == "sbatch":

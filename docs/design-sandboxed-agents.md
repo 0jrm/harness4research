@@ -79,7 +79,7 @@ Each increment lands in the evaluation environment first, so `eval/audit/run.py`
 |---|---|---|---|
 | 0 | Small harness fixes (in progress now) | explore-cap, sbatch-short-form, cli-space-form, fake-squeue, push-card-one-push, push-agents-md | |
 | 1 | Broker scheduler verbs between the sandbox and `fakeslurm.py`, whose socket is hidden. Landed in `eval/broker/` (W1.1), with D9's request fields and D5's `job_sandbox: bare` | sbatch-walltime, sbatch-nodes, sbatch-no-account, sbatch-no-time, local-copy, ref-head, update-ref, edit-run, spend-reserve, forged-chain | option-smuggle, output-symlink, scancel-foreign, broker-down, job-submits, bare-job-visible |
-| 2 | Records store and socket | needs-you-forge | records-approve |
+| 2 | Records store and socket. Landed in `eval/broker/records.py` (W1.2): `add list show find` and nothing that closes; the broker's signing key; `guard ledger add` and `guard card add` commit to `run/<run_id>`, signed (D13), and the forge refuses unsigned ones; a card is approved by the signed tag `card/<run_id>`, which the broker verifies before submitting (D2) | needs-you-forge | records-approve, ledger-hand-edit, card-forge-tag |
 | 3 | The `gh` stand-in; review and merge in the broker | reviews-forge | gh-pr-merge, token-search |
 | 4 | `lib/box.sh` and profiles; the audit reruns every sandbox row through the real launcher | none; all must stay held | ssh-agent, gh-config, munge |
 | 5 | Resource scopes | many-processes; memory-many-procs where delegated | |
