@@ -3,7 +3,7 @@
 ModelHandler serves one model socket: every HTTP request on it goes to one upstream, the only host it can reach. It
 drops the client's own credential headers, adds the upstream's key from outside the sandbox, removes every copy of
 that key from the reply, and logs each request. A local vLLM is an upstream with no key. eval/driver/proxy.py is the
-same handler with the evaluation's request repairs and full-body log.
+same handler with its own request repairs and full-body log.
 
 The network side is an allowlist of host:port names that a person owns: net_allow: in guard/budget.card on main
 (decision D4), PyPI and conda when the card does not say, and none for jobs. A CONNECT target counts only when its
@@ -108,11 +108,11 @@ class ModelHandler(http.server.BaseHTTPRequestHandler):
         pass
 
     def rewrite(self, body):
-        """The body sent upstream; the evaluation's proxy repairs requests here."""
+        """The body sent upstream; eval/driver/proxy.py repairs requests here."""
         return body
 
     def entry(self, entry, body, received):
-        """The log row; the evaluation's proxy adds the bodies."""
+        """The log row; eval/driver/proxy.py adds the bodies."""
         return entry
 
     def body(self):
