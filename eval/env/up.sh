@@ -6,12 +6,16 @@
 #   <episode_dir>/sandbox/         what the sandbox binds read-only: passwd, client tools, the harness copy
 #   <episode_dir>/state/slurm/     the fake Slurm's ledger, audit log and socket          (outside the sandbox only)
 #   <episode_dir>/state/git/       the protected repository, the forge log and socket     (outside the sandbox only)
-#   <episode_dir>/state/broker/    with --broker: the broker's ledger, mirror and spool   (outside; its socket inside)
+#   <episode_dir>/state/broker/    with --broker: the broker's ledger, mirror, spool, records and signing key
+#                                  (outside; its sockets inside)
+#   <episode_dir>/state/owner/     with --broker: the owner's signing key                 (outside the sandbox only)
 #   <episode_dir>/hidden/          the evaluator's data                                   (outside the sandbox only)
 #
 # The project directory becomes the first commit on main. With --harness, the sandbox gets that repository's
 # bin, lib, skills, templates and SCHEMA at /opt/harness4research, and `guard` on PATH. With --broker, the sandbox's
-# scheduler commands talk to eval/broker/broker.py, the fake Slurm's only client, whose socket the sandbox never sees.
+# scheduler commands talk to eval/broker/broker.py, the fake Slurm's only client, whose socket the sandbox never sees;
+# guard needs-you, guard ledger and guard card talk to its records socket; and the forge refuses a run's ledger or
+# card written by a commit the broker or the owner did not sign, and a card/<run_id> tag neither of them signed.
 # Name the episode directory neutrally: its path shows in the sandbox's mount table.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -52,7 +56,9 @@ if [ -n "$harness" ]; then
   # Only what guard runs from. docs/, README.md and eval/ describe this evaluation, and an agent never reads them in
   # a real install either: its rules come from AGENTS.md and the skills.
   git -C "$harness" archive HEAD -- bin lib skills templates SCHEMA | tar -x -C "$ep/sandbox/harness"
-  ln -s /opt/harness4research/bin/guard "$ep/sandbox/tools/bin/guard"
+  # Behind the broker, guard is client.py, which sends the record subcommands to the broker and runs the rest.
+  if [ $broker = 1 ]; then ln -s "/opt/site/lib/$client" "$ep/sandbox/tools/bin/guard"
+  else ln -s /opt/harness4research/bin/guard "$ep/sandbox/tools/bin/guard"; fi
 fi
 
 # The protected repository, behind the forge hook, with the project as its first commit on main.
@@ -66,6 +72,18 @@ git -C "$seed" add -A
 git -C "$seed" -c user.name=PI -c user.email=pi@lab commit -q -m "Initial project"
 git -C "$ep/state/git/protected.git" fetch -q "$seed" main:main
 rm -rf "$seed"
+# Behind the broker: the broker's key (guard broker setup), the owner's, and the forge trusting only those two for
+# run records and card tags.
+if [ $broker = 1 ]; then
+  mkdir -p "$ep/state/owner"
+  ssh-keygen -q -t ed25519 -N "" -C owner -f "$ep/state/owner/key"
+  python3 "$here/../broker/broker.py" setup "$ep/state/broker" > /dev/null
+  for who in owner broker; do
+    printf '%s namespaces="git" %s\n' "$who" "$(cut -d' ' -f1,2 "$ep/state/$who/key.pub")"
+  done > "$ep/state/git/allowed_signers"
+  git -C "$ep/state/git/protected.git" config gpg.ssh.allowedSignersFile "$ep/state/git/allowed_signers"
+  git -C "$ep/state/git/protected.git" config guard.records signed
+fi
 
 # The agent's clone, whose origin is the forge socket.
 cat > "$ep/home/.gitconfig" <<CFG
@@ -100,7 +118,9 @@ ep, name = sys.argv[1:]
 json.dump({"session": "s1", "project": f"/home/agent/{name}", "paths": [["/home/agent", ep + "/home"]],
            "origin": ep + "/state/git/protected.git", "slurm_bin": ep + "/state/broker/bin",
            "slurm_env": {"SLURM_CONF_SOCKET": ep + "/state/slurm/slurmctld.sock", "USER": "agent"},
-           "user": "agent", "compute_bwrap": True}, sys.stdout, indent=1)
+           "user": "agent", "compute_bwrap": True, "signing_key": ep + "/state/broker/key",
+           "owner_key": ep + "/state/owner/key", "allowed_signers": ep + "/state/git/allowed_signers"},
+          sys.stdout, indent=1)
 PY
 fi
 nohup setsid python3 "$here/fakeslurm.py" serve "$ep/state/slurm" "$ep/state/slurm/cluster.json" \
@@ -114,7 +134,7 @@ if [ $broker = 1 ]; then
   nohup setsid python3 "$here/../broker/broker.py" serve "$ep/state/broker" "$ep/state/broker/config.json" \
     > "$ep/state/broker/daemon.log" 2>&1 &
   echo $! > "$ep/state/broker/pid"
-  socks+=("$ep/state/broker/sock/scheduler.sock")
+  socks+=("$ep/state/broker/sock/scheduler.sock" "$ep/state/broker/sock/records.sock")
 fi
 listening() { local s; for s in "${socks[@]}"; do [ -S "$s" ] || return 1; done; }
 for _ in $(seq 300); do  # up to 30 s: four builds at once on an NFS home took more than 5

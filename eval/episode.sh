@@ -49,11 +49,14 @@ if [ "$arm" = E ]; then
   human=$stage/human
   git clone -q "$ep/state/git/protected.git" "$human"
   git -C "$human" switch -q guard/init
-  python3 - "$task/task.json" "$human/guard/budget.card" "$human/guard/watch.list" <<'PY'
+  # Behind the broker, the budget lets the broker approve a card of at most 10 core-hours itself (decision D2).
+  python3 - "$task/task.json" "$human/guard/budget.card" "$human/guard/watch.list" ${broker[@]+"${broker[@]}"} <<'PY'
 import datetime, json, sys
 task = json.load(open(sys.argv[1]))
 values = dict(task["arm_e"]["budget"])
 values.setdefault("start_date", (datetime.date.today() - datetime.timedelta(days=7)).isoformat())
+if "--broker" in sys.argv[4:]:
+    values.setdefault("card_auto_max_core_hours", 10)
 lines = open(sys.argv[2]).read().splitlines()
 out = [f"{l.split(':', 1)[0]}: {values.pop(l.split(':', 1)[0])}" if l.split(":", 1)[0] in values else l for l in lines]
 out += [f"{k}: {v}" for k, v in values.items()]

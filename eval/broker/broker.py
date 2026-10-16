@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""The broker's scheduler verbs: design increment 1 of docs/design-sandboxed-agents.md, in the evaluation.
+"""The broker's scheduler verbs and records: design increments 1 and 2 of docs/design-sandboxed-agents.md, in the
+evaluation.
 
+    broker.py setup <state_dir>                         # once: the broker's signing key (guard broker setup)
     broker.py serve <state_dir> <config.json>
-    broker.py approve reserve <state_dir> <run_id>     # a person, outside the sandbox
+    broker.py approve reserve <state_dir> <run_id>      # a person, outside the sandbox
+    broker.py approve card <state_dir> <run_id>         # the owner signs card/<run_id> (git tag -s)
+    broker.py revoke card <state_dir> <run_id>          # the owner deletes card/<run_id>; a revoked row
+    broker.py records ack|done|dismiss <state_dir> <id> [--note N]   # only a person closes a needs-you item
 
 It runs outside the agent's sandbox, which sees only its socket, and it is the only client of the scheduler. The
 sandbox's sbatch, squeue, sacct and scancel are eval/broker/client.py, which sends one request per call:
@@ -23,11 +28,17 @@ then its own values last, so they win: account, job name, a guard:<session>:<seq
 directory, and an output path in its spool, which the agent cannot write. The submitted script is a wrapper that
 opens the requested output inside the job sandbox and runs the agent's script, so no #SBATCH line in it reaches the
 scheduler. A job runs bare where the compute nodes have no bwrap or it spans nodes (decision D5); its ledger row and
-the reply say job_sandbox: bare.
+the reply say job_sandbox: bare. A run other than explore-* submits only once its card is approved: the signed tag
+card/<run_id> on origin verifies against the owner's and the broker's keys, and the card is read from that tag
+(decision D2; records.py).
+
+The records socket (records.py) offers add, list, show and find for the needs-you queue, execution.tsv rows and
+question cards, and nothing that closes or approves.
 
 config.json keys: session, project (the project's path inside the sandbox), paths ([[inside, outside], ...]), origin
 (the repository main is fetched from), slurm_bin (the scheduler's clients, by absolute path), slurm_env (their
-environment), user, compute_bwrap (true when every compute node has bwrap)."""
+environment), user, compute_bwrap (true when every compute node has bwrap), signing_key (the broker's private key),
+owner_key (the owner's, for approve card in the evaluation), allowed_signers (the two public keys)."""
 import datetime as dt
 import fnmatch
 import hashlib
@@ -45,6 +56,8 @@ import threading
 import time
 import traceback
 
+from records import Records, Refused, approve_card, needs_you, read_rows, revoke_card
+
 FIELDS = ("time", "nodes", "tasks", "cpus_per_task", "mem", "gpus", "array", "dependency", "partition", "output")
 RUN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 INDEX = r"[0-9]+(-[0-9]+(:[0-9]+)?)?"
@@ -53,10 +66,6 @@ JOB_ID = re.compile(r"^[0-9]+(_[0-9]+)?$")
 DEPENDENCY = re.compile(r"^(after|afterany|afterok|afternotok):[0-9]+(_[0-9]+)?(:[0-9]+(_[0-9]+)?)*$")
 OUTPUT = re.compile(r"^[A-Za-z0-9_.%/-]+$")
 FAILED = ("TIMEOUT", "OUT_OF_ME", "NODE_FAIL", "FAILED", "PREEMPTED")
-
-
-class Refused(Exception):
-    pass
 
 
 def to_minutes(text):
@@ -128,9 +137,11 @@ class Mirror:
         if not os.path.isdir(path):
             subprocess.run(["git", "init", "-q", "--bare", path], check=True)
 
-    def git(self, *args, text=True):
-        env = {"PATH": os.environ["PATH"], "HOME": self.path, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
-        return subprocess.run(["git", "--git-dir", self.path, *args], capture_output=True, text=text, env=env)
+    def git(self, *args, text=True, env=None, input=None):
+        env = {"PATH": os.environ["PATH"], "HOME": self.path, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+               **(env or {})}
+        return subprocess.run(["git", "--git-dir", self.path, *args], capture_output=True, text=text, env=env,
+                              input=input)
 
     def fetch(self):
         done = self.git("fetch", "-q", "--no-tags", self.origin, "+refs/heads/main:refs/heads/main")
@@ -194,6 +205,7 @@ class Broker:
         self.dir, self.cfg = os.path.abspath(state_dir), cfg
         self.lock = threading.Lock()
         self.mirror = Mirror(os.path.join(self.dir, "mirror.git"), cfg["origin"])
+        self.records = Records(self.dir, cfg, self.mirror)
         self.ledger_path = os.path.join(self.dir, "ledger.jsonl")
         self.rows = read_rows(self.ledger_path)
         self.reconcile()
@@ -253,6 +265,9 @@ class Broker:
         handler = {"submit": self.submit, "queue": self.queue, "acct": self.acct, "cancel": self.cancel}.get(verb)
         if handler is None:
             return {"rc": 1, "err": f"guard broker: no verb {verb!r}; it offers submit, queue, acct and cancel\n"}
+        return self.locked(handler, req)
+
+    def locked(self, handler, req):
         with self.lock:
             try:
                 return handler(req)
@@ -411,11 +426,7 @@ class Broker:
         card_sha, qcard = None, {}
         if not explore:
             q = f"runs/{run}/question.card"
-            path = os.path.join(tree.root, q)
-            if os.path.islink(path) or not os.path.isfile(path):
-                raise Refused(f"{q} is not in the project; commit it first")
-            with open(tree.inside(path), "rb") as f:
-                qtext = f.read()
+            qtext = self.records.approved(run)[0].encode()
             card_sha = hashlib.sha256(qtext).hexdigest()
             first = next((r["card_sha"] for r in self.rows if r["state"] == "intent" and r["run"] == run), None)
             if first and first != card_sha:
@@ -534,13 +545,6 @@ def expand_flags(args):
     return out
 
 
-def read_rows(path):
-    if not os.path.exists(path):
-        return []
-    with open(path) as f:
-        return [json.loads(line) for line in f if line.strip()]
-
-
 class Handler(socketserver.StreamRequestHandler):
     def handle(self):
         pid, uid, gid = struct.unpack("3i", self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
@@ -551,7 +555,7 @@ class Handler(socketserver.StreamRequestHandler):
             elif not isinstance(req, dict):
                 reply = {"rc": 1, "err": "guard broker: a request is one JSON object\n"}
             else:
-                reply = self.server.broker.handle(req)
+                reply = self.server.answer(req)
         except (ValueError, UnicodeDecodeError):
             reply = {"rc": 1, "err": "guard broker: a request is one JSON object\n"}
         except Exception as e:  # a bad request never takes the broker down; daemon.log keeps the trace
@@ -570,18 +574,42 @@ def serve(state_dir, config_path):
     broker = Broker(state_dir, cfg)
     sock_dir = os.path.join(broker.dir, "sock")
     os.makedirs(sock_dir, exist_ok=True)
-    os.chdir(sock_dir)  # a socket path is limited to about 108 bytes, so bind a relative name
-    if os.path.exists("scheduler.sock"):
-        os.unlink("scheduler.sock")
+    os.chdir(sock_dir)  # a socket path is limited to about 108 bytes, so bind relative names
+    names = ("scheduler.sock", "records.sock")
+    for name in names:
+        if os.path.exists(name):
+            os.unlink(name)
 
     def stop(signum, frame):
-        os.unlink(os.path.join(sock_dir, "scheduler.sock"))
+        for name in names:
+            if os.path.exists(os.path.join(sock_dir, name)):
+                os.unlink(os.path.join(sock_dir, name))
         os._exit(0)
 
     signal.signal(signal.SIGTERM, stop)
+    records = Server("records.sock", Handler)
+    records.answer = lambda req: broker.locked(broker.records.handle, req)
+    threading.Thread(target=records.serve_forever, daemon=True).start()
     with Server("scheduler.sock", Handler) as server:
-        server.broker = broker
+        server.answer = broker.handle
         server.serve_forever()
+
+
+def setup(state_dir):
+    """The broker's signing key, made once (guard broker setup); prints its public key."""
+    key = os.path.join(state_dir, "key")
+    os.makedirs(state_dir, exist_ok=True)
+    if not os.path.exists(key):
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "guard-broker", "-f", key], check=True)
+    with open(key + ".pub") as f:
+        print(f.read().strip())
+
+
+def outside_records(state_dir):
+    """The records as a person outside the sandbox reaches them, without starting a broker."""
+    with open(os.path.join(state_dir, "config.json")) as f:
+        cfg = json.load(f)
+    return Records(state_dir, cfg, Mirror(os.path.join(state_dir, "mirror.git"), cfg["origin"]))
 
 
 def approve(state_dir, what, run):
@@ -594,10 +622,23 @@ def approve(state_dir, what, run):
     print(f"approved one diagnostic job for {run} past the ripples gate and the reserve ({row['id']})")
 
 
+def main(argv):
+    if len(argv) == 3 and argv[1] == "setup":
+        return setup(argv[2])
+    if len(argv) == 4 and argv[1] == "serve":
+        return serve(argv[2], argv[3])
+    if len(argv) == 5 and argv[1:3] == ["approve", "reserve"]:
+        return approve(argv[3], argv[2], argv[4])
+    if len(argv) == 5 and argv[1:3] in (["approve", "card"], ["revoke", "card"]):
+        return (approve_card if argv[1] == "approve" else revoke_card)(outside_records(argv[3]), argv[4])
+    if len(argv) in (5, 7) and argv[1] == "records" and argv[2] in needs_you.MOVES \
+            and (len(argv) == 5 or argv[5] == "--note"):
+        try:
+            return needs_you.move(outside_records(argv[3]).queue, argv[2], argv[4], argv[6] if len(argv) == 7 else "")
+        except needs_you.Refused as e:
+            sys.exit(f"broker.py: {e}")
+    sys.exit(__doc__)
+
+
 if __name__ == "__main__":
-    if len(sys.argv) == 4 and sys.argv[1] == "serve":
-        serve(sys.argv[2], sys.argv[3])
-    elif len(sys.argv) == 5 and sys.argv[1] == "approve":
-        approve(sys.argv[3], sys.argv[2], sys.argv[4])
-    else:
-        sys.exit(__doc__)
+    main(sys.argv)

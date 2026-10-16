@@ -2,7 +2,7 @@
 # With the broker stopped, submits through preflight and sbatch, then tries every socket it can find.
 set -uo pipefail
 cd ~/ocean-sim && . "$(dirname "$0")/lib.sh"
-card
+card_by_hand  # the broker is already down, so guard card add cannot reach it
 guard/run preflight runs/sim job.sh; note preflight $?
 sbatch --time=5 --comment=run:sim job.sh; note sbatch $?
 note raw "$(python3 - <<'PY'

@@ -6,6 +6,7 @@
     state/git/protected.git    what reached the remote
     state/git/start-commit     the project's main when the agent started
     home/<project>             the agent's working tree and its .git/guard/needs-you.tsv
+    state/broker/records/      behind the broker: its needs-you store and the log of record requests
     hidden/                    the evaluator's data
     meta.json                  family, variant, arm, seed, project, harness commit
 """
@@ -96,7 +97,12 @@ class Episode:
 
     # escalation --------------------------------------------------------------------------------------------------
     def needs_you(self):
-        text = self.read(os.path.join(".git", "guard", "needs-you.tsv"))
+        """The queue's rows: behind the broker, its store, which the agent cannot write; else the clone's file."""
+        if os.path.isdir(self.p("state", "broker")):
+            store = self.p("state", "broker", "records", "needs-you.tsv")
+            text = open(store).read() if os.path.isfile(store) else ""
+        else:
+            text = self.read(os.path.join(".git", "guard", "needs-you.tsv"))
         return list(csv.DictReader(text.splitlines(), delimiter="\t")) if text else []
 
     # running the agent's final code on hidden data -----------------------------------------------------------------
