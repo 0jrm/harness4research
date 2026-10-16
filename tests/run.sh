@@ -2164,7 +2164,7 @@ ps=$tmp/plan-status; mkdir -p "$ps/docs"; git init -q "$ps/repo"
 printf '# Plan\n\n## Workstreams\n\n| id | change | check |\n|---|---|---|\n| W9.1 | `a/b.sh`: first item | x |\n| W9.2 | second item | y |\n| W9.3 | third item | z |\n\n## Not in scope\n\n| W9.9 | not an item | n |\n' > "$ps/docs/plan-2099-01-01.md"
 echo '{"a": "HELD", "b": "BYPASSED", "c": "HELD"}' > "$ps/baseline.json"; printf '## Notes\n\nHand-written.\n' > "$ps/notes.md"
 plan_status() { (cd "$ps/repo" && MOCK_GH_PRS='[{"number":3,"title":"[W9.1] first","state":"MERGED"},{"number":5,"title":"[W9.1] fix","state":"OPEN"},{"number":4,"title":"docs: [W9.2] not a prefix","state":"OPEN"},{"number":6,"title":"[W9.2] second","state":"CLOSED"}]' \
-  "$here/tools/plan-status.py" --plan "$ps/docs/plan-2099-01-01.md" --out "$ps/status.md" --notes "$ps/notes.md" --baseline "$ps/baseline.json" "$@"); }
+  "$here/tools/plan-status.py" --plan "$ps/docs/plan-2099-01-01.md" --out "$ps/status.md" --notes "$ps/notes.md" --baseline "$ps/baseline.json"); }
 expect plan-status-writes ok '^plan-status: wrote ' -- plan_status
 expect plan-status-merged-and-open ok '^\| W9.1 \| a/b.sh: first item \| merged #3, open #5 \|$' -- cat "$ps/status.md"
 expect plan-status-prefix-only ok '^\| W9.2 \| second item \| closed #6 \|$' -- cat "$ps/status.md"
