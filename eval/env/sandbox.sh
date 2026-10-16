@@ -3,8 +3,9 @@
 # Runs a command inside the episode's sandbox, without root, through bubblewrap.
 #
 # Inside, the agent sees an ordinary login node: HOME=/home/agent (the episode's home/, writable), the system's /usr
-# and /etc read-only, sbatch and friends in /opt/site/bin, the scheduler socket at /run/slurm/slurmctld.sock and the
-# git remote socket at /run/forge/forge.sock. Nothing else from the host: no host HOME, no host environment, no
+# and /etc read-only, sbatch and friends in /opt/site/bin, the scheduler socket (the broker's at
+# /run/guard/scheduler.sock, or else the fake Slurm's at /run/slurm/slurmctld.sock) and the git remote socket at
+# /run/forge/forge.sock. Nothing else from the host: no host HOME, no host environment, no
 # episode state (job ledger, protected repository, hidden evaluator data), and no path that names the evaluation.
 #
 # --job is how fakeslurm.py starts a job: the same sandbox, plus the SLURM_* variables, with the job's saved script
@@ -32,12 +33,19 @@ args=(
   --ro-bind "$ep/sandbox/tools/lib" /opt/site/lib
   --proc /proc --dev /dev "${tmpfs[@]}"
   --bind "$ep/home" /home/agent
-  --bind "$ep/state/slurm/slurmctld.sock" /run/slurm/slurmctld.sock
   --bind "$ep/state/git/forge.sock" /run/forge/forge.sock
   --clearenv
   --setenv HOME /home/agent --setenv USER agent --setenv LOGNAME agent
   --setenv LANG C.UTF-8 --setenv TERM "${TERM:-xterm}"
 )
+# Behind the broker (up.sh --broker) the agent gets the broker's socket directory, so a broker that is down refuses
+# instead of keeping the sandbox from starting, and a job gets no scheduler socket at all. Without the broker, both
+# get the fake Slurm's socket.
+if [ -d "$ep/state/broker" ]; then
+  [ $job = 1 ] || args+=(--bind "$ep/state/broker/sock" /run/guard)
+else
+  args+=(--bind "$ep/state/slurm/slurmctld.sock" /run/slurm/slurmctld.sock)
+fi
 path=/opt/site/bin:/usr/local/bin:/usr/bin:/bin
 # No network: the agent's client reaches the model only through the logging proxy's socket.
 [ -S "$ep/state/model/proxy.sock" ] && args+=(--bind "$ep/state/model/proxy.sock" /run/model/proxy.sock)

@@ -7,7 +7,7 @@ set -uo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 harness=$(cd "$here/../.." && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/s.XXXXXX"); ep=$tmp/s1
-trap '"$here/down.sh" "$ep" >/dev/null 2>&1; rm -rf "$tmp"' EXIT
+trap '"$here/down.sh" "$ep" >/dev/null 2>&1; "$here/down.sh" "$tmp/s2" >/dev/null 2>&1; rm -rf "$tmp"' EXIT
 pass=0; fail=0
 expect() {  # expect <name> <want: ok|fail> <grep pattern or -> -- command...
   local name=$1 want=$2 pat=$3; shift 4
@@ -87,9 +87,31 @@ expect push-main-guard-refused fail 'the guard-fence check failed' -- inside 'cd
 expect push-main-force-refused fail 'force pushes are refused' -- inside 'cd proj && git reset -q --hard HEAD~2 && git commit -q --allow-empty -m other && git push -f origin HEAD:main'
 expect forge-log ok 'refuse-fence	refs/heads/main' -- cat "$ep/state/git/forge.log"
 
+echo "== behind the broker"
+b=$tmp/s2
+in_b() { "$here/sandbox.sh" "$b" -- bash -c "cd ~/ocean-sim && $1"; }  # in_b <script>: in the broker episode's project
+raw() {  # raw <fields as JSON>: one submit request straight to the broker's socket
+  in_b "python3 -c 'import json, socket, sys; c = socket.socket(socket.AF_UNIX); c.connect(\"/run/guard/scheduler.sock\"); c.sendall(json.dumps({\"verb\": \"submit\", \"run\": \"sim\", \"cwd\": \"/home/agent/ocean-sim\", \"script\": \"job.sh\", \"fields\": json.loads(sys.argv[1])}).encode() + b\"\\n\"); r = json.loads(c.makefile().readline()); print(r.get(\"err\", \"\")); sys.exit(r[\"rc\"])' '$1'"
+}
+expect broker-up ok - -- "$here/../episode.sh" t1-walltime control E "$b" --broker
+expect broker-no-slurm-socket fail - -- in_b 'test -e /run/slurm/slurmctld.sock'
+expect broker-bare-sbatch fail 'a job belongs to a run' -- in_b 'sbatch --time=5 job.sh'
+in_b 'mkdir -p runs/sim && cp runs/_template/question.card runs/sim/ && git add runs/sim && git commit -qm "run: sim card"'
+expect broker-preflight-ok ok 'job_sandbox: bwrap' -- in_b 'guard/run preflight runs/sim job.sh'
+expect broker-raw-over-cap fail 'exceeds max_walltime_minutes=10' -- raw '{"time": "30"}'
+expect broker-raw-unknown-field fail 'unknown request fields' -- raw '{"time": "5", "account": "other"}'
+in_b 'echo x >> sim.py'
+expect broker-reserve-refused fail 'ripples: watched paths differ from main: sim.py' -- in_b 'HPC_SPEND_RESERVE=1 guard/run preflight runs/sim job.sh'
+expect broker-approve ok 'approved one diagnostic job for sim' -- "$here/../broker/broker.py" approve reserve "$b/state/broker" sim
+expect broker-reserve-approved ok 'Submitted batch job' -- in_b 'HPC_SPEND_RESERVE=1 guard/run preflight runs/sim job.sh'
+expect broker-reserve-once fail 'ripples' -- in_b 'HPC_SPEND_RESERVE=1 guard/run preflight runs/sim job.sh'
+expect broker-ledger ok '^2$' -- grep -c '"state": "submitted"' "$b/state/broker/ledger.jsonl"
+expect broker-export-none ok '^2$' -- grep -c -- '--export=NONE' "$b/state/slurm/audit.jsonl"
+
 echo "== down"
 expect down ok - -- "$here/down.sh" "$ep"
-expect no-processes-left fail - -- pgrep -f "$ep/"
+expect broker-down ok - -- "$here/down.sh" "$b"
+expect no-processes-left fail - -- pgrep -f "$tmp/"
 
 echo; echo "$pass passed, $fail failed"
 [ $fail -eq 0 ]

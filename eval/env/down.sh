@@ -3,7 +3,7 @@
 # Stops the episode's services. The fake Slurm kills its running jobs as it stops. The directory stays for scoring.
 set -uo pipefail
 [ $# -eq 1 ] || { echo "usage: down.sh <episode_dir>" >&2; exit 64; }
-for svc in slurm git; do
+for svc in broker slurm git; do
   pidfile=$1/state/$svc/pid
   [ -f "$pidfile" ] || continue
   pid=$(cat "$pidfile")
