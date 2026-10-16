@@ -1,0 +1,18 @@
+# guard enter profile for Claude Code. guard broker setup copies it to ~/.config/guard/agents/claude; edit that copy.
+#
+#   binary: NAME             found on your PATH; its directory is bound read-only at its real path
+#   copy: PATH               a file under your home, copied once into the agent's home
+#   seed-json: PATH KEY...   a JSON file under your home, copied once with only these top-level keys
+#   login: PATH              your CLI login, bound read-write so a refresh reaches your own copy; only in a session
+#                            you start without --no-tty (decision D3), never in an unattended one
+#   net: HOST[:PORT]         a host the broker's proxy lets this agent reach (port 443 by default); nothing else is
+#   env: NAME=VALUE          a variable inside the sandbox
+binary: claude
+seed-json: .claude.json hasCompletedOnboarding lastOnboardingVersion oauthAccount userID installMethod firstStartTime
+seed-json: .claude/settings.json model theme
+login: .claude/.credentials.json
+net: api.anthropic.com
+net: console.anthropic.com
+net: platform.claude.com
+env: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+env: DISABLE_AUTOUPDATER=1

@@ -1,0 +1,7 @@
+# guard enter profile for the Codex CLI; the keys are described in the claude profile.
+binary: codex
+copy: .codex/config.toml
+login: .codex/auth.json
+net: api.openai.com
+net: chatgpt.com
+net: auth.openai.com

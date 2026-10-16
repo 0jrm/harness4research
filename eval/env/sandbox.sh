@@ -1,87 +1,71 @@
 #!/usr/bin/env bash
 # usage: eval/env/sandbox.sh <episode_dir> [--job] -- <command...>
-# Runs a command inside the episode's sandbox, without root, through bubblewrap.
+# Runs a command inside the episode's sandbox through lib/box.sh, the launcher guard enter uses, laid out as an
+# episode: this file only says what the episode binds where.
 #
 # Inside, the agent sees an ordinary login node: HOME=/home/agent (the episode's home/, writable), the system's /usr
 # and /etc read-only, sbatch and friends in /opt/site/bin, the scheduler socket (the broker's at
 # /run/guard/scheduler.sock, or else the fake Slurm's at /run/slurm/slurmctld.sock) and the git remote socket at
 # /run/forge/forge.sock. Nothing else from the host: no host HOME, no host environment, no
 # episode state (job ledger, protected repository, hidden evaluator data), and no path that names the evaluation.
+# Before the agent's command, lib/box.sh's pre-flight probe checks those walls from inside and starts nothing if one
+# fails.
 #
 # --job is how fakeslurm.py starts a job: the same sandbox, plus the SLURM_* variables, with the job's saved script
-# bound read-only at /run/slurm/job.sh.
+# bound read-only at /run/slurm/job.sh, and no probe.
 set -euo pipefail
 [ $# -ge 3 ] || { echo "usage: sandbox.sh <episode_dir> [--job] -- <command...>" >&2; exit 64; }
 ep=$(cd "$1" && pwd); shift
 job=0; [ "$1" = --job ] && { job=1; shift; }
 [ "$1" = -- ] || { echo "sandbox.sh: expected -- before the command" >&2; exit 64; }
 shift
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-# /tmp and /run are in memory; cap them at 1 GiB each where bwrap can (0.10 and later). They mount before the
-# sockets bound under /run.
-tmpfs=(--tmpfs /tmp --tmpfs /run)
-bwrap --help 2>&1 | grep -q -- '--size' && tmpfs=(--size $((1 << 30)) --tmpfs /tmp --size $((1 << 30)) --tmpfs /run)
-args=(
-  --unshare-all --die-with-parent --new-session
-  --hostname login1
-  --ro-bind /usr /usr
-  --symlink usr/bin /bin --symlink usr/sbin /sbin --symlink usr/lib /lib
-  --ro-bind /etc /etc
-  --ro-bind "$ep/sandbox/etc/passwd" /etc/passwd
-  --ro-bind "$ep/sandbox/etc/group" /etc/group
-  --ro-bind "$ep/sandbox/tools/bin" /opt/site/bin
-  --ro-bind "$ep/sandbox/tools/lib" /opt/site/lib
-  --proc /proc --dev /dev "${tmpfs[@]}"
-  --bind "$ep/home" /home/agent
-  --bind "$ep/state/git/forge.sock" /run/forge/forge.sock
-  --clearenv
-  --setenv HOME /home/agent --setenv USER agent --setenv LOGNAME agent
-  --setenv LANG C.UTF-8 --setenv TERM "${TERM:-xterm}"
+box=(
+  --no-tty --hostname login1 --user agent
+  --ro "$ep/sandbox/etc/passwd" /etc/passwd
+  --ro "$ep/sandbox/etc/group" /etc/group
+  --ro "$ep/sandbox/tools/bin" /opt/site/bin
+  --ro "$ep/sandbox/tools/lib" /opt/site/lib
+  --home "$ep/home" /home/agent
+  --sock "$ep/state/git/forge.sock" /run/forge/forge.sock
 )
 # Behind the broker (up.sh --broker) the agent gets the broker's socket directory, so a broker that is down refuses
 # instead of keeping the sandbox from starting, and a job gets no scheduler socket at all. Without the broker, both
 # get the fake Slurm's socket.
 if [ -d "$ep/state/broker" ]; then
-  [ $job = 1 ] || args+=(--bind "$ep/state/broker/sock" /run/guard)
+  [ $job = 1 ] || box+=(--sock-dir "$ep/state/broker/sock")
 else
-  args+=(--bind "$ep/state/slurm/slurmctld.sock" /run/slurm/slurmctld.sock)
+  box+=(--sock "$ep/state/slurm/slurmctld.sock" /run/slurm/slurmctld.sock)
 fi
-path=/opt/site/bin:/usr/local/bin:/usr/bin:/bin
 # No network: the agent's client reaches the model only through the logging proxy's socket.
-[ -S "$ep/state/model/proxy.sock" ] && args+=(--bind "$ep/state/model/proxy.sock" /run/model/proxy.sock)
-[ -e /lib64 ] && args+=(--symlink usr/lib64 /lib64)
-[ -d "$ep/sandbox/harness" ] && args+=(--ro-bind "$ep/sandbox/harness" /opt/harness4research)
-# The site's scientific Python (site-python.sh), first on PATH, as a cluster module would put it.
-site_python=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.site-venv
-[ -d "$site_python" ] && { args+=(--ro-bind "$site_python" /opt/site/python); path=/opt/site/python/bin:$path; }
+[ -S "$ep/state/model/proxy.sock" ] && box+=(--sock "$ep/state/model/proxy.sock" /run/model/proxy.sock)
+[ -d "$ep/sandbox/harness" ] && box+=(--ro "$ep/sandbox/harness" /opt/harness4research)
 # Extra read-only binds, one "<host path> <sandbox path>" per line, such as the agent client's binary, and the
-# directories they add to PATH, one per line, first listed first.
+# directories they add to PATH, one per line, first listed first; then the site's scientific Python
+# (site-python.sh), as a cluster module would put it, then the site's tools.
 if [ -f "$ep/sandbox/binds" ]; then
-  while read -r src dst; do [ -n "$src" ] && args+=(--ro-bind "$src" "$dst"); done < "$ep/sandbox/binds"
+  while read -r src dst; do [ -n "$src" ] && box+=(--ro "$src" "$dst"); done < "$ep/sandbox/binds"
 fi
 if [ -f "$ep/sandbox/path" ]; then
-  extra=$(paste -sd: "$ep/sandbox/path")
-  [ -z "$extra" ] || path=$extra:$path
+  while read -r dir; do [ -n "$dir" ] && box+=(--path "$dir"); done < "$ep/sandbox/path"
 fi
-args+=(--setenv PATH "$path")
+site_python=$here/.site-venv
+[ -d "$site_python" ] && box+=(--ro "$site_python" /opt/site/python --path /opt/site/python/bin)
+box+=(--path /opt/site/bin)
 # Extra variables for the agent's own client, such as the model endpoint, listed one NAME=value per line.
 if [ -f "$ep/sandbox/env" ]; then
-  while IFS='=' read -r name value; do
-    [ -n "$name" ] && args+=(--setenv "$name" "$value")
-  done < "$ep/sandbox/env"
+  while IFS= read -r line; do [ -n "${line%%=*}" ] && box+=(--env "$line"); done < "$ep/sandbox/env"
 fi
 
 if [ $job = 1 ]; then
-  args+=(--ro-bind "$SLURMD_SCRIPT" /run/slurm/job.sh)
+  box+=(--ro "$SLURMD_SCRIPT" /run/slurm/job.sh)
   while IFS='=' read -r name value; do
-    case $name in SLURM_*|SLURMD_*) args+=(--setenv "$name" "$value") ;; esac
+    case $name in SLURM_*|SLURMD_*) box+=(--env "$name=$value") ;; esac
   done < <(env)
-  args+=(--setenv SLURMD_SCRIPT /run/slurm/job.sh --chdir "$SLURMD_CWD")
+  box+=(--env SLURMD_SCRIPT=/run/slurm/job.sh --chdir "$SLURMD_CWD")
   set -- bash /opt/site/lib/jobwrap.sh "$@"
 else
-  args+=(--chdir /home/agent)
+  box+=(--chdir /home/agent --probe --hide "$ep" --hide "$HOME")
 fi
-# bwrap stays in the sandbox as PID 1, so its arguments, which name host paths, go through a file descriptor
-# instead of its command line.
-# Per-process caps, inherited by everything inside: 4 GiB per file, 32 GiB of address space.
-exec prlimit --fsize=$((4 << 30)) --as=$((32 << 30)) bwrap --args 3 -- "$@" 3< <(printf '%s\0' "${args[@]}")
+exec "$here/../../lib/box.sh" "${box[@]}" -- "$@"

