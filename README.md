@@ -9,7 +9,7 @@ It is for research groups whose agents write code, submit jobs, and report resul
 - A Slurm cluster. `guard/run preflight` submits through `sbatch`.
 - A GPU box without a scheduler. `guard/run launch` runs each job under a supervisor that enforces its limits.
 - A cloud instance, such as one on AWS, works as a GPU box without a scheduler. This is not tested yet.
-- Another HPC scheduler, such as PBS or Flux. Not supported yet. Preflight and ripples need a small port in `guard/bin/`.
+- Another HPC scheduler, such as PBS or Flux. Not supported yet. Preflight and ripples need a small port in `lib/guard/`.
 
 ## Try it in two minutes
 

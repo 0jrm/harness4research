@@ -17,7 +17,7 @@ On a launch host only two things ever signal a job: the supervisor that launch s
 
 ## Why the scripts run from the protected branch
 
-`guard/run preflight` does not run `guard/bin/preflight.sh` from your working tree. It runs the copy on the default branch, read with `git show`. An edit to the script, the budget, or the watch list on a branch has no effect by itself, and the next preflight or ripples call reports the edit.
+`guard/run preflight` does not run a script from your working tree. It reads the `harness:` pin from the default branch's budget card and runs `lib/guard/preflight.sh` from the harness at that pin, read with `git show`, or from the default branch's `guard/harness-<pin>.sh` on an offline host. An edit to the script, the budget, or the watch list on a branch has no effect by itself, and the next preflight or ripples call reports the edit.
 
 This is a speed bump, not a wall. The agent controls its own clone and environment, so it can run any copy it likes:
 

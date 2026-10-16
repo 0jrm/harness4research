@@ -38,4 +38,4 @@ Runs named `explore-*` need no question card. Preflight caps them at one node, o
 - An agent with your credentials can bypass the speed bumps. The walls need the steps in [enforcement.md](enforcement.md).
 - A reviewing model shares blind spots with the model it reviews. Your spot checks still matter.
 - When agents merge their own pull requests, the review record is a local file an agent could forge. The ruleset, the required checks, and an agent token without admin rights are the walls. [autonomy.md](autonomy.md) lists what `guard merge` checks.
-- The scripts target Slurm and GitHub. PBS and Flux need small ports in `guard/bin/`.
+- The scripts target Slurm and GitHub. PBS and Flux need small ports in `lib/guard/`.
