@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The broker's scheduler verbs and records: design increments 1 and 2 of docs/design-sandboxed-agents.md, in the
-evaluation.
+"""The broker's scheduler verbs, records and forge: design increments 1 to 3 of docs/design-sandboxed-agents.md, in
+the evaluation.
 
     broker.py setup <state_dir>                         # once: the broker's signing key (guard broker setup)
     broker.py serve <state_dir> <config.json>
@@ -8,6 +8,9 @@ evaluation.
     broker.py approve card <state_dir> <run_id>         # the owner signs card/<run_id> (git tag -s)
     broker.py revoke card <state_dir> <run_id>          # the owner deletes card/<run_id>; a revoked row
     broker.py records ack|done|dismiss <state_dir> <id> [--note N]   # only a person closes a needs-you item
+    broker.py review <state_dir> <pr>                   # guard review, the reviewer in its own sandbox (forge.py)
+    broker.py merge <state_dir> <pr>                    # guard merge: only a verdict the broker recorded merges
+    broker.py ship <state_dir>                          # guard ship: review, then merge what is approved
 
 It runs outside the agent's sandbox, which sees only its socket, and it is the only client of the scheduler. The
 sandbox's sbatch, squeue, sacct and scancel are eval/broker/client.py, which sends one request per call:
@@ -33,12 +36,18 @@ card/<run_id> on origin verifies against the owner's and the broker's keys, and 
 (decision D2; records.py).
 
 The records socket (records.py) offers add, list, show and find for the needs-you queue, execution.tsv rows and
-question cards, and nothing that closes or approves.
+question cards, and nothing that closes or approves. The gh socket (forge.py) is the sandbox's gh: pull requests
+kept in the broker's state, guard pr open's brief among them, and no verb that merges; review, merge and ship run
+from broker.py outside the sandbox. The broker holds the agent's GitHub token and the model key (in the evaluation,
+canaries from gh_token_file and model_key_file, in its environment as GH_TOKEN and ANTHROPIC_API_KEY), and no request
+carries either into the sandbox or the reviewer's.
 
 config.json keys: session, project (the project's path inside the sandbox), paths ([[inside, outside], ...]), origin
 (the repository main is fetched from), slurm_bin (the scheduler's clients, by absolute path), slurm_env (their
 environment), user, compute_bwrap (true when every compute node has bwrap), signing_key (the broker's private key),
-owner_key (the owner's, for approve card in the evaluation), allowed_signers (the two public keys)."""
+owner_key (the owner's, for approve card in the evaluation), allowed_signers (the two public keys), gh_token_file and
+model_key_file (the credentials the broker holds), reviewer ({cmd, model_socket, passwd, binds, path, env, timeout}:
+the reviewer's command and what its sandbox binds; review refuses without cmd)."""
 import datetime as dt
 import fnmatch
 import hashlib
@@ -56,6 +65,7 @@ import threading
 import time
 import traceback
 
+from forge import Forge
 from records import Records, Refused, approve_card, needs_you, read_rows, revoke_card
 
 FIELDS = ("time", "nodes", "tasks", "cpus_per_task", "mem", "gpus", "array", "dependency", "partition", "output")
@@ -206,6 +216,7 @@ class Broker:
         self.lock = threading.Lock()
         self.mirror = Mirror(os.path.join(self.dir, "mirror.git"), cfg["origin"])
         self.records = Records(self.dir, cfg, self.mirror)
+        self.forge = Forge(self.dir, cfg, self.mirror, self.records)
         self.ledger_path = os.path.join(self.dir, "ledger.jsonl")
         self.rows = read_rows(self.ledger_path)
         self.reconcile()
@@ -571,11 +582,15 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 def serve(state_dir, config_path):
     with open(config_path) as f:
         cfg = json.load(f)
+    for key, name in (("gh_token_file", "GH_TOKEN"), ("model_key_file", "ANTHROPIC_API_KEY")):
+        if cfg.get(key):  # held here, as a real broker holds them; every subprocess gets an explicit environment
+            with open(cfg[key]) as f:
+                os.environ[name] = f.read().strip()
     broker = Broker(state_dir, cfg)
     sock_dir = os.path.join(broker.dir, "sock")
     os.makedirs(sock_dir, exist_ok=True)
     os.chdir(sock_dir)  # a socket path is limited to about 108 bytes, so bind relative names
-    names = ("scheduler.sock", "records.sock")
+    names = ("scheduler.sock", "records.sock", "gh.sock")
     for name in names:
         if os.path.exists(name):
             os.unlink(name)
@@ -590,6 +605,9 @@ def serve(state_dir, config_path):
     records = Server("records.sock", Handler)
     records.answer = lambda req: broker.locked(broker.records.handle, req)
     threading.Thread(target=records.serve_forever, daemon=True).start()
+    gh = Server("gh.sock", Handler)
+    gh.answer = lambda req: broker.locked(broker.forge.handle, req)
+    threading.Thread(target=gh.serve_forever, daemon=True).start()
     with Server("scheduler.sock", Handler) as server:
         server.answer = broker.handle
         server.serve_forever()
@@ -612,6 +630,11 @@ def outside_records(state_dir):
     return Records(state_dir, cfg, Mirror(os.path.join(state_dir, "mirror.git"), cfg["origin"]))
 
 
+def outside_forge(state_dir):
+    records = outside_records(state_dir)
+    return Forge(state_dir, records.cfg, records.mirror, records)
+
+
 def approve(state_dir, what, run):
     if what != "reserve" or not RUN.match(run):
         sys.exit("usage: broker.py approve reserve <state_dir> <run_id>")
@@ -631,6 +654,13 @@ def main(argv):
         return approve(argv[3], argv[2], argv[4])
     if len(argv) == 5 and argv[1:3] in (["approve", "card"], ["revoke", "card"]):
         return (approve_card if argv[1] == "approve" else revoke_card)(outside_records(argv[3]), argv[4])
+    if len(argv) == 4 and argv[1] in ("review", "merge") or len(argv) == 3 and argv[1] == "ship":
+        forge = outside_forge(argv[2])
+        try:
+            sys.exit(forge.ship() if argv[1] == "ship" else getattr(forge, argv[1])(argv[3]))
+        except Refused as e:
+            print(f"guard {argv[1]}: refused: {e}", file=sys.stderr)
+            sys.exit(2)
     if len(argv) in (5, 7) and argv[1] == "records" and argv[2] in needs_you.MOVES \
             and (len(argv) == 5 or argv[5] == "--note"):
         try:

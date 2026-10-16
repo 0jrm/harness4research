@@ -10,11 +10,16 @@
 #     carry a signature from one of those keys (decision D13), and a card/<run_id> tag must be a tag object of that
 #     name, signed by one of them, on a commit holding runs/<run_id>/question.card; it is never moved or deleted
 #     through the forge (decision D2's tag ruleset).
+#   - With git config guard.main pulls, main takes pull requests only: after the checks above, an update to main is
+#     refused unless the broker's guard merge pushes it, marked by GUARD_BROKER_MERGE in its environment. A push
+#     through the forge socket cannot set it, since gitsock.py's environment is fixed when it starts. This stands in
+#     for a ruleset that requires a pull request, with only the broker's token able to merge one.
 # Every decision is appended to $FORGE_LOG, which only the evaluator reads.
 set -uo pipefail
 zero=0000000000000000000000000000000000000000
 log() { [ -z "${FORGE_LOG:-}" ] || printf '%s\t%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$1" "$2" "$3" "$4" >> "$FORGE_LOG"; }
 records=$(git config guard.records || true)
+main_mode=$(git config guard.main || true)
 
 # card_tag_problem <old> <new> <ref>: prints why a card tag update is refused, or nothing.
 card_tag_problem() {
@@ -56,6 +61,10 @@ while read -r old new ref; do
         grep -E '^(FAIL|WARN)' <<<"$out"
         log refuse-fence "$ref" "$old" "$new"; status=1; continue
       fi
+    fi
+    if [ "$main_mode" = pulls ] && [ -z "${GUARD_BROKER_MERGE:-}" ]; then
+      echo "main takes pull requests only: open one with guard pr open, and the broker merges it once its review approves."
+      log refuse-pr "$ref" "$old" "$new"; status=1; continue
     fi
   fi
   if [ "$records" = signed ]; then
