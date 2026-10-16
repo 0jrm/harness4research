@@ -19,9 +19,9 @@ guard config set merge_policy semi-manual
 
 The [review-and-merge skill](../skills/review-and-merge/SKILL.md) tells the agent these steps:
 
-1. Push the branch.
-2. Write a brief at `.git/guard/briefs/<branch>.md`, with `/` in the branch name replaced by `-`.
-3. Open the pull request with `gh pr create`, described in its own words.
+1. Commit the work on a branch.
+2. Write the user's request verbatim, its plan, and a description in its own words to files.
+3. Run `guard pr open`. It writes the brief at `.git/guard/briefs/<branch>.md`, with `/` in the branch name replaced by `-`, pushes the branch, and opens the pull request with the description. It refuses a description that repeats a line of the request.
 4. Run `guard ship`. It reviews and merges the open pull requests once the batch is due, and otherwise says when it is due.
 
 For urgent work, the agent runs `guard review <pr>` and, on approve, `guard merge <pr>` instead. The agent never runs `gh pr merge` itself.
