@@ -154,7 +154,8 @@ class Records:
             same = needs_you.find(items, kind, title, ("open", "acked") if update else ("open",))
             if same:
                 made["id"] = same.id
-                if update and not same.source.startswith(f"sandbox {self.cfg['session']}"):
+                mine = f"sandbox {self.cfg['session']}"
+                if update and same.source != mine and not same.source.startswith(mine + ": "):
                     raise Refused(f"{same.id} was queued by {same.source or 'a person'}, so only they change it")
                 fresh = same._replace(ts=now(), state="open", **fields)
                 unchanged = fresh._replace(ts=same.ts, state=same.state, note=same.note) == same
