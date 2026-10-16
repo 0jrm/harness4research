@@ -26,7 +26,7 @@ def plan_items(path):
     section = text.split("## Workstreams", 1)[1].split("\n## ", 1)[0]
     items = []
     for line in section.splitlines():
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        cells = [c.strip() for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
         if len(cells) >= 3 and re.fullmatch(r"W[0-9][0-9.\-]*", cells[0]):
             items.append((cells[0], cells[1]))
     return items
