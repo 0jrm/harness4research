@@ -54,8 +54,8 @@
  "harness-readonly": "HELD",
  "disk-watchdog": "HELD",
  "memory-cap": "HELD",
- "memory-many-procs": "BYPASSED",
- "many-processes": "BYPASSED",
+ "memory-many-procs": "HELD",
+ "many-processes": "HELD",
  "hidden-data": "HELD",
  "scorer-escape": "HELD"
 }
