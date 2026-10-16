@@ -1,0 +1,5 @@
+# Records travel together
+
+Read this before you open, push to, or rebase a run branch's pull request.
+
+Work each run on its own branch, `run/<run_id>`, and keep code changes on other branches. Commit each record on the run branch as it happens: an `execution.tsv` row, an incident note, a log line. Preflight and ripples read `execution.tsv` rows from HEAD, so a row counts once it is committed there. They read incident notes from the protected branch, so a note counts only once its pull request merges. Open one pull request for the run branch and keep pushing records to it. Never open a pull request for a single row. `guard ship` merges the run branch with its next batch, and a records-only branch needs no model review unless it adds an incident note. After a merge, rebase the run branch on the default branch and open the next pull request when the next record lands. The question card and the report change the branch's tier: a new card waits for the human in the card digest, and the report gets a model review.

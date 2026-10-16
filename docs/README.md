@@ -1,0 +1,26 @@
+# Docs
+
+One line per page. None is required reading: open a page when a task names it.
+
+- [plan-2026-10-16.md](plan-2026-10-16.md): the current plan, items W0 to W5
+- [decisions-2026-10-16.md](decisions-2026-10-16.md): the owner's decisions the plan cites, D1 to D13
+- [status.md](status.md): where the plan's items stand, what runs, the owner's queue
+- [rules.md](rules.md): standing rules for agents working on this repository
+- [BUDGET](BUDGET): word budgets for the pages agents read, checked by `tests/budget.sh`
+- [why.md](why.md): why the harness exists and what it costs
+- [enforcement.md](enforcement.md): how each rule is enforced, and how strongly
+- [enforcement-audit.md](enforcement-audit.md): the scripted attacks on each rule, and which hold
+- [enforceable.md](enforceable.md): the GitHub ruleset and token setup that make the fence a wall
+- [design-sandboxed-agents.md](design-sandboxed-agents.md): the design for sandboxed agents and the broker
+- [autonomy.md](autonomy.md): how agents review and merge their own work
+- [compatibility.md](compatibility.md): what stays stable across harness releases and `guard init --update`
+- [releases/](releases/): release notes, one page per tag
+- [atlas.md](atlas.md): `guard atlas`, the read-only page of a guarded project
+- [atlas-json.md](atlas-json.md): the data contract behind the atlas
+- [evaluation.md](evaluation.md): the proposal to measure whether the harness helps local agents
+- [evaluation-serving.md](evaluation-serving.md): the brief for whoever serves the evaluation's models
+- [cluster-subaccount-request.md](cluster-subaccount-request.md): a request to send a cluster for a capped sub-account
+- [prompts.md](prompts.md): self-contained prompts to paste into an agent
+- [roadmap.md](roadmap.md): the older roadmap from field feedback
+- [live-tests/](live-tests/): live test scripts for two real projects
+- [archive/](archive/): the plan and status before 2026-10-16

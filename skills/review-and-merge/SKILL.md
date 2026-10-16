@@ -12,7 +12,7 @@ description: >-
 
 # Review and merge
 
-The agent that wrote a change does not review it and does not merge it by hand. `guard ship` reviews and merges the open pull requests together, a few times a day. It approves pull requests that change only run records without a model, reviews small ones several to a session, and runs `guard review` on large ones. Each model review judges the diff against the user's own words, in a fresh reviewer session that never saw the implementer's reasoning. It merges only when the merge policy, the credentials, the branch ruleset, the checks and the review all allow it. A new question card or a change to `guard/` always goes to a human as a 🩺 item, and so does any merge the gate refuses. A run's records ride one pull request from its `run/<run_id>` branch, as the safe-autonomous-hpc-science skill says, so never open a pull request for a single record.
+The agent that wrote a change neither reviews nor merges it by hand. `guard ship` reviews and merges the open pull requests together, a few times a day: it approves record-only ones without a model, reviews small ones several to a session, and runs `guard review` on large ones. Each model review judges the diff against the user's own words in a fresh session that never saw the implementer's reasoning, and a merge happens only when the merge policy, credentials, ruleset, checks and review all allow it. A new question card or a change to `guard/` always goes to a human as a 🩺 item, and so does any merge the gate refuses. A run's records ride one pull request from its `run/<run_id>` branch; never open one for a single record.
 
 ## Steps
 
@@ -40,12 +40,12 @@ The agent that wrote a change does not review it and does not merge it by hand. 
    <the command that runs the tests>
    ```
 
-   Copy the request out of the user's messages character for character. Do not paraphrase, summarize, translate, or fix its typos. If the request grew over several messages, copy each message that shaped it, in order, including corrections. The reviewer judges the diff against this section. It reads your plan as claims to check, so the plan does not need to persuade anyone.
-3. Open the pull request with `gh pr create`. Describe the change in your own words. Never put the brief or the user's words in the title, the body, or a comment. They stay on this machine.
+   Copy the request out of the user's messages character for character: no paraphrase, summary, translation, or typo fixes. If it grew over several messages, copy each one that shaped it, in order, corrections included. The reviewer judges the diff against this section and reads your plan as claims to check, so the plan need not persuade.
+3. Open the pull request with `gh pr create`, describing the change in your own words. The brief and the user's words stay on this machine: never in the title, body or a comment.
 4. Run `guard ship`.
-   - When the batch is not due, it says which pull requests wait and when the batch runs. Tell the user, and stop. The merge can wait up to a day.
-   - When the batch runs, it ends with a summary: the count per tier, each verdict, and each merged pull request with its merge commit. Relay the summary and every 🩺 block it printed, then stop.
-   - Exit 2 means it refused to start, or that no reviewer could run (`reviewer unavailable:`). Do what its message says, then rerun. An unavailable reviewer is this host's problem, and `guard doctor` names it; tell the user.
+   - When the batch is not due, it says which pull requests wait and when it runs. Tell the user and stop; the merge can wait up to a day.
+   - When it runs, it ends with a summary: the count per tier, each verdict, each merge commit. Relay the summary and every 🩺 block it printed, then stop.
+   - Exit 2 means it refused to start, or no reviewer could run (`reviewer unavailable:`, this host's problem, which `guard doctor` names; tell the user). Do what its message says, then rerun.
    - Run `guard ship --now` only when the user asks for the batch now.
 
 ## Urgent work
@@ -55,10 +55,10 @@ When the user says the change cannot wait for the batch, review and merge its on
 1. Run `guard review <pr>`.
    - Exit 0 is approve. Pull the branch first if the reviewer pushed fixes, then go to step 2.
    - Exit 1 is `changes` or `escalate`. `guard review` queued an item for the human. Relay its block and stop. If the user then asks you to address the review, fix it, push, and run `guard review` again.
-   - Exit 2 means it refused to start, or that no reviewer could run. Do what its message says, such as writing the brief, then rerun. A `reviewer unavailable:` message is a problem on this host, such as no network, no login, or too little memory, and `guard doctor` names it. Tell the user; it is not a verdict on the pull request.
-2. Run `guard merge <pr>`.
+   - Exit 2 means it refused to start, or no reviewer could run. Do what its message says, such as writing the brief, then rerun. `reviewer unavailable:` is this host's problem (no network, no login, too little memory), which `guard doctor` names. Tell the user; it is not a verdict.
+2. Once `gh pr checks <pr>` shows every check finished, run `guard merge <pr>`. Run while a check is pending, it refuses and queues the merge for the human.
    - Exit 0 means it merged.
-   - Exit 2 means it refused and queued the merge for a human. Relay the block and stop. Under `merge_policy: semi-manual` this is the expected end. The review is done, and the merge belongs to the human.
+   - Exit 2 means it refused and queued the merge for a human. Relay the block and stop. Under `merge_policy: semi-manual` this is the expected end: the merge belongs to the human.
    - Exit 1 means GitHub refused the merge, for example because the head moved. Relay the block and stop.
 
 ## Relaying a 🩺 block
@@ -67,8 +67,8 @@ Put each block that `guard ship`, `guard review` or `guard merge` printed at the
 
 ## Never do these
 
-- Run `gh pr merge` yourself, with or without `--admin`. `guard ship` and `guard merge` are the only ways an agent merges. The `gh pr merge` commands in a 🩺 block are the human's to run.
+- Run `gh pr merge` yourself, with or without `--admin`. An agent merges only through `guard ship` and `guard merge`; the `gh pr merge` commands in a 🩺 block are the human's.
 - Change `merge_policy`, the reviewer or batch settings in `guard config`, a ruleset, a token, or anything under `guard/` to get a merge through.
 - Ack, finish, or dismiss a needs-you item. The human does that.
 - Edit the brief after a review to change its verdict.
-- Push to the branch while `guard review` or `guard ship` runs. They push the reviewer's fixes themselves.
+- Push to the branch while `guard review` or `guard ship` runs. They push the reviewer's fixes.
