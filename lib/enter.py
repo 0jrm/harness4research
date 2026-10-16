@@ -7,14 +7,17 @@ is how you look at a tree an agent wrote (decision D8): never open one outside a
 
   --agent NAME   the profile to use; by default the command's name (claude, codex, cursor-agent), and none for any
                  other command. A profile is ~/.config/guard/agents/NAME, else the harness's templates/agents/NAME.
-  --no-tty       an unattended session, as runhub starts one: a new terminal session, and no CLI login bound (D3)
+  --no-tty       an unattended session, as runhub starts one: a new terminal session, no CLI login bound, and the
+                 model through the broker's gateway, which holds the key (D3)
   --print        print lib/box.sh's arguments instead of starting anything
 
 The agent's home is ${XDG_DATA_HOME:-~/.local/share}/guard/homes/NAME, seeded once from the profile's copy: and
 seed-json: files. The broker (guard broker) starts if it is not running; the session's sockets are
 /tmp/guard-$UID/s-<session>/, at /run/guard inside: sbatch, squeue, sacct and scancel reach the scheduler only through
-it, and a profile's net: hosts only through its proxy. The pre-flight probe checks the walls from inside first, and
-nothing starts if one fails. Exit: the command's, 2 when guard enter refuses, 64 on a usage error, 70 when the probe
+it; the hosts on the session's allowlist (net_allow: in guard/budget.card on main, D4, and the profile's net:) only
+through its proxy, at 127.0.0.1:3128 inside; and, in an unattended session whose profile names model: NAME URL_VAR
+[KEY_VAR], the model through its gateway at URL_VAR=http://127.0.0.1:3129, with KEY_VAR a placeholder the gateway
+replaces. The pre-flight probe checks the walls from inside first, and nothing starts if one fails. Exit: the command's, 2 when guard enter refuses, 64 on a usage error, 70 when the probe
 fails."""
 import json
 import os
@@ -29,6 +32,8 @@ sys.path.insert(0, HERE)
 import broker_host as host  # noqa: E402
 
 RELAY_PORT = 3128
+MODEL_PORT = 3129
+PLACEHOLDER = "guard-gateway-adds-the-key"
 STAND_INS = ("sbatch", "squeue", "sacct", "scancel")
 
 
@@ -72,7 +77,7 @@ def profile(name):
                     if not line:
                         continue
                     key, sep, value = line.partition(":")
-                    if not sep or key not in ("binary", "copy", "seed-json", "login", "net", "env") or not value.strip():
+                    if not sep or key not in ("binary", "copy", "seed-json", "login", "net", "env", "model") or not value.strip():
                         refuse(f"{path}:{n}: not a profile line: {line}")
                     entries.append((key, value.strip()))
             return path, entries
@@ -201,15 +206,24 @@ def main(argv):
     os.makedirs(agent_home, mode=0o700, exist_ok=True)
     seed(home, agent_home, entries)
     net = [v for k, v in entries if k == "net"]
+    model = [v.split() for k, v in entries if k == "model"][:1] if no_tty else []
+    if model and not 2 <= len(model[0]) <= 3:
+        refuse(f"{path}: model: takes NAME URL_VAR [KEY_VAR], not {' '.join(model[0])}")
     if not show:
         how = host.start()
         if how != "running":
             print(f"guard enter: started the broker ({how}); guard broker status shows it", file=sys.stderr)
-        opened = host.ask({"verb": "open", "project": project, "agent": name, "net": net, "pid": os.getpid()})
+        opened = host.ask({"verb": "open", "project": project, "agent": name, "net": net, "pid": os.getpid(),
+                           "model": model[0][0] if model else None})
         if not opened or opened.get("rc"):
             refuse(f"the broker did not open a session ({(opened or {}).get('err', 'no answer').strip()}); nothing "
                    "started")
-        sid, sock_dir, record = opened["session"], opened["dir"], opened["record"]
+        sid, sock_dir, net = opened["session"], opened["dir"], opened["net"]
+        record = opened["record"]
+        for note in opened.get("notes") or []:
+            print(f"guard enter: warning: {note}", file=sys.stderr)
+        if not opened.get("model"):
+            model = []
     else:
         sid, sock_dir, record = "print", os.path.join(host.runtime_dir(), "s-print"), None
     bindir = os.path.join(host.private_dir(host.runtime_dir()), f"b-{sid}")
@@ -232,6 +246,9 @@ def main(argv):
             for var in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
                 box += ["--env", f"{var}={proxy}"]
             box += ["--env", "NO_PROXY=127.0.0.1,localhost", "--env", "no_proxy=127.0.0.1,localhost"]
+        if model:
+            box += ["--relay", f"{MODEL_PORT}:model.sock", "--env", f"{model[0][1]}=http://127.0.0.1:{MODEL_PORT}"]
+            box += ["--env", f"{model[0][2]}={PLACEHOLDER}"] if len(model[0]) > 2 else []
         for var in ("COLORTERM", "TZ", "LANG"):
             if os.environ.get(var):
                 box += ["--env", f"{var}={os.environ[var]}"]

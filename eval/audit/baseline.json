@@ -49,6 +49,8 @@
  "gpu": "HELD",
  "real-slurm": "HELD",
  "ssh-agent": "HELD",
+ "net-allowlist": "HELD",
+ "api-key-search": "HELD",
  "gh-config": "HELD",
  "munge": "HELD",
  "harness-readonly": "HELD",

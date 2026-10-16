@@ -5,3 +5,4 @@ login: .codex/auth.json
 net: api.openai.com
 net: chatgpt.com
 net: auth.openai.com
+model: openai OPENAI_BASE_URL OPENAI_API_KEY

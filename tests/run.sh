@@ -2252,6 +2252,14 @@ expect hooks-unknown-agent fail 'invalid choice' -- "$guard" hooks install codex
 
 expect eval-analyze-unit ok '^OK' -- python3 -m unittest discover -s "$here/eval/tests"
 
+echo "== the model and network gateway"
+gw() { python3 -c 'import sys; sys.path.insert(0, sys.argv[1] + "/lib"); import gateway as g; print(eval(sys.argv[2]))' "$here" "$1"; }
+expect gateway-net-allow ok "^\(\['pypi.org:443', 'localhost:8080'\], \['bad/host'\]\)$" -- gw 'g.net_allow("x: 1\nnet_allow: PyPI.org, localhost.:8080 bad/host")'
+expect gateway-net-default ok "^\(\['pypi.org:443', 'files.pythonhosted.org:443', 'conda.anaconda.org:443', 'repo.anaconda.com:443'\], \[\]\)$" -- gw 'g.net_allow("x: 1")'
+expect gateway-net-none ok '^\(\[\], \[\]\)$' -- gw 'g.net_allow("net_allow: none")'
+expect gateway-host-port ok "^\('localhost:3128', None, None\)$" -- gw '(g.host_port("LocalHost.:3128"), g.host_port("a@b:1"), g.host_port("a:b:c"))'
+expect gateway-scrub-split ok '^a\[removed by the gateway\]b \[removed by the gateway\] 2$' -- gw '(lambda s: (b"".join(s.feed(c) for c in (b"aSECR", b"ET-KEYb SEC", b"RET-KEY")) + s.flush()).decode() + " " + str(s.removed))(g.Scrubber(["SECRET-KEY"]))'
+
 echo "== guard enter and guard broker"
 # An owner's home with what no sandbox may see, a project, and a host without sbatch; the broker runs detached, with
 # its state in that home and its sockets under $tmp/rt.
@@ -2311,7 +2319,50 @@ else
   expect enter-net-refused ok '^HTTP/1.1 403 ' -- en enter "$ep_" --agent fake -- python3 -c "$connect" example.com:443
   expect enter-net-env ok '^http://127.0.0.1:3128$' -- en enter "$ep_" --agent fake -- bash -c 'echo "$HTTPS_PROXY"'
   kill $lsn 2>/dev/null
-  expect broker-status-net ok 'net: CONNECT example.com:443 is not on the fake profile' -- en broker status
+  expect broker-status-net ok 'net: CONNECT example.com:443 is not on this session.s allowlist' -- en broker status
+  # An origin inside the project is the agent's own repository, however it is spelled; one outside is kept.
+  inside_check='import sys; sys.path.insert(0, sys.argv[1] + "/lib"); import broker_host as b; p = sys.argv[2]
+print(" ".join(str(b.inside(u, p)) for u in (p + "/.mine.git", "file://" + p + "/.mine.git", "file://localhost" + p + "/.mine",
+      ".mine", "file:///tmp/../" + p + "/x.git", p + "/../elsewhere.git", "git@github.com:o/r.git", "https://h/r.git", "ext::x %S")))'
+  expect broker-origin-inside ok '^True True True True True False False False False$' -- python3 -c "$inside_check" "$here" "$ep_"
+  expect enter-net-no-card ok 'warning: no package hosts this session: the broker cannot read guard/budget.card on main' -- en enter "$ep_" --agent fake -- true
+  # The model gateway: an upstream that echoes every header back, the key beside its model file, and a profile whose
+  # model: line routes an unattended session through it. The key reaches the upstream and never the sandbox.
+  echo_up='import http.server, json, sys
+class H(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    def log_message(self, *a): pass
+    def do_GET(self):
+        open(sys.argv[1] + "/seen", "a").write(self.headers.get("x-api-key", "none") + " " + self.headers.get("authorization", "none") + "\n")
+        data = json.dumps({"path": self.path, "headers": dict(self.headers.items())}).encode()
+        self.send_response(200); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+    do_POST = do_GET
+s = http.server.HTTPServer(("127.0.0.1", 0), H); open(sys.argv[1] + "/up-port", "w").write(str(s.server_port)); s.serve_forever()'
+  python3 -c "$echo_up" "$tmp" & up=$!
+  for _ in $(seq 50); do [ -s "$tmp/up-port" ] && break; sleep 0.1; done
+  models=$tmp/xdg/guard/models
+  printf 'upstream: http://127.0.0.1:%s/v1\nkey: echo.key\nheader: x-api-key\n' "$(cat "$tmp/up-port")" > "$models/echo"
+  echo sk-ant-canary-0123456789abcdefghijklmnop > "$models/echo.key"; chmod 644 "$models/echo.key"
+  printf 'model: echo GW_URL GW_KEY\n' >> "$tmp/xdg/guard/agents/fake"
+  ask='import os, urllib.request; r = urllib.request.Request(os.environ["GW_URL"] + "/messages", headers={"x-api-key": os.environ["GW_KEY"], "Authorization": "Bearer mine"}); print(urllib.request.urlopen(r).read().decode())'
+  expect enter-model-key-mode ok 'no model gateway: .*echo.key must be yours and mode 0600' -- en enter "$ep_" --agent fake --no-tty -- true
+  chmod 600 "$models/echo.key"
+  expect enter-model-placeholder ok '^http://127.0.0.1:3129 guard-gateway-adds-the-key$' -- en enter "$ep_" --agent fake --no-tty -- bash -c 'echo "$GW_URL $GW_KEY"'
+  expect enter-model-scrubbed ok '"x-api-key": "\[removed by the gateway\]"' -- en enter "$ep_" --agent fake --no-tty -- python3 -c "$ask"
+  expect enter-model-path ok '"path": "/v1/messages"' -- en enter "$ep_" --agent fake --no-tty -- python3 -c "$ask"
+  expect enter-model-key-upstream ok '^sk-ant-canary-0123456789abcdefghijklmnop none$' -- tail -1 "$tmp/seen"
+  expect enter-model-logged ok '"model": "echo".*"path": "/messages", "status": 200' -- tail -1 "$eh/.local/state/guard/model.jsonl"
+  expect enter-model-tty-none ok '^unset$' -- en enter "$ep_" --agent fake -- bash -c 'echo "${GW_URL:-unset}"'
+  expect enter-model-key-hidden fail - -- en enter "$ep_" --agent fake --no-tty -- grep -rqs sk-ant-canary "$eh" /run /tmp
+  # The evaluation's proxy is the same handler: it pins the model and the seed, and logs the request in full.
+  python3 "$here/eval/driver/proxy.py" --upstream "http://127.0.0.1:$(cat "$tmp/up-port")/v1" --alias pinned --seed 7 \
+    --log "$tmp/proxy.jsonl" --port-file "$tmp/proxy-port" & px=$!
+  for _ in $(seq 50); do [ -s "$tmp/proxy-port" ] && break; sleep 0.1; done
+  post='import json, sys, urllib.request; r = urllib.request.Request("http://127.0.0.1:" + sys.argv[1] + "/v2/x", data=b"{\"model\": \"mine\"}", headers={"Content-Type": "application/json"}); print(json.loads(urllib.request.urlopen(r).read())["path"])'
+  expect proxy-forwards ok '^/v1/v2/x$' -- python3 -c "$post" "$(cat "$tmp/proxy-port")"
+  expect proxy-pins ok '"request": \{"model": "pinned", "seed": 7\}' -- tail -1 "$tmp/proxy.jsonl"
+  kill "$px" "$up" 2>/dev/null
+  expect box-relay-name fail 'box.sh: --relay takes PORT or PORT:NAME.sock' -- "$here/lib/box.sh" --relay 1:../x -- true
   mkdir -p "$ep_/.claude"; echo '{"env": {"GH_TOKEN": "x", "EDITOR": "vi"}}' > "$ep_/.claude/settings.local.json"
   expect enter-warns-planted-token ok 'warning: .*settings.local.json sets GH_TOKEN, inside the project' -- en enter "$ep_" -- true
   rm -rf "$ep_/.claude"

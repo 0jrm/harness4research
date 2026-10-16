@@ -1,0 +1,5 @@
+# guard broker model upstream: OpenAI's API, for a profile's model: openai line; the keys are described in the
+# anthropic file. Put the key in ~/.config/guard/models/openai.key, mode 0600.
+upstream: https://api.openai.com/v1
+key: openai.key
+header: authorization
