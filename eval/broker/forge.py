@@ -509,21 +509,26 @@ class Forge:
                                     "guard review (broker)")
         return 0 if verdict == "approve" else 1
 
+    def mirror_wt(self, wt, *args, env=None):
+        """A git command with the broker's mirror as the git dir and wt as the work tree, config-free: it reads the
+        mirror's objects (the broker's) and wt's files, never a .git the reviewer could write there, as scorelib.py
+        reads the agent's work tree against the protected git dir (#82)."""
+        return self.mirror.git("--work-tree", wt, "-c", "core.fsmonitor=", "-c", "protocol.allow=never",
+                               "-c", "protocol.file.allow=always", *args, env=env)
+
     def round(self, pr, sha, brief, wt, log):
-        """One reviewer round in wt, a fresh clone of the head with no remote: (head, verdict, reason), or None when
-        the reviewer could not review. Commits the reviewer made are pushed to the branch, and the verdict becomes
-        changes."""
+        """One reviewer round. The head is laid out in wt as plain files, with no .git, so nothing the reviewer writes
+        there is a git dir, config, hook or object the broker later runs. Afterward the broker reads the changes
+        through its own mirror with a scratch index, and commits and pushes any from there. Returns (head, verdict,
+        reason), or None when the reviewer could not review."""
         number = pr["number"]
-        git = ["git", "-C", wt, "-c", "core.hooksPath=/dev/null"]
-        quiet = {"capture_output": True, "text": True}
-        subprocess.run(["git", "init", "-q", "-b", "review", wt], check=True, **quiet)
-        subprocess.run(git + ["fetch", "-q", "--no-tags", self.mirror.path, f"refs/forge/{pr['head']}:refs/pr/head",
-                              "refs/heads/main:refs/pr/base"], check=True, **quiet)
-        subprocess.run(git + ["checkout", "-q", "--detach", sha], check=True, **quiet)
+        with tempfile.TemporaryDirectory() as tmp:
+            idx = {"GIT_INDEX_FILE": os.path.join(tmp, "index")}
+            if self.mirror_wt(wt, "read-tree", sha, env=idx).returncode \
+                    or self.mirror_wt(wt, "checkout-index", "-f", "-a", env=idx).returncode:
+                raise Refused(f"the broker could not lay out {pr['head']} for review")
         os.makedirs(os.path.join(wt, ".guard-review"))
-        with open(os.path.join(wt, ".guard-review", ".gitignore"), "w") as f:
-            f.write("*\n")
-        diff = subprocess.run(git + ["diff", "refs/pr/base...HEAD"], **quiet).stdout
+        diff = self.mirror.git("diff", f"refs/heads/main...{sha}").stdout
         with open(os.path.join(REPO, "lib", "review-prompt.md")) as f:
             prompt = f.read()
         with open(os.path.join(wt, ".guard-review", "prompt.md"), "w") as f:
@@ -546,14 +551,32 @@ class Forge:
             return None
         m = VERDICT.match(reply[-1])
         verdict, reason = (m.group(1), m.group(2)) if m else ("escalate", "the reviewer's last line is not a VERDICT line")
-        after = subprocess.run(git + ["rev-parse", "HEAD"], **quiet).stdout.strip()
-        if after == sha:
+        # The reviewer's fixes are whatever files it changed. The .guard-review scratch and any .git it planted are
+        # dropped before the broker reads the tree, so neither reaches the branch, and git never touches that .git.
+        for junk in (".guard-review", ".git"):
+            path = os.path.join(wt, junk)
+            if os.path.islink(path) or os.path.isfile(path):
+                os.unlink(path)
+            elif os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            idx = {"GIT_INDEX_FILE": os.path.join(tmp, "index")}
+            self.mirror_wt(wt, "read-tree", sha, env=idx)
+            self.mirror_wt(wt, "add", "-A", env=idx)
+            new_tree = self.mirror_wt(wt, "write-tree", env=idx).stdout.strip()
+        if new_tree == self.mirror.git("rev-parse", f"{sha}^{{tree}}").stdout.strip():
             return sha, verdict, reason
-        pushed = subprocess.run(git + ["push", "-q", self.mirror.origin, f"HEAD:refs/heads/{pr['head']}"], **quiet)
+        made = self.mirror.git("commit-tree", "-p", sha, "-m", "guard review: reviewer fixes", new_tree,
+                               env={"GIT_AUTHOR_NAME": "guard reviewer", "GIT_AUTHOR_EMAIL": "reviewer@guard.invalid",
+                                    "GIT_COMMITTER_NAME": "guard reviewer", "GIT_COMMITTER_EMAIL": "reviewer@guard.invalid"})
+        after = made.stdout.strip()
+        if made.returncode or not after:
+            raise Refused(f"the broker could not record the reviewer's fixes ({made.stderr.strip()[-200:]})")
+        pushed = self.mirror.git("push", "-q", self.mirror.origin, f"{after}:refs/heads/{pr['head']}")
         if pushed.returncode:
-            raise Refused(f"cannot push the reviewer's commits to {pr['head']}: {pushed.stderr.strip()[-200:]}")
+            raise Refused(f"cannot push the reviewer's fixes to {pr['head']}: {pushed.stderr.strip()[-200:]}")
         if verdict != "escalate":
-            verdict, reason = "changes", "the reviewer committed fixes, pushed to the branch; review it again"
+            verdict, reason = "changes", "the reviewer changed files, carried to the branch; review it again"
         return after, verdict, reason
 
     def merge(self, number):

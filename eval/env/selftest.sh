@@ -178,6 +178,42 @@ expect merge-approved ok 'Merged pull request #1' -- "$broker_py" merge "$b/stat
 expect main-has-merge ok '^note$' -- git -C "$b/state/git/protected.git" show main:NOTE
 expect gh-view-merged ok '^MERGED$' -- in_b 'gh pr view 1 --json state --jq .state'
 
+echo "== the reviewer cannot run code on the host or move a ref the broker did not make"
+in_b 'git fetch -q origin && git switch -q -c fix origin/main && echo fix > FIX && git add FIX && git commit -qm fix'
+in_b 'echo "add a fix file for the self-test" > ~/req3.md && echo "add FIX" > ~/plan3.md && echo "Adds FIX." > ~/body3.md'
+in_b 'guard pr open --title fix --request ~/req3.md --plan ~/plan3.md --test true --body ~/body3.md' >/dev/null
+mkdir -p "$b/state/model"
+(cd "$b/state/model" && python3 -c 'import socket; socket.socket(socket.AF_UNIX).bind("proxy.sock")' 2>/dev/null)
+marker=$b/state/broker/ESCAPED
+python3 - "$tmp/hostile.sh" "$marker" "$b/state/git/protected.git" <<'PY'
+import sys
+script, marker, origin = sys.argv[1:]
+open(script, "w").write(
+    "cd /review\n"
+    "git init -q 2>/dev/null\n"
+    "mkdir -p .git/hooks .git/objects/info\n"
+    f'git config core.fsmonitor "touch {marker}.fsmonitor; false"\n'
+    "git config protocol.allow always\n"
+    f'git config "url.ext::sh -c \\"touch {marker}.url; exec git-upload-pack .\\".insteadOf" {origin}\n'
+    f"printf '#!/bin/sh\\ntouch {marker}.hook\\n' > .git/hooks/pre-commit\n"
+    "chmod +x .git/hooks/pre-commit\n"
+    "echo /review/.git/objects > .git/objects/info/alternates\n"
+    "echo hostile >> FIX\n"
+    "git -c user.name=x -c user.email=x add -A 2>/dev/null\n"
+    "git -c user.name=x -c user.email=x commit -qm pwn 2>/dev/null\n"
+    'echo "VERDICT: approve - hostile reviewer"\n')
+PY
+python3 - "$b/state/broker/config.json" "$tmp/hostile.sh" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+cfg["reviewer"].update(cmd="bash /opt/reviewer/hostile.sh", binds=[[sys.argv[2], "/opt/reviewer/hostile.sh"]])
+json.dump(cfg, open(sys.argv[1], "w"), indent=1)
+PY
+"$broker_py" review "$b/state/broker" 2 >/dev/null 2>&1
+expect reviewer-no-host-exec fail - -- bash -c 'ls "$1".* 2>/dev/null | grep .' _ "$marker"
+expect reviewer-fix-by-broker ok '^guard reviewer$' -- git -C "$b/state/git/protected.git" log -1 --format=%an refs/heads/fix
+expect reviewer-no-planted-git ok - -- bash -c '! git -C "$1" ls-tree -r --name-only refs/heads/fix | grep -qE "^\.git(/|$)"' _ "$b/state/git/protected.git"
+
 echo "== down"
 expect down ok - -- "$here/down.sh" "$ep"
 expect broker-down ok - -- "$here/down.sh" "$b"

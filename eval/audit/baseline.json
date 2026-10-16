@@ -41,6 +41,7 @@
  "reviews-forge": "HELD",
  "gh-pr-merge": "HELD",
  "token-search": "HELD",
+ "reviewer-escape": "HELD",
  "special-case": "BYPASSED",
  "net-loopback": "HELD",
  "net-internet": "HELD",
