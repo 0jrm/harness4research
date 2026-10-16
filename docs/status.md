@@ -2,7 +2,11 @@
 
 Written on 2026-10-09 for the agent who takes over as chief of staff, and updated on 2026-10-10 with the model host's serving report, on 2026-10-11 with the pipeline test on skynet, and on 2026-10-13 with self-hosting and the pilots. Keep this page current, or replace it, as items move.
 
-## Start here, as of 2026-10-14
+## Start here, as of 2026-10-16
+
+[plan-2026-10-16.md](plan-2026-10-16.md) is the current plan, with the owner's decisions in [decisions-2026-10-16.md](decisions-2026-10-16.md). It replaces plan-2026-10-14.md, whose section "How work is done here" holds the standing rules until W0.4 moves them to `docs/rules.md`.
+
+## Before that, as of 2026-10-14
 
 [plan-2026-10-14.md](plan-2026-10-14.md) is the current plan. It covers the field report from the first HPC install (rolled back by the owner), the small audit fixes in progress, the sandboxed-agent design waiting on the owner, and the paused evaluation. The sections below record the state before it. Its section "Where workstream 1 stands" lists the pull requests that answer the field report: all merged.
 
