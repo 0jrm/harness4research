@@ -1,9 +1,12 @@
 ## What runs
 
-Nothing. Our vLLM server on skynet has been stopped since 2026-10-14, and the plan runs no model before W1.4. The evaluation's environment, weights and clone stay on `/conda/jmiranda/h4r`. The history before this plan is in [archive/status-2026-10-14.md](archive/status-2026-10-14.md).
+Nothing. Our vLLM server on skynet has been stopped since 2026-10-14. W1.4 has merged, so the plan allows a model run again; W5 waits for the owner to say whether to start on GPU 1 now or after telling Brendon (n28). GPU 1 was free on 2026-10-16; GPU 0 holds Brendon's vLLM. History: [archive/status-2026-10-14.md](archive/status-2026-10-14.md).
+
+## Releases
+
+v6.2 (7126a73) and v7.0 (4281354) are tagged. RCC runs v6.2 (checkpoint 0 done); its move to v7.0 is checkpoint 3 (n57), when the owner asks.
 
 ## Deviations from the plan
 
-- W0.2: the CI job's script merged (#108); the workflow job waits for the owner's push (n47).
-- W0.4's check "arm-E input tokens per turn below pilot 4" needs a model run, and the plan runs none before W1.4. The four skill cores went from 7028 to 3519 words and `templates/AGENTS.md` from 288 to 250; W5 measures the tokens.
-- W3 and W4 ran before W1.2 merged, in parallel worktrees: they share no files with it.
+- W0.4's token check needs a model run; W5 measures it.
+- W1.4's laptop check ran on a scratch clone: this checkout's `.claude/settings.local.json` holds the agent's GitHub token, which a sandboxed session would see (n58).
