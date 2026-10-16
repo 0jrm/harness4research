@@ -7,6 +7,7 @@
     state/git/start-commit     the project's main when the agent started
     home/<project>             the agent's working tree and its .git/guard/needs-you.tsv
     state/broker/records/      behind the broker: its needs-you store and the log of record requests
+    state/broker/forge/        behind the broker: its pull requests, briefs, review verdicts and the log of gh requests
     hidden/                    the evaluator's data
     meta.json                  family, variant, arm, seed, project, harness commit
 """

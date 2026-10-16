@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The sandbox's sbatch, squeue, sacct, scancel, sacctmgr and guard, by the name they are called under, when the
+"""The sandbox's sbatch, squeue, sacct, scancel, sacctmgr, gh and guard, by the name they are called under, when the
 episode runs behind the broker. Each sends one request to one of the broker's sockets and prints the reply.
 
 sbatch never reaches the scheduler: it turns its options and the script's #SBATCH lines into the broker's request
@@ -12,15 +12,23 @@ refused there:
 
     guard needs-you [--remind] | add --kind K --title T [...] | find --kind K --title T | show <id>
     guard ledger add <run_id> <field> <value> [--why W] [--evidence E] | list <run_id>
-    guard card add <run_id> <card file> | show <run_id> | list"""
+    guard card add <run_id> <card file> | show <run_id> | list
+
+gh sends its arguments to the gh socket, which decides what it offers (forge.py): pr create, view, list, diff, checks
+and comment, and api reads. Here it only reads --body-file into --body, names the current branch where gh would, and
+applies --jq to the reply. guard pr open writes its brief through that socket into the broker's state (decision A3),
+after pushing the branch. guard review, guard merge and guard ship run in the broker, outside the sandbox, so here
+they are refused."""
 import argparse
 import json
 import os
 import socket
+import subprocess
 import sys
 
 SOCKET = "/run/guard/scheduler.sock"
 RECORDS = "/run/guard/records.sock"
+GH = "/run/guard/gh.sock"
 GUARD = "/opt/harness4research/bin/guard"
 
 # sbatch option -> request field. Later values win, the command line over #SBATCH lines, as sbatch reads them.
@@ -148,7 +156,108 @@ def records_request(args):
     return {"verb": verb, "store": store, "args": rest}
 
 
+def branch():
+    done = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True)
+    return done.stdout.strip()
+
+
+def read_text(path, what):
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError as e:
+        raise Refused(f"cannot read {what} {path}: {e.strerror}")
+
+
+def gh_request(args):
+    """(request, jq): the arguments with --body-file read and the current branch named, and the --jq expression."""
+    out, jq, i = [], None, 0
+    pr = args[:1] == ["pr"]
+    while i < len(args):
+        a = args[i]
+        if a in ("--jq", "-q") and i + 1 < len(args):
+            jq, i = args[i + 1], i + 2
+            continue
+        if a.startswith("--jq="):
+            jq, i = a[len("--jq="):], i + 1
+            continue
+        if pr and a in ("--body-file", "-F") and i + 1 < len(args):
+            out += ["--body", read_text(args[i + 1], "--body-file")]
+            i += 2
+            continue
+        if pr and a.startswith("--body-file="):
+            out += ["--body", read_text(a[len("--body-file="):], "--body-file")]
+            i += 1
+            continue
+        out.append(a)
+        i += 1
+    if out[:2] == ["pr", "create"] and not any(a in ("--head", "-H") or a.startswith("--head=") for a in out):
+        out += ["--head", branch()]
+    if out[:2] in (["pr", "view"], ["pr", "diff"], ["pr", "checks"]) and (len(out) == 2 or out[2].startswith("-")):
+        out.insert(2, branch())
+    return {"verb": "gh", "argv": out}, jq
+
+
+def gh(args):
+    try:
+        request, jq = gh_request(args)
+    except Refused as e:
+        sys.stderr.write(f"gh: refused: {e}\n")
+        return 1
+    reply = ask(request, GH)
+    out = reply.get("out", "")
+    if jq is not None and reply.get("rc") == 0:
+        done = subprocess.run(["jq", "-r", jq], input=out, capture_output=True, text=True)
+        out = done.stdout
+        sys.stderr.write(done.stderr)
+        if done.returncode:
+            return done.returncode
+    sys.stdout.write(out)
+    sys.stderr.write(reply.get("err", ""))
+    return reply.get("rc", 1)
+
+
+def pr_open(args):
+    """guard pr open, as lib/pr-open.sh takes it: pushes the branch, then sends the brief's parts and the body to the
+    broker, which writes the brief in its state and opens the pull request."""
+    p = argparse.ArgumentParser(prog="guard pr open")
+    for name in ("title", "request", "plan", "test", "body"):
+        p.add_argument(f"--{name}", required=True)
+    for name in ("item", "scope"):
+        p.add_argument(f"--{name}", default="")
+    p.add_argument("--base", default="main")
+    a = p.parse_args(args)
+    head = branch()
+    if not head:
+        raise Refused("HEAD is detached. Check out the branch the pull request is for.")
+    if head == a.base:
+        raise Refused(f"the current branch is {a.base} itself. Commit the change on its own branch.")
+    request = {"verb": "pr-open", "item": a.item, "title": a.title, "base": a.base, "head": head, "test": a.test,
+               "request": read_text(a.request, "--request"), "plan": read_text(a.plan, "--plan"),
+               "scope": read_text(a.scope, "--scope") if a.scope else "", "body": read_text(a.body, "--body")}
+    pushed = subprocess.run(["git", "push", "-q", "-u", "origin", f"HEAD:refs/heads/{head}"], capture_output=True,
+                            text=True)
+    if pushed.returncode:
+        raise Refused(f"cannot push {head}: {(pushed.stderr.strip().splitlines() or ['git push failed'])[-1]}")
+    return request
+
+
 def guard(args):
+    if args[:1] in (["review"], ["merge"], ["ship"]):
+        sys.stderr.write(f"guard {args[0]}: refused: guard review, guard merge and guard ship run in the broker, "
+                         "outside the sandbox; a person or the orchestrating session runs them there. Open the pull "
+                         "request with guard pr open and stop.\n")
+        return 2
+    if args[:2] == ["pr", "open"]:
+        try:
+            request = pr_open(args[2:])
+        except Refused as e:
+            sys.stderr.write(f"guard pr open: {e}\n")
+            return 2
+        reply = ask(request, GH)
+        sys.stdout.write(reply.get("out", ""))
+        sys.stderr.write(reply.get("err", "").replace("gh: refused by the broker", "guard pr open: refused by the broker"))
+        return 0 if reply.get("rc") == 0 else 2
     if not args or args[0] not in ("needs-you", "ledger", "card"):
         os.execv(GUARD, [GUARD, *args])
     try:
@@ -171,7 +280,7 @@ def ask(request, path=SOCKET):
     try:
         conn.connect(path)
     except OSError as e:
-        if path == RECORDS:
+        if path in (RECORDS, GH):
             return {"rc": 1, "err": f"guard broker unreachable ({e.strerror}); nothing was recorded\n"}
         return {"rc": 1, "err": f"guard broker unreachable ({e.strerror}); nothing was submitted, and nothing else "
                                 f"reaches the scheduler from here\n"}
@@ -184,6 +293,8 @@ def ask(request, path=SOCKET):
 def main(cmd, args):
     if cmd == "guard":
         return guard(args)
+    if cmd == "gh":
+        return gh(args)
     verbs = {"squeue": "queue", "sacct": "acct", "scancel": "cancel"}
     try:
         if cmd == "sbatch":
