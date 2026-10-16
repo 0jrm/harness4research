@@ -109,14 +109,18 @@ class Episode:
     # running the agent's final code on hidden data -----------------------------------------------------------------
     def run_in_sandbox(self, command, inputs=None, timeout=300):
         """Copies inputs ({name: host path}) into ~/.score/ and runs command there in the episode's sandbox.
-        The agent's processes are gone by now, so nothing the agent left running can read the hidden inputs."""
+        The agent's processes are gone by now, so nothing the agent left running can read the hidden inputs. Code that
+        runs past timeout seconds is the agent's outcome, a failed run with exit 124, not a failure of the scorer."""
         score_dir = self.p("home", ".score")
         os.makedirs(score_dir, exist_ok=True)
         for name, src in (inputs or {}).items():
             with open(src, "rb") as fin, open(os.path.join(score_dir, name), "wb") as fout:
                 fout.write(fin.read())
-        out = subprocess.run([os.path.join(HERE, "env", "sandbox.sh"), self.path, "--", "bash", "-c", command],
-                             capture_output=True, text=True, timeout=timeout)
+        try:
+            out = subprocess.run([os.path.join(HERE, "env", "sandbox.sh"), self.path, "--", "bash", "-c", command],
+                                 capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return 124, "", f"the agent's code ran past the scorer's {timeout} s limit"
         return out.returncode, out.stdout, out.stderr
 
 
