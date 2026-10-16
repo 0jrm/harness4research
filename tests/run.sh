@@ -2338,6 +2338,12 @@ print("forked", n)'
 n=$(tail -1 "$2" | sed -n "s/.*\"nproc\": \([0-9]*\).*/\1/p"); echo "inside $u, recorded $n"; [ "$u" = "$n" ]'
   expect box-limits-prlimit ok '^inside [0-9]+, recorded [0-9]+$' -- bash -c "$nproc_inside" _ "$here/lib/box.sh" "$tmp/limits.jsonl"
   expect box-limits-prlimit-why ok '"why": "GUARD_BOX_LIMITS=prlimit"' -- tail -1 "$tmp/limits.jsonl"
+  # A user manager that answers on a cgroup v1 host, whose cgroup has no cgroup.controllers, falls back to prlimit.
+  mkdir -p "$tmp/v1-bin"
+  printf '#!/bin/sh\necho /no/such/cgroup\n' > "$tmp/v1-bin/systemctl"; printf '#!/bin/sh\nexit 1\n' > "$tmp/v1-bin/systemd-run"
+  chmod +x "$tmp/v1-bin/systemctl" "$tmp/v1-bin/systemd-run"
+  expect box-limits-cgroup-v1 ok '^inside$' -- env PATH="$tmp/v1-bin:$PATH" "$here/lib/box.sh" --no-tty --record "$tmp/limits.jsonl" -- bash -c 'echo inside'
+  expect box-limits-cgroup-v1-why ok '"limits": "prlimit", "why": "the user manager does not delegate the memory and pids controllers"' -- tail -1 "$tmp/limits.jsonl"
   expect box-limits-usage fail '^box.sh: --tasks takes a count$' -- "$here/lib/box.sh" --tasks many -- true
   en enter "$ep_" -- sleep 4 & slow=$!
   for _ in $(seq 40); do en broker status 2>/dev/null | grep -q 'limits: [ap]' && break; sleep 0.1; done

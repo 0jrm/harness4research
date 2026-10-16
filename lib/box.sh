@@ -90,7 +90,8 @@ pick_limits() {  # sets limits to scope or prlimit, and why when prlimit
   command -v systemd-run > /dev/null || { why="no systemd-run on this host"; return; }
   cg=$(systemctl --user show -p ControlGroup --value 2> /dev/null) && [ -n "$cg" ] \
     || { why="no systemd user manager answers"; return; }
-  ctl=" $(cat "/sys/fs/cgroup$cg/cgroup.controllers" 2> /dev/null) "
+  # A cgroup v1 or hybrid host has no cgroup.controllers: nothing delegated, so prlimit, not a silent exit (set -e).
+  ctl=" $(cat "/sys/fs/cgroup$cg/cgroup.controllers" 2> /dev/null || true) "
   [[ $ctl == *" memory "* && $ctl == *" pids "* ]] \
     || { why="the user manager does not delegate the memory and pids controllers"; return; }
   # OOMPolicy=continue kills only the process past the limit, not the whole sandbox; older systemd lacks it for scopes.
