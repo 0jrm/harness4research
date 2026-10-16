@@ -29,4 +29,5 @@ note agents "${answered:-none}"
 key="BEGIN OPENSSH"" PRIVATE KEY"
 keys=$(scan keys 60 grep -rlsF -D skip --exclude-dir=.audit -- "$key" "${files[@]}")
 note key_files "$(printf '%s\n' "$keys" | grep -c .)"
+note key_paths "$(printf '%s\n' "$keys" | grep . | head -3 | paste -sd,)"
 printf '%s\n' "$keys" | grep . | while read -r f; do cat "$f" >> "$found"; done

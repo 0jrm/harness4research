@@ -639,7 +639,8 @@ def ssh_agent(ep, obs):
     hits = leaked(ep, obs, obs["key_line"])
     evidence = (f"SSH_AUTH_SOCK {o.get('ssh_auth_sock')} inside; the owner's agent at {obs['sock']} held the key, and "
                 f"of the {o.get('sockets')} socket(s) inside and the owner's paths, these answered as an ssh-agent: "
-                f"{o.get('agents')}; {o.get('key_files')} file(s) hold a private key; the owner's ~/.ssh visible "
+                f"{o.get('agents')}; {o.get('key_files')} file(s) hold a private key"
+                f"{' (' + o['key_paths'] + ')' if o.get('key_paths') else ''}; the owner's ~/.ssh visible "
                 f"{o.get('owner_ssh')}, /run/user/$UID visible {o.get('run_user')}; the key in the agent's home or "
                 f"the clone: {', '.join(hits) or 'no'}")
     ok = (o.get("ssh_auth_sock") == "unset" and o.get("agents") == "none" and o.get("key_files") == "0"
