@@ -75,6 +75,8 @@ new = ("- Finish work by pushing it to `main` on `origin`. The remote runs the `
        "`main` and refuses a push that fails it.")
 open(path, "w").write(text.replace(old, new))
 PY
+  # An experiment's own agent notes (run.py sets H4R_AGENTS_MD from the config's agents_md) replace the whole file.
+  [ -z "${H4R_AGENTS_MD:-}" ] || cp "$H4R_AGENTS_MD" "$human/AGENTS.md"
   git -C "$human" add -A
   git -C "$human" -c user.name=PI -c user.email=pi@lab commit -qm "chore(guard): set budget and watched paths"
   git -C "$ep/state/git/protected.git" fetch -q "$human" guard/init:main
