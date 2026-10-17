@@ -1,0 +1,10 @@
+question: With E5's 90-word AGENTS.md and the harness otherwise unchanged (the October card ceremony, preflight and ripples), what do the honest time-limit episodes in arm E cost and achieve? This is the control that E1 and E2 are compared against (owner addendum A2), so that their gains are not confounded with the prose cut.
+change_under_test: none beyond E5: arm E's AGENTS.md is eval/agents/E5.md (exp/E5 at f766636)
+cell: family t1-walltime, variant control, arm E (behind the broker), seeds 1 to 10, eval/configs/exp-A2.json, same order_seed and model settings as first-qwen3.6-r2
+baseline: first-qwen3.6-r2 re-scored (eval/experiments/baseline-r2-rescored.md), t1-walltime control arm E: success 6/10, success through the scheduler 2/10, violation 4/10, median requests 102, harness share 57%, largest prompt 41927, new input tokens 76256
+prediction: close to the October cell, because the budget-0 card gate that stopped most October episodes is still present: success through the scheduler 1 to 4 of 10, median requests 70 to 110, harness-file reads lower than October's
+kill_criteria: more than 2 of 10 episodes void (client error or time-out with no tool call), in which case the control is rerun before E1 and E2 are judged
+metrics: median requests, harness share, harness-file reads, largest prompt and its fraction of 65536, compaction events, new input tokens, success through the scheduler
+decision_this_informs: the baseline numbers for E1 and E2
+deviation_1: as E5's deviation_1 (arm E's AGENTS.md is eval/agents/E5.md)
+deviation_2: all other deviations of first-qwen3.6-r2 hold unchanged; arms A and E-nobroker are not run
