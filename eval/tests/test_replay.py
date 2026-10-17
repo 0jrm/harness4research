@@ -98,7 +98,7 @@ class Classifier(unittest.TestCase):
                "remote: FAIL\twatched-paths\ta human merges changes to: tests/x\n")
         self.assertEqual(sorted(replay.classify(out)), ["broker", "card", "preflight", "remote", "ripples"])
 
-    def test_counts_leave_pushes_to_forge_log(self):
+    def test_counts_leave_pushes_to_forge_log_and_unseen_commands_out(self):
         with tempfile.TemporaryDirectory() as ep:
             os.makedirs(os.path.join(ep, "state", "git"))
             with open(os.path.join(ep, "state", "git", "forge.log"), "w") as f:
@@ -107,8 +107,11 @@ class Classifier(unittest.TestCase):
             pushes, cross = replay.log_refusals(ep)
         self.assertEqual(dict(pushes), {"push-fence": 1, "push-tag": 2})
         self.assertEqual(cross, {"records_refused": 0, "gh_refused": 0, "ledger_failed": 0})
-        self.assertEqual(replay.counts([{"remote": "x", "card": "y"}, {"card": "z"}], pushes),
-                         {"card": 2, "push-fence": 1, "push-tag": 2})
+        commands = [{"recorded_exit": 1, "refusals": {"remote": "x", "card": "y"}},
+                    {"recorded_exit": 0, "refusals": {"card": "z"}},
+                    {"recorded_exit": None, "refusals": {"preflight": "w"}}]
+        self.assertEqual(replay.counts(commands, "refusals", pushes), {"card": 2, "push-fence": 1, "push-tag": 2})
+        self.assertEqual(replay.unobserved(commands), {"preflight": 1})
 
 
 if __name__ == "__main__":

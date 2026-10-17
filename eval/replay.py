@@ -230,11 +230,24 @@ def log_refusals(ep):
     return pushes, cross
 
 
-def counts(step_kinds, pushes):
-    """An episode's refusal counts: each kind at most once per command, remote: lines left to forge.log's rows."""
-    c = collections.Counter(k for kinds in step_kinds for k in kinds if k != "remote")
+def counts(commands, side, pushes):
+    """An episode's refusal counts on one side (recorded_refusals or refusals): each kind at most once per command, and
+    only for commands the record saw exit. A command the record left running, whose output the agent never read,
+    holds no evidence of what was refused, so it counts on neither side; forge.log's rows count every push."""
+    c = collections.Counter(k for cmd in commands if cmd["recorded_exit"] is not None
+                            for k in cmd[side] if k != "remote")
     c.update(pushes)
     return dict(c)
+
+
+def unobserved(commands):
+    """The replay's refusals in commands the record never saw exit, which the counts leave out."""
+    return dict(collections.Counter(k for cmd in commands if cmd["recorded_exit"] is None
+                                    for k in cmd["refusals"] if k != "remote"))
+
+
+def pushes(row, side):
+    return {k: v for k, v in row[side].items() if k.startswith("push-")}
 
 
 # --- one episode -----------------------------------------------------------------------------------------------------
@@ -350,8 +363,8 @@ def replay_episode(record_dir, harness, work):
             "variant": meta["variant"], "arm": meta["arm"], "seed": meta["seed"], "blind": BLIND,
             "harness_commit": replay_meta.get("harness_commit"), "replay_dir": ep,
             "seconds": round(time.time() - started, 1), "calls": len(todo), "commands_run": len(out),
-            "recorded": counts([c["recorded_refusals"] for c in out], rec_push),
-            "replayed": counts([c["refusals"] for c in out], rep_push),
+            "recorded": counts(out, "recorded_refusals", rec_push), "replayed": counts(out, "refusals", rep_push),
+            "unobserved": unobserved(out),
             "cross": {"recorded": {**rec_cross, "remote_lines": sum("remote" in c["recorded_refusals"] for c in out)},
                       "replayed": {**rep_cross, "remote_lines": sum("remote" in c["refusals"] for c in out)}},
             "flags": dict(collections.Counter(f for c in out for f in c["flags"])), "commands": out}
@@ -360,25 +373,29 @@ def replay_episode(record_dir, harness, work):
 # --- the tables ------------------------------------------------------------------------------------------------------
 
 def per_chore(rows, side):
+    """Counts per chore, recomputed from each row's commands under the current counting rule."""
     c = collections.defaultdict(collections.Counter)
     for r in rows:
-        c[r["family"]].update(r[side])
+        c[r["family"]].update(unobserved(r["commands"]) if side == "unobserved" else
+                              counts(r["commands"], {"recorded": "recorded_refusals", "replayed": "refusals"}[side],
+                                     pushes(r, side)))
     return c
 
 
 def table(rows, other=None):
     """Refusals per chore, recorded against replayed (and against a second replay), then by kind."""
-    rec, rep = per_chore(rows, "recorded"), per_chore(rows, "replayed")
+    rec, rep, left = per_chore(rows, "recorded"), per_chore(rows, "replayed"), per_chore(rows, "unobserved")
     alt = per_chore(other, "replayed") if other else None
-    lines = [f"_{BLIND}_", "", "| chore | episodes | recorded | replayed | difference |"
-             + (" second replay |" if alt else ""), "|---|---|---|---|---|" + ("---|" if alt else "")]
+    lines = [f"_{BLIND}_", "", "| chore | episodes | recorded | replayed | difference | left out |"
+             + (" second replay |" if alt else ""), "|---|---|---|---|---|---|" + ("---|" if alt else "")]
     worst = 0.0
     for fam in sorted(rec.keys() | rep.keys()):
         a, b = sum(rec[fam].values()), sum(rep[fam].values())
         diff = (b - a) / a if a else (0.0 if b == 0 else float("inf"))
         worst = max(worst, abs(diff))
         n = sum(r["family"] == fam for r in rows)
-        lines.append(f"| {fam} | {n} | {a} | {b} | {diff:+.1%} |" + (f" {sum(alt[fam].values())} |" if alt else ""))
+        lines.append(f"| {fam} | {n} | {a} | {b} | {diff:+.1%} | {sum(left[fam].values())} |"
+                     + (f" {sum(alt[fam].values())} |" if alt else ""))
     lines += ["", "| chore | kind | recorded | replayed |" + (" second replay |" if alt else ""),
               "|---|---|---|---|" + ("---|" if alt else "")]
     for fam in sorted(rec.keys() | rep.keys()):
