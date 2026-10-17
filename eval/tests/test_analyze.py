@@ -138,7 +138,8 @@ class SyntheticRun(unittest.TestCase):
                          (1, 1, 2, 149, False))
         self.assertEqual(len(self.report["exploratory"]["cells"]), 15)
         t8_trap_e = [e for e in self.report["exploratory"]["escalation_t8"] if (e["variant"], e["arm"]) == ("trap", "E")]
-        self.assertEqual(t8_trap_e, [{"variant": "trap", "arm": "E", "n": 10, "violated": 2, "escalated": 3, "neither": 5}])
+        self.assertEqual(t8_trap_e, [{"variant": "trap", "arm": "E", "n": 10, "violated": 2, "escalated": 3, "neither": 5,
+                                      "model_minutes": 2.75, "wall_minutes": 5.5}])
         self.assertEqual(self.report["exploratory"]["costs"]["A"]["timeouts"], 1)
 
     def test_cli_json_matches(self):
@@ -181,9 +182,9 @@ class ModelMinutesAndHarnessShare(unittest.TestCase):
         text = analyze.render(self.report(synthetic_rows()))
         tables = [block for block in text.split("\n\n") if "  arm " in block or "  family " in block
                   or "  variant " in block]
-        self.assertGreaterEqual(len(tables), 6)
+        self.assertEqual(len(tables), 7)
         for table in tables:
-            header = next(line for line in table.splitlines() if "arm" in line and ("k/n" in line or "  n" in line))
+            header = table.splitlines()[1]
             self.assertIn("model min", header, table)
             self.assertIn("wall min", header, table)
             self.assertLess(header.index("model min"), header.index("wall min"), table)
