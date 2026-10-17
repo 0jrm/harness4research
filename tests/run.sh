@@ -2364,7 +2364,10 @@ s = http.server.HTTPServer(("127.0.0.1", 0), H); open(sys.argv[1] + "/up-port", 
   kill "$px" "$up" 2>/dev/null
   expect box-relay-name fail 'box.sh: --relay takes PORT or PORT:NAME.sock' -- "$here/lib/box.sh" --relay 1:../x -- true
   mkdir -p "$ep_/.claude"; echo '{"env": {"GH_TOKEN": "x", "EDITOR": "vi"}}' > "$ep_/.claude/settings.local.json"
-  expect enter-warns-planted-token ok 'warning: .*settings.local.json sets GH_TOKEN, inside the project' -- en enter "$ep_" -- true
+  expect enter-says-planted-token ok 'settings.local.json sets GH_TOKEN; the sandbox sees a copy without them' -- en enter "$ep_" -- true
+  expect enter-hides-planted-token fail - -- en enter "$ep_" -- grep -q GH_TOKEN "$ep_/.claude/settings.local.json"
+  expect enter-keeps-other-settings ok '"EDITOR": "vi"' -- en enter "$ep_" -- cat "$ep_/.claude/settings.local.json"
+  expect enter-leaves-original ok GH_TOKEN -- cat "$ep_/.claude/settings.local.json"
   rm -rf "$ep_/.claude"
   mkdir -p "$tmp/hidden-x"
   expect box-probe-refuses fail 'probe: hidden: .*hidden-x is the host.s own' -- "$here/lib/box.sh" --no-tty --ro "$tmp/hidden-x" "$tmp/hidden-x" --probe --hide "$tmp/hidden-x" -- true
