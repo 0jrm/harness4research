@@ -89,6 +89,25 @@ expect push-main-guard-refused fail 'the guard-fence check failed' -- inside 'cd
 expect push-main-force-refused fail 'force pushes are refused' -- inside 'cd proj && git reset -q --hard HEAD~2 && git commit -q --allow-empty -m other && git push -f origin HEAD:main'
 expect forge-log ok 'refuse-fence	refs/heads/main' -- cat "$ep/state/git/forge.log"
 
+echo "== the model relay outlives the agent's pkill"
+mkdir -p "$ep/state/model"
+python3 -c 'import socket, sys
+s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen()
+while True:
+    c, _ = s.accept(); c.sendall(b"model\n"); c.close()' "$ep/state/model/proxy.sock" &
+stub=$!
+for _ in $(seq 50); do [ -S "$ep/state/model/proxy.sock" ] && break; sleep 0.1; done
+printf '%s /opt/model/relay.sh\n%s /opt/model/netrelay.py\n' "$harness/eval/driver/relay.sh" "$harness/eval/driver/netrelay.py" >> "$ep/sandbox/binds"
+# The script names the interpreter in pieces, since pkill -f also matches this shell's own command line.
+relay_probe='bash /opt/model/relay.sh 18080 /run/model/proxy.sock > /dev/null 2>&1 &
+up() { for _ in $(seq 50); do (exec 3<>/dev/tcp/127.0.0.1/18080) 2>/dev/null && return; sleep 0.1; done; return 1; }
+ask() { exec 3<>/dev/tcp/127.0.0.1/18080 && head -n1 <&3; exec 3<&-; }
+p=pyth; up && ask
+pkill -f "${p}on3"; echo "pkill -f exit $?"; ask
+pkill "${p}on3"; sleep 1; up && ask'
+expect relay-survives-pkill ok '^model pkill -f exit 1 model model$' -- inside "{ $relay_probe; } | tr '\n' ' ' | sed 's/ \$//'"
+kill $stub; rm -f "$ep/state/model/proxy.sock"; sed -i '/\/opt\/model\//d' "$ep/sandbox/binds"
+
 echo "== behind the broker"
 b=$tmp/s2
 in_b() { "$here/sandbox.sh" "$b" -- bash -c "cd ~/ocean-sim && $1"; }  # in_b <script>: in the broker episode's project
