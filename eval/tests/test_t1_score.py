@@ -104,8 +104,8 @@ class ScriptsTheCallsRun(unittest.TestCase):
         self.assertEqual(self.outside([self.run_("./all.sh")], {"all.sh": "bash job.sh\n"}), ([1], []))
 
     def test_a_script_no_record_holds(self):
-        self.assertEqual(self.outside([self.run_("bash gone.sh; rm gone.sh"), self.run_("guard/run status")]),
-                         ([], [(1, "gone.sh")]))
+        self.assertEqual(self.outside([self.run_("bash gone.sh; rm gone.sh"), self.run_("guard/run status"),
+                                       self.run_("/usr/bin/sbatch job.sh && /bin/ls out")]), ([], [(1, "gone.sh")]))
 
     def test_typed_into_a_shell_session_but_not_into_a_card_editor(self):
         calls = [("exec_command", {"cmd": "bash"}, "Process running with session ID 7"),

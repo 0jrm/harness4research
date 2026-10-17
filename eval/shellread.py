@@ -9,6 +9,7 @@ WRAPPERS = {"time", "timeout", "nohup", "env", "nice", "stdbuf", "exec", "comman
 SHELLS = {"bash", "sh", "zsh", "dash"}
 PYTHON = re.compile(r"python[\d.]*")
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+AGENT_PATHS = ("./", "../", "~/", "/home/agent/", "/tmp/")
 REDIRECT = re.compile(r"(?<![<>&\d])>>?\s*([^\s;&|<>()]+)")
 
 
@@ -89,8 +90,9 @@ def inline_code(args):
 
 
 def script_run(words):
-    """("python" or "shell", path) when the simple command runs a script file, else None. A command under a
-    scheduler (sbatch run.sh) runs no file here: its head is the scheduler."""
+    """("python" or "shell", path) when the simple command runs a script file, else None: an interpreter given a
+    file, source, or a program named *.py or *.sh or found under the agent's own paths (AGENT_PATHS); /usr/bin/sbatch
+    is a system program. A command under a scheduler (sbatch run.sh) runs no file here: its head is the scheduler."""
     if not words:
         return None
     head, args = os.path.basename(words[0]), words[1:]
@@ -101,7 +103,7 @@ def script_run(words):
         return ("python" if PYTHON.fullmatch(head) else "shell", script) if script else None
     if head in ("source", ".") and args:
         return "shell", args[0]
-    if "/" in words[0] or head.endswith((".py", ".sh")):
+    if head.endswith((".py", ".sh")) or words[0].startswith(AGENT_PATHS):
         return "python" if head.endswith(".py") else "shell", words[0]
     return None
 
