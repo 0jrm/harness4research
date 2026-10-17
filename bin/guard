@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: guard <survey|init|archive|doctor|config|review|merge|ship|enter|broker|preflight|ripples|manifest|fence|code|launch|atlas|needs-you|hooks|version> [args...]
+# usage: guard <survey|init|archive|doctor|config|review|merge|ship|enter|broker|preflight|ripples|manifest|fence|code|launch|atlas|needs-you|hooks|wait|version> [args...]
 set -euo pipefail
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 cmd=${1:-help}; shift || true
@@ -12,6 +12,7 @@ case $cmd in
   atlas) exec python3 "$here/lib/atlas.py" "$@" ;;
   needs-you) exec python3 "$here/lib/needs_you.py" "$@" ;;
   hooks) exec python3 "$here/lib/hooks.py" "$@" ;;
+  wait) exec python3 "$here/lib/wait.py" "$@" ;;
   preflight|ripples|manifest|fence|code|launch)
     # Run the enclosing project's protected guard/run, never this harness's copy. Online, it reads this clone at the pin.
     base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
@@ -65,6 +66,9 @@ Agent sessions, on your machine or a login node:
                       ~/.config/guard/agents/, and a sandbox self-test
   broker status       whether the broker answers, its sessions, live jobs and recent refusals
   broker stop         stops the broker; every session's sockets then refuse
+  wait <job_id|pid> | wait -- <cmd...>  [--timeout 20m]
+                      blocks silently until the job changes state or the process exits, then prints its status and
+                      last 20 lines of output; never past the timeout
 
 In any git repository, guarded or not:
   needs-you           list what only you can do, check, or approve; add, show, ack, done, dismiss manage the queue
