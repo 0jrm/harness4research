@@ -2386,8 +2386,10 @@ for _ in range(100):
         os.execvp("sleep", ["sleep", "5"])
     n += 1
 print("forked", n)'
-  expect box-tasks-capped ok '^forked ([0-9]|[1-5][0-9])$' -- "$here/lib/box.sh" --no-tty --tasks 40 --record "$tmp/limits.jsonl" -- python3 -c "$forks"
-  expect box-limits-record ok '"limits": "(scope|prlimit)".*"tasks.*40' -- tail -1 "$tmp/limits.jsonl"
+  # A scope caps the sandbox's tasks; prlimit caps none, since a per-uid cap starves the sandbox when other work runs.
+  "$here/lib/box.sh" --no-tty --tasks 40 --record "$tmp/limits.jsonl" -- python3 -c "$forks" > "$tmp/forked" 2>&1
+  expect box-tasks-capped ok '^(scope forked ([0-9]|[1-5][0-9])|prlimit forked 100)$' -- bash -c 'printf "%s %s\n" "$(sed -n "s/.*\"limits\": \"\([a-z]*\)\".*/\1/p" "$1" | tail -1)" "$(cat "$2")"' _ "$tmp/limits.jsonl" "$tmp/forked"
+  expect box-limits-record ok '"limits": "scope".*"tasks_max": 40|"limits": "prlimit".*"nproc": null' -- tail -1 "$tmp/limits.jsonl"
   nproc_inside='u=$(GUARD_BOX_LIMITS=prlimit "$1" --no-tty --tasks 40 --record "$2" -- bash -c "ulimit -u")
 echo "inside $u, outside $(ulimit -u)"; [ "$u" = "$(ulimit -u)" ] && tail -1 "$2" | grep -q "\"nproc\": null"'
   expect box-limits-prlimit-no-nproc ok '^inside [0-9a-z]+, outside [0-9a-z]+$' -- bash -c "$nproc_inside" _ "$here/lib/box.sh" "$tmp/limits.jsonl"
@@ -2401,7 +2403,7 @@ echo "inside $u, outside $(ulimit -u)"; [ "$u" = "$(ulimit -u)" ] && tail -1 "$2
   expect box-limits-usage fail '^box.sh: --tasks takes a count$' -- "$here/lib/box.sh" --tasks many -- true
   en enter "$ep_" -- sleep 4 & slow=$!
   for _ in $(seq 40); do en broker status 2>/dev/null | grep -q 'limits: [ap]' && break; sleep 0.1; done
-  expect broker-status-limits ok '^    limits: (a systemd user scope, MemoryMax .* TasksMax 512: a wall|prlimit .* a speed bump)' -- en broker status
+  expect broker-status-limits ok '^    limits: (a systemd user scope, MemoryMax .* TasksMax 512: a wall|prlimit .* no cap on the sandbox.s processes)' -- en broker status
   wait "$slow"
   expect broker-stop ok '^guard broker: stopped' -- en broker stop
   expect broker-down-after-stop fail '^guard broker: not running' -- en broker status
