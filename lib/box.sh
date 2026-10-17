@@ -15,7 +15,7 @@
 # interactive logins, there is no cap on the sandbox as a whole: prlimit caps each process's memory and file size,
 # and nothing caps its processes. A prlimit --nproc cap cannot stand in, because the kernel counts every process and
 # thread of the uid against it: with a model server or a second sandbox running as you, the sandbox whose cap was set
-# first stops being able to start a thread, and its agent hangs (the first evaluation run on skynet, 2026-10-17).
+# first stops being able to start a thread, and its agent hangs (seen on skynet on 2026-10-17).
 # GUARD_BOX_LIMITS=prlimit picks the second where the first would apply. --record says which one applied.
 #
 # Options, applied in the order given; bind a parent before what goes inside it:
