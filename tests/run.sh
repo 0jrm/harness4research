@@ -321,7 +321,7 @@ expect ripples-tty-exit ok - -- bash -c "$(declare -f on_tty)"'; on_tty guard/ru
 expect ripples-tty-opt-out fail '^RIPPLE	job-states	100:TIMEOUT 102:FAILED \(' -- on_tty env HPC_RIPPLES_TSV=1 guard/run ripples "$R"
 expect ripples-term-dumb ok - -- bash -c 'out=$1; [ -n "$out" ] && [ -z "$(tr -dc "\033\t" <<<"$out")" ]' _ "$(on_tty env TERM=dumb guard/run ripples "$R")"
 tty=$(on_tty guard/run ripples "$R")
-expect ripples-tty-ripple ok $'^\e\\[1;31mRIPPLE   \e\\[0m  job-states {17}100:TIMEOUT 102:FAILED \\(diagnose' -- echo "$tty"
+expect ripples-tty-ripple ok $'^\e\\[1;31mRIPPLE   \e\\[0m  job-states {17}100:TIMEOUT 102:FAILED \\(the work needs more than max_walltime_minutes' -- echo "$tty"
 expect ripples-tty-pass ok $'^\e\\[32mPASS     \e\\[0m  quota {22}42%$' -- echo "$tty"
 expect ripples-tty-no-tabs ok - -- test -z "$(tr -dc '\t' <<<"$tty")"
 tty=$(on_tty env NO_COLOR=1 guard/run ripples "$R")
