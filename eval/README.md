@@ -102,7 +102,7 @@ The proxy can repair a request on its way to the model, and logs it as sent. Bot
 
 ### The question card
 
-The run's question card is drafted at `eval/cards/drafts/first-qwen3.6.card`, in the harness's flat `key: value` format. It holds the question, the hypothesis, the two primary contrasts, the exploratory contrast of arm E with and without the broker, the kill criteria, every known deviation (`deviation_1` and on) and every claim not yet checked (`unverified_1` and on). The result in the README cites the deviations, and reports each unverified claim as unmeasured until it is checked.
+The run's question card, frozen on 2026-10-16 with the owner's approval, is `eval/cards/first-qwen3.6.card`, in the harness's flat `key: value` format. It holds the question, the hypothesis, the two primary contrasts, the exploratory contrast of arm E with and without the broker, the kill criteria, every known deviation (`deviation_1` and on) and every claim not yet checked (`unverified_1` and on). The result in the README cites the deviations, and reports each unverified claim as unmeasured until it is checked.
 
 `eval/run.py` refuses a card that is not frozen: one with more than one commit, uncommitted edits, or a `<placeholder>` left. It records the card's sha256 and commit in `results_dir/run.json`, and a resumed run must match them. `--unfrozen` is for smoke runs, and `run.json` and every verdict say so. The model host's serving report filled in the launch command and the FP8 outcome. To freeze the card once the model host names the alias:
 
