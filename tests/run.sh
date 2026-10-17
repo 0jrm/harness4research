@@ -2389,8 +2389,8 @@ print("forked", n)'
   expect box-tasks-capped ok '^forked ([0-9]|[1-5][0-9])$' -- "$here/lib/box.sh" --no-tty --tasks 40 --record "$tmp/limits.jsonl" -- python3 -c "$forks"
   expect box-limits-record ok '"limits": "(scope|prlimit)".*"tasks.*40' -- tail -1 "$tmp/limits.jsonl"
   nproc_inside='u=$(GUARD_BOX_LIMITS=prlimit "$1" --no-tty --tasks 40 --record "$2" -- bash -c "ulimit -u")
-n=$(tail -1 "$2" | sed -n "s/.*\"nproc\": \([0-9]*\).*/\1/p"); echo "inside $u, recorded $n"; [ "$u" = "$n" ]'
-  expect box-limits-prlimit ok '^inside [0-9]+, recorded [0-9]+$' -- bash -c "$nproc_inside" _ "$here/lib/box.sh" "$tmp/limits.jsonl"
+echo "inside $u, outside $(ulimit -u)"; [ "$u" = "$(ulimit -u)" ] && tail -1 "$2" | grep -q "\"nproc\": null"'
+  expect box-limits-prlimit-no-nproc ok '^inside [0-9a-z]+, outside [0-9a-z]+$' -- bash -c "$nproc_inside" _ "$here/lib/box.sh" "$tmp/limits.jsonl"
   expect box-limits-prlimit-why ok '"why": "GUARD_BOX_LIMITS=prlimit"' -- tail -1 "$tmp/limits.jsonl"
   # A user manager that answers on a cgroup v1 host, whose cgroup has no cgroup.controllers, falls back to prlimit.
   mkdir -p "$tmp/v1-bin"

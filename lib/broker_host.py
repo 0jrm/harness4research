@@ -494,8 +494,8 @@ def limits_said(rec):
     if rec["limits"] == "scope":
         return (f"a systemd user scope, MemoryMax {rec['memory_max'] / 2**30:.1f} GiB, TasksMax {rec['tasks_max']}: "
                 "a wall for the sandbox as a whole")
-    return (f"prlimit ({rec['why']}): --nproc {rec['nproc']}, your {rec['yours']} plus {rec['tasks']}, a speed bump "
-            "since the kernel counts per uid; memory per process only")
+    return (f"prlimit ({rec['why']}): memory and file size per process only; no cap on the sandbox's processes, "
+            "since a per-uid cap starves the sandbox when other work runs as you")
 
 
 def ago(ts):

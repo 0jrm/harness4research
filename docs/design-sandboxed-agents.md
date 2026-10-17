@@ -55,8 +55,8 @@ It is one standard-library Python process per user per host, built from `fakeslu
 ## Resources without root
 
 - **Where the system lets user sessions limit memory and processes** (Fedora usually does, and so does the owner's Pop!_OS laptop): the sandbox runs under `systemd-run --user --scope` with `MemoryMax`, `MemorySwapMax=0` and `TasksMax`. That's a real wall. skynet has no user manager in non-interactive sessions, so it doesn't apply there.
-- **Elsewhere:** `prlimit --as --fsize` per process, and `--nproc` as the next point sets it.
-- **A correction to the Fable design.** It says `prlimit --nproc` binds only the sandbox, but the kernel counts processes per uid, your shells and servers included. The cap must be set to your current process count plus the sandbox's allowance, and it is a speed bump, not a wall.
+- **Elsewhere:** `prlimit --as --fsize` per process, and no cap on the sandbox's processes.
+- **No `prlimit --nproc`.** The kernel counts processes and threads per uid, your shells and servers included, so a cap set to your current count plus an allowance starves the sandbox as soon as other work runs as you. W1.5 shipped that cap, and on 2026-10-17 it stalled the first evaluation run on skynet: with the model server and eight sandboxes running as the owner, agents could not start threads and sat silent until their time limits. A cap on the sandbox's processes needs a cgroup, which on skynet needs an administrator.
 - **Disk:** the broker's 2-second watchdog, and 1 GB caps on the in-memory `/tmp` and `/run`. That's a kill, not a wall.
 - **Needs an administrator:** scratch-space quotas, memory limits where nothing is delegated, an enforced cap at the scheduler (see `.audit/admin-request-skynet.md`), and GPU accounting.
 

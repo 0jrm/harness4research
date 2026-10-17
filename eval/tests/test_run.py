@@ -208,3 +208,28 @@ class TimeoutByFamily(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KillCriterion(unittest.TestCase):
+    def rows(self, path, n_fail, n_ok, error=0):
+        with open(path, "w") as f:
+            for i in range(n_fail):
+                f.write(json.dumps({"family": "t", "variant": "control", "arm": "A", "seed": i, "timed_out": True,
+                                    "requests": 0, "client_exit": -9}) + "\n")
+            for i in range(n_ok):
+                f.write(json.dumps({"family": "t", "variant": "control", "arm": "E", "seed": i, "timed_out": False,
+                                    "requests": 12, "client_exit": 0}) + "\n")
+            for i in range(error):
+                f.write(json.dumps({"family": "t", "variant": "trap", "arm": "A", "seed": i, "error": "x"}) + "\n")
+
+    def test_trips_past_threshold_and_minimum(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "v.jsonl")
+            self.rows(p, 3, 7)
+            self.assertEqual(run.kill_tripped(p), (True, 3, 10))
+            self.rows(p, 2, 8)
+            self.assertEqual(run.kill_tripped(p), (False, 2, 10))
+            self.rows(p, 5, 3)
+            self.assertEqual(run.kill_tripped(p)[0], False)
+            self.rows(p, 2, 8, error=5)
+            self.assertEqual(run.kill_tripped(p), (False, 2, 10))

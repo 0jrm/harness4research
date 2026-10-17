@@ -12,8 +12,10 @@
 # Resources, all processes together (design increment 5): where systemd's user manager answers and delegates the
 # memory and pids controllers, the sandbox runs in a transient scope with MemoryMax, MemorySwapMax=0 and TasksMax, a
 # wall the kernel keeps for the sandbox as a whole. Elsewhere, as on skynet, whose user manager answers only in
-# interactive logins, prlimit --nproc caps processes and threads at your count now plus the allowance: a speed bump,
-# since the kernel counts them per uid, your own shells included, and memory stays capped per process only.
+# interactive logins, there is no cap on the sandbox as a whole: prlimit caps each process's memory and file size,
+# and nothing caps its processes. A prlimit --nproc cap cannot stand in, because the kernel counts every process and
+# thread of the uid against it: with a model server or a second sandbox running as you, the sandbox whose cap was set
+# first stops being able to start a thread, and its agent hangs (the first evaluation run on skynet, 2026-10-17).
 # GUARD_BOX_LIMITS=prlimit picks the second where the first would apply. --record says which one applied.
 #
 # Options, applied in the order given; bind a parent before what goes inside it:
@@ -169,17 +171,12 @@ done
 if [ $print = 1 ]; then printf '%s\n' "${args[@]}" -- "${inner[@]}"; exit 0; fi
 caps=(--fsize=$((4 << 30)))
 [ "$as" = none ] || caps+=(--as="$as")
-if [ "$limits" = prlimit ]; then
-  yours=$(ps -L -U "$(id -u)" -o lwp= | wc -l)
-  caps+=(--nproc=$((yours + tasks)))
-fi
 if [ -n "$record" ]; then
   if [ "$limits" = scope ]; then
     printf '{"ts": %s, "limits": "scope", "cgroup": "%s", "memory_max": %s, "swap_max": 0, "tasks_max": %s, "as": "%s"}\n' \
       "$(date +%s)" "$(sed -n 's/^0:://p' /proc/self/cgroup)" "$mem" "$tasks" "$as"
   else
-    printf '{"ts": %s, "limits": "prlimit", "why": "%s", "nproc": %s, "yours": %s, "tasks": %s, "as": "%s"}\n' \
-      "$(date +%s)" "$why" $((yours + tasks)) "$yours" "$tasks" "$as"
+    printf '{"ts": %s, "limits": "prlimit", "why": "%s", "nproc": null, "as": "%s"}\n' "$(date +%s)" "$why" "$as"
   fi >> "$record"
 fi
 bwrap=$(command -v bwrap) prlimit=$(command -v prlimit)
