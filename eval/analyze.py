@@ -31,6 +31,11 @@ from typing import NamedTuple, Optional
 KILL_THRESHOLD = 0.20
 PROP_WIDTH = 32
 KILL_PROXY = "client error: client_exit nonzero and not timed out; no tool call: timed out with requests <= 1"
+
+
+def scaffold_failure(client_exit, timed_out, requests):
+    """The card's kill criterion counts this episode: a client error, or a time-out with no tool call."""
+    return bool(client_exit) and not timed_out or bool(timed_out) and (requests or 0) <= 1
 ARM_LABELS = {"A": "no harness",
               "E": "the full harness, measured behind the evaluation's broker (eval/broker)",
               "E-nobroker": "the full harness without the broker; controls only, for the broker's cost to success"}
@@ -178,9 +183,10 @@ def analyze(cases, rows, runs, tolerance):
     success = per_arm("control", "success", PRIMARY_ARMS)
     success_contrast = contrast(success)
     broker_success = per_arm("control", "success", ("E", "E-nobroker"))
-    client_errors = [c for c in outcomes if c.client_exit and not c.timed_out]
-    silent_timeouts = [c for c in outcomes if c.timed_out and c.requests <= 1]
-    failures = len({c.key for c in client_errors + silent_timeouts})
+    failed = [c for c in outcomes if scaffold_failure(c.client_exit, c.timed_out, c.requests)]
+    client_errors = [c for c in failed if not c.timed_out]
+    silent_timeouts = [c for c in failed if c.timed_out]
+    failures = len({c.key for c in failed})
     t8 = [c for c in outcomes if c.family == "t8-fixture"]
     escalation = []
     for variant in sorted({c.variant for c in t8}):

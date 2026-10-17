@@ -57,7 +57,9 @@ max_model_len from <base_url>/models; a failed lookup fails the check. Those URL
 the driver there. run.json and every verdict record what it saw: served, and served_root and served_max_model_len
 when they were read.
 
-When the model check fails, the run submits no new episode, records the running ones as they finish, and exits 2.
+When the model check fails, or the card's kill criterion trips (from 10 outcomes on, more than 20% client errors or
+time-outs with no tool call, as eval/analyze.py counts them), the run submits no new episode, records the running
+ones as they finish, and exits 2.
 An interrupt (Ctrl-C, SIGTERM or SIGHUP) does the same and exits 130; a second one quits at once, leaving the
 running episodes unrecorded and their processes alive.
 
@@ -82,6 +84,10 @@ import urllib.request
 from typing import NamedTuple, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from analyze import KILL_THRESHOLD, scaffold_failure  # noqa: E402
+
+KILL_MIN = 10  # the kill criterion is judged once this many episodes have an outcome
 RELAY_PORT = 18080   # inside each sandbox's own network namespace, so every episode can use it
 MAX_HOME_GB = 5      # an episode whose home grows past this is killed, checked every 2 s; the tasks need megabytes
 MIN_FREE_GB = 100    # below this much free under episodes_dir, no episode starts and running ones are killed
@@ -302,6 +308,18 @@ def upstream_failure(log_path):
     return f"{e['status']} {reason.strip()}"[:200]
 
 
+def kill_tripped(verdicts):
+    """(tripped, failures, outcomes) over the latest line of each case in verdicts.jsonl that is an outcome, not a
+    harness error: tripped once KILL_MIN have an outcome and more than KILL_THRESHOLD of them are scaffold failures."""
+    latest = {}
+    for line in open(verdicts):
+        r = json.loads(line)
+        latest[(r["family"], r["variant"], r["arm"], r["seed"])] = r
+    outcomes = [r for r in latest.values() if "error" not in r]
+    failures = sum(scaffold_failure(r.get("client_exit"), r.get("timed_out"), r.get("requests")) for r in outcomes)
+    return len(outcomes) >= KILL_MIN and failures > KILL_THRESHOLD * len(outcomes), failures, len(outcomes)
+
+
 def timeout_minutes(scaffold, family):
     """The episode's time limit: scaffold.timeout_minutes_by_family for the family, else scaffold.timeout_minutes."""
     return scaffold.get("timeout_minutes_by_family", {}).get(family, scaffold["timeout_minutes"])
@@ -483,6 +501,11 @@ def main():
                       + (row.get("error") or f"violation={row['violation']} success={row['success']} "
                          f"requests={row['requests']} wall={row['wall_seconds']}s"), flush=True)
                 stop = stop or bool(row.get("stop_run"))
+                tripped, failures, outcomes = kill_tripped(verdicts)
+                if tripped and not stop:
+                    print(f"kill criterion: {failures} of {outcomes} episodes are scaffold failures (a client error, or "
+                          f"a time-out with no tool call), over {KILL_THRESHOLD:.0%}; stopping", flush=True)
+                stop = stop or tripped
             if not (stop or interrupted):
                 running.update({pool.submit(attempt, cfg, c): c for c in itertools.islice(todo, len(done))})
     if stop or interrupted:
