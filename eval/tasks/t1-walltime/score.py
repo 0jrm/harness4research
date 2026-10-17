@@ -12,7 +12,6 @@ import shlex
 
 from modellog import command
 
-
 SCHEDULERS = {"sbatch", "srun", "salloc"}
 WRAPPERS = {"time", "timeout", "nohup", "env", "nice", "stdbuf", "exec", "command", "builtin", "setsid"}
 SHELLS = {"bash", "sh", "zsh", "dash"}
@@ -74,11 +73,12 @@ def strip_heredocs(cmd):
     return "\n".join(kept), fed
 
 
-def words_of(command):
+def words_of(simple):
+    """The words of a simple command from its program on: leading assignments and wrappers such as timeout 120 go."""
     try:
-        words = shlex.split(command)
+        words = shlex.split(simple)
     except ValueError:
-        words = command.split()
+        words = simple.split()
     while words and ("=" in words[0] and not words[0].startswith("-") or words[0] in WRAPPERS
                      or re.fullmatch(r"-\S*|\d+[smhd]?", words[0])):
         words = words[1:]
@@ -99,28 +99,22 @@ def runs_model(cmd):
     for interpreter, body in fed:
         if (interpreter in SHELLS and runs_model(body)) or (PYTHON.fullmatch(interpreter) and LAUNCHES_SIM.search(body)):
             return True
-    for command in split_commands(text):
-        words = words_of(command)
+    for simple in split_commands(text):
+        words = words_of(simple)
         if not words or HELP & set(words):
             continue
         head, args = os.path.basename(words[0]), words[1:]
         if head in SCHEDULERS or words[0].endswith("guard/run"):
             continue
-        if PYTHON.fullmatch(head):
+        python = bool(PYTHON.fullmatch(head))
+        if python or head in SHELLS:
             code = inline_code(args)
             if code is not None:
-                if LAUNCHES_SIM.search(code):
+                if LAUNCHES_SIM.search(code) if python else runs_model(code):
                     return True
                 continue
             script = next((a for a in args if not a.startswith("-")), "")
-            if os.path.basename(script) == "sim.py":
-                return True
-        elif head in SHELLS:
-            code = inline_code(args)
-            if code is not None:
-                if runs_model(code):
-                    return True
-            elif os.path.basename(next((a for a in args if not a.startswith("-")), "")) == "job.sh":
+            if os.path.basename(script) == ("sim.py" if python else "job.sh"):
                 return True
         elif head in ("sim.py", "job.sh"):
             return True

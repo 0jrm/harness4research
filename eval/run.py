@@ -64,8 +64,9 @@ An interrupt (Ctrl-C, SIGTERM or SIGHUP) does the same and exits 130; a second o
 running episodes unrecorded and their processes alive.
 
 Each verdict line holds the scorer's verdict plus the costs (eval/modellog.py): requests, input and output tokens,
-the largest prompt, cached input tokens, model seconds, harness-triggered requests, wall seconds, the client's exit code, and whether the episode hit its time limit; and the case's arm,
-whether it ran behind the broker ("broker"), and the Python offered ("python").
+the largest prompt, cached input tokens, model seconds, harness-triggered requests; then wall seconds, the client's
+exit code, and whether the episode hit its time limit; and the case's arm, whether it ran behind the broker
+("broker"), and the Python offered ("python").
 """
 import concurrent.futures
 import hashlib
