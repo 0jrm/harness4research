@@ -25,6 +25,7 @@ def row(family, variant, arm, seed, **over):
          "escalated": family == "t8-fixture" and arm == "E" and 3 <= seed <= 5,
          "signals": {}, "requests": 10 * seed, "input_tokens": 1000 * seed, "output_tokens": 100 * seed,
          "max_prompt_tokens": 500 * seed, "wall_seconds": 60.0 * seed, "client_exit": 0, "timed_out": False,
+         "cached_tokens": 800 * seed, "model_seconds": 30.0 * seed, "harness_requests": seed if arm != "A" else 0,
          "unfrozen": False, "card_sha256": SHA}
     r.update(over)
     return r
@@ -166,6 +167,62 @@ class SyntheticRun(unittest.TestCase):
         self.assertIn("WARNING: 2 arm E cases were not run behind the broker", text)
         self.assertIn("WARNING: 3 different Pythons offered", text)
         self.assertIn("python offered: not recorded (1 cases)", text)
+
+
+class ModelMinutesAndHarnessShare(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+
+    def report(self, rows):
+        return analyze.analyze(*analyze.load([write(rows, self.dir.name)]), 0.10)
+
+    def test_every_table_shows_model_minutes_beside_wall_minutes(self):
+        text = analyze.render(self.report(synthetic_rows()))
+        tables = [block for block in text.split("\n\n") if "  arm " in block or "  family " in block
+                  or "  variant " in block]
+        self.assertGreaterEqual(len(tables), 6)
+        for table in tables:
+            header = next(line for line in table.splitlines() if "arm" in line and ("k/n" in line or "  n" in line))
+            self.assertIn("model min", header, table)
+            self.assertIn("wall min", header, table)
+            self.assertLess(header.index("model min"), header.index("wall min"), table)
+
+    def test_cell_costs_and_harness_share(self):
+        rows = [row("t1-walltime", "trap", "E", s) for s in (1, 2, 3)]
+        cell = self.report(rows)["exploratory"]["cells"][0]
+        c = cell["costs"]
+        self.assertEqual((c["requests"], c["max_prompt_tokens"], c["input_tokens"], c["new_input_tokens"]),
+                         (20, 1000, 2000, 400))
+        self.assertAlmostEqual(c["cache_share"], 0.8)
+        self.assertEqual((c["model_minutes"], c["wall_minutes"]), (1.0, 2.0))
+        self.assertAlmostEqual(c["harness_share"], 0.1)
+
+    def test_harness_share_over_target_is_marked(self):
+        rows = [row("t1-walltime", "trap", "E", 1, harness_requests=5, requests=10)]
+        text = analyze.render(self.report(rows))
+        self.assertIn("50%!", text)
+        self.assertIn("harness share target: under 10%", text)
+
+    def test_success_via_scheduler_for_t1(self):
+        rows = [row("t1-walltime", "control", "E", 1, success=True, signals={"outside_scheduler": [5]}),
+                row("t1-walltime", "control", "E", 2, success=True, signals={"outside_scheduler": []}),
+                row("t1-walltime", "control", "E", 3, success=False, signals={"outside_scheduler": []}),
+                row("t8-fixture", "control", "E", 1, success=True)]
+        cells = {c["family"]: c for c in self.report(rows)["exploratory"]["cells"]}
+        p = cells["t1-walltime"]["success_via_scheduler"]
+        self.assertEqual((p["k"], p["n"]), (1, 3))
+        self.assertEqual(cells["t1-walltime"]["success"]["k"], 2)
+        self.assertIsNone(cells["t8-fixture"]["success_via_scheduler"])
+
+    def test_rows_from_before_the_new_costs_render_dashes(self):
+        old = row("t1-walltime", "trap", "A", 1)
+        for key in ("cached_tokens", "model_seconds", "harness_requests"):
+            del old[key]
+        report = self.report([old])
+        c = report["exploratory"]["cells"][0]["costs"]
+        self.assertEqual((c["model_minutes"], c["harness_share"], c["cache_share"]), (None, None, None))
+        self.assertIn(" - ", analyze.render(report))
 
 
 class Edges(unittest.TestCase):
