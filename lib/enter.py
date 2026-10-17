@@ -99,19 +99,38 @@ def check_project(project, home):
             refuse(f"{project} overlaps {secret}, which no sandbox may see")
 
 
+CREDENTIAL_WORDS = ("TOKEN", "KEY", "SECRET", "PASS")
+
+
 def planted_credentials(project):
-    """Claude Code settings in the project that set a credential-like variable: whatever sits in the project is inside
-    the sandbox, so such a token is the agent's."""
+    """Claude Code settings in the project that set a credential-like variable, as (path, settings, the keys): what sits
+    in the project is inside the sandbox, so guard enter covers each such file with a copy without those keys."""
     found = []
     for name in ("settings.json", "settings.local.json"):
         path = os.path.join(project, ".claude", name)
         try:
             with open(path) as f:
-                env = json.load(f).get("env") or {}
+                settings = json.load(f)
+            env = settings.get("env") or {}
         except (OSError, ValueError, AttributeError):
             continue
-        found += [f"{path} sets {k}" for k in env if any(w in k.upper() for w in ("TOKEN", "KEY", "SECRET", "PASS"))]
+        keys = [k for k in env if any(w in k.upper() for w in CREDENTIAL_WORDS)]
+        if keys:
+            found.append((path, settings, keys))
     return found
+
+
+def masked(found, bindir):
+    """Writes each settings file in found without its credential keys, and returns the read-only binds over the
+    originals."""
+    out = []
+    for path, settings, keys in found:
+        clean = {**settings, "env": {k: v for k, v in settings["env"].items() if k not in keys}}
+        copy = os.path.join(bindir, ".settings-" + os.path.basename(path))
+        with open(copy, "w") as f:
+            json.dump(clean, f, indent=2)
+        out.append(("--ro", copy, path))
+    return out
 
 
 def seed(home, agent_home, entries):
@@ -153,13 +172,14 @@ def git_dirs(project):
 MOUNT_RANK = {"--ro-try": 0, "--ro": 1, "--home": 2, "--bind": 3}
 
 
-def mounts(home, agent_home, project, entries, no_tty, bindir):
+def mounts(home, agent_home, project, entries, no_tty, bindir, covers=()):
     """lib/box.sh's bind options, a parent before what sits inside it, so the host's read-only /opt never covers a
     project, git directory or home under it; at one path, the writable bind comes last and wins. The harness is
     read-only, unless it is the project itself, which the agent is there to change."""
     out = [("--ro-try", "/opt", "/opt"), ("--home", agent_home, home), ("--bind", project, project),
            ("--ro", bindir, "/run/guard-bin")]
     out += [("--bind", d, d) for d in git_dirs(project)]
+    out += list(covers)
     if HARNESS != project:
         out.append(("--ro", HARNESS, HARNESS))
     for key, value in entries:
@@ -190,9 +210,9 @@ def main(argv):
     home = os.path.realpath(os.path.expanduser("~"))
     project = os.path.realpath(project)
     check_project(project, home)
-    for found in planted_credentials(project):
-        print(f"guard enter: warning: {found}, inside the project, so the agent can read it; move that credential "
-              "out of the project", file=sys.stderr)
+    planted = planted_credentials(project)
+    for path, _, keys in planted:
+        print(f"guard enter: {path} sets {', '.join(keys)}; the sandbox sees a copy without them", file=sys.stderr)
     name = agent or os.path.basename(cmd[0])
     path, entries = profile(name)
     if path is None:
@@ -234,7 +254,7 @@ def main(argv):
     os.symlink(os.path.join(HARNESS, "bin", "guard"), os.path.join(bindir, "guard"))
 
     try:
-        box = [os.path.join(HERE, "box.sh"), *mounts(home, agent_home, project, entries, no_tty, bindir),
+        box = [os.path.join(HERE, "box.sh"), *mounts(home, agent_home, project, entries, no_tty, bindir, masked(planted, bindir)),
                "--sock-dir", sock_dir, "--path", "/run/guard-bin",
                "--env", f"GUARD_SESSION={sid}", "--probe", *[x for p in host.hidden() for x in ("--hide", p)]]
         for key, value in entries:
