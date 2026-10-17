@@ -361,14 +361,15 @@ def run_episode(cfg, ep, family, variant, arm, seed):
         time.sleep(0.05)
     release = expand(scaffold["release_dir"])
     with open(os.path.join(ep, "sandbox", "binds"), "w") as f:
-        f.write(f"{release} /opt/codex\n{os.path.join(HERE, 'driver', 'netrelay.py')} /opt/model/netrelay.py\n")
+        f.write(f"{release} /opt/codex\n{os.path.join(HERE, 'driver', 'netrelay.py')} /opt/model/netrelay.py\n"
+                f"{os.path.join(HERE, 'driver', 'relay.sh')} /opt/model/relay.sh\n")
     with open(os.path.join(ep, "sandbox", "path"), "w") as f:
         f.write("/opt/codex/bin\n")
     os.makedirs(os.path.join(ep, "home", ".codex"), exist_ok=True)
     with open(os.path.join(ep, "home", ".codex", "config.toml"), "w") as f:
         f.write(codex_config(scaffold, RELAY_PORT, model["alias"]))
     prompt = open(os.path.join(ep, "prompt.md")).read()
-    relay = (f"python3 /opt/model/netrelay.py {RELAY_PORT} /run/model/proxy.sock & "
+    relay = (f"bash /opt/model/relay.sh {RELAY_PORT} /run/model/proxy.sock & "
              f"until (exec 3<>/dev/tcp/127.0.0.1/{RELAY_PORT}) 2>/dev/null; do sleep 0.1; done; exec \"$@\"")
     cmd = [os.path.join(HERE, "env", "sandbox.sh"), ep, "--", "bash", "-c", relay, "relay", "codex", "exec", "--json", "--skip-git-repo-check",
            "--dangerously-bypass-approvals-and-sandbox", "-C", f"/home/agent/{meta['project']}", prompt]
