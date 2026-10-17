@@ -66,6 +66,9 @@ PY
   # The sandbox's remote has no pull requests: a push to main passes when the fence passes, as the ruleset would
   # let a merge pass. So arm E finishes by pushing, and the review-and-merge skill, which drives the pull-request
   # flow, is not linked. Recorded in the evaluation's question card as its one deviation from the installed harness.
+  # Behind the broker, guard run replaces the card, preflight and ripples steps (experiment E2), so AGENTS.md is the
+  # broker's own short version.
+  if [ ${#broker[@]} -gt 0 ]; then cp "$here/broker/AGENTS.md" "$human/AGENTS.md"; else
   python3 - "$human/AGENTS.md" <<'PY'
 import sys
 path = sys.argv[1]
@@ -75,6 +78,7 @@ new = ("- Finish work by pushing it to `main` on `origin`. The remote runs the `
        "`main` and refuses a push that fails it.")
 open(path, "w").write(text.replace(old, new))
 PY
+  fi
   git -C "$human" add -A
   git -C "$human" -c user.name=PI -c user.email=pi@lab commit -qm "chore(guard): set budget and watched paths"
   git -C "$ep/state/git/protected.git" fetch -q "$human" guard/init:main
