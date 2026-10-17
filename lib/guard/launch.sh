@@ -737,7 +737,7 @@ gate_ripples() {
   out=$(bash -c "$script" guard/bin/ripples.sh "$run_dir" 2>&1); rc=$?
   case $rc in
     0) ;;
-    1) fail "ripples reports $(awk -F'\t' '$1=="RIPPLE" { printf "%s%s: %s", (n++ ? " | " : ""), $2, $3 }' <<<"$out"); fix the cause, record it, or set HPC_SPEND_RESERVE=1 for a diagnostic run" ;;
+    1) fail "ripples reports $(awk -F'\t' '$1=="RIPPLE" { printf "%s%s: %s", (n++ ? " | " : ""), $2, $3 }' <<<"$out"); take the step each ripple names, then launch again" ;;
     *) fail "ripples could not run (exit $rc): $(tail -n1 <<<"$out"); run guard/run ripples $run_dir to see why" ;;
   esac
 }

@@ -290,7 +290,8 @@ expect explore-walltime-bounded fail 'exceeds max_walltime_minutes=10' -- env HP
 expect explore-nodes-bounded fail 'exceeds max_nodes_per_job=1' -- env HPC_GUARD_REF=HEAD guard/run preflight runs/explore-sketch job.sh --nodes=2 --time=00:05:00
 git reset -q --hard HEAD~1
 printf '100|2026-09-29-demo|FAILED|10|240\n' > "$tmp/rows"
-expect preflight-refuses-on-ripple fail '^PREFLIGHT FAIL: ripples reports job-states 100:FAILED \(diagnose, then merge runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line and the root cause for each, since ripples reads incidents from origin/main; a resource stop of a launch continues with an execution.tsv restart or resume row instead\); fix the cause' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
+expect preflight-refuses-on-ripple fail '^PREFLIGHT FAIL: ripples reports job-states 100:FAILED \(diagnose, then merge runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line and the root cause for each, since ripples reads incidents from origin/main; a resource stop of a launch continues with an execution.tsv restart or resume row instead\); take the step each ripple names, then submit again$' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run preflight "$R" job.sh
+expect preflight-refusal-offers-no-reserve fail - -- bash -c 'MOCK_SACCT_ROWS="$1" guard/run preflight "$2" job.sh 2>&1 | grep HPC_SPEND_RESERVE' _ "$tmp/rows" "$R"
 expect ripples-single-entry fail '^RIPPLE	job-states	100:FAILED \(diagnose' -- env MOCK_SACCT_ROWS="$tmp/rows" guard/run ripples "$R"
 expect preflight-reserve-skips-ripples ok 'SBATCH .*--job-name=2026-09-29-demo' -- env MOCK_SACCT_ROWS="$tmp/rows" HPC_SPEND_RESERVE=1 guard/run preflight "$R" job.sh
 mkdir -p "$R/incidents"; printf '# Incident 0\njob: 100\n' > "$R/incidents/0.md"; git add -A; git commit -q -m "run: incident 0"
@@ -305,8 +306,8 @@ echo "== ripples"
 mkdir -p "$R/checks"; printf '#!/bin/bash\necho "nan count 3"; exit 1\n' > "$R/checks/nan.sh"; chmod +x "$R/checks/nan.sh"
 printf '100|2026-09-29-demo|TIMEOUT|14400|240\n101|2026-09-29-demo|COMPLETED|13000|240\n102|2026-09-29-demo|FAILED|10|240\n103|other|FAILED|1|1\n' > "$tmp/rows"
 export MOCK_SACCT_ROWS=$tmp/rows
-expect ripples-states fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED \(diagnose, then merge runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line and the root cause for each, since ripples reads incidents from origin/main; a resource stop of a launch continues with an execution.tsv restart or resume row instead\)$' -- guard/run ripples "$R"
-expect ripples-walltime fail 'RIPPLE.walltime-headroom.100:100% 101:90%' -- guard/run ripples "$R"
+expect ripples-states fail 'RIPPLE.job-states.100:TIMEOUT 102:FAILED \(the work needs more than max_walltime_minutes in one job: split it into jobs that each fit and resume from the last checkpoint, or ask a human to raise the limit; then merge runs/2026-09-29-demo/incidents/<n>.md with a job: <id> line and the root cause for each, since ripples reads incidents from origin/main; a resource stop of a launch continues with an execution.tsv restart or resume row instead\)$' -- guard/run ripples "$R"
+expect ripples-walltime fail 'RIPPLE.walltime-headroom.100:100% 101:90% \(the work needs more than max_walltime_minutes in one job: split it' -- guard/run ripples "$R"
 expect ripples-check fail 'RIPPLE.check:nan.sh.nan count 3' -- guard/run ripples "$R"
 printf '#!/bin/bash\necho "no metrics.csv yet"; exit 77\n' > "$R/checks/later.sh"; chmod +x "$R/checks/later.sh"
 expect ripples-check-not-yet fail '^UNCHECKED	check:later.sh	no metrics.csv yet; it exits 77 until its input exists$' -- guard/run ripples "$R"
