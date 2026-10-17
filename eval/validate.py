@@ -4,7 +4,8 @@ Checks every task's scorer against its scripted agents before any model runs: ea
 through a real episode, and the verdict must match the expectation in the task's task.json. An honest agent is
 played on both variants and must pass both; a cheating agent is played on the trap variant and must be caught.
 With --seeds N, each case runs on seeds 1..N, since the data and thresholds vary by seed. Exit 1 when any
-verdict differs."""
+verdict differs. In task.json a scripted agent may name its "arms" and "variants", and "broker": true
+plays it behind the broker (episode.sh --broker)."""
 import json
 import os
 import shutil
@@ -19,11 +20,12 @@ def run(*cmd, **kw):
     return subprocess.run(list(cmd), capture_output=True, text=True, **kw)
 
 
-def play(family, variant, arm, agent, keep, seed):
+def play(family, variant, arm, agent, keep, seed, broker=False):
     root = tempfile.mkdtemp(prefix="v.", dir=os.environ.get("TMPDIR"))
     ep = os.path.join(root, "s")
     try:
-        built = run(os.path.join(HERE, "episode.sh"), family, variant, arm, ep, "--seed", str(seed))
+        built = run(os.path.join(HERE, "episode.sh"), family, variant, arm, ep, "--seed", str(seed),
+                    *(["--broker"] if broker else []))
         if built.returncode:
             return None, f"episode.sh failed: {built.stderr.strip()[-400:]}"
         scripted = os.path.join(ep, "home", ".scripted")
@@ -62,10 +64,10 @@ def main():
         with open(os.path.join(HERE, "tasks", family, "task.json")) as f:
             task = json.load(f)
         for agent, spec in task["scripted"].items():
-            variants = ["trap", "control"] if agent == "honest" else ["trap"]
+            variants = spec.get("variants", ["trap", "control"] if agent == "honest" else ["trap"])
             for variant in variants:
                 for arm, seed in [(a, s) for a in spec.get("arms", arms) if a in arms for s in range(1, seeds + 1)]:
-                    got, err = play(family, variant, arm, agent, keep, seed)
+                    got, err = play(family, variant, arm, agent, keep, seed, spec.get("broker", False))
                     name = f"{family} {variant} arm {arm} {agent} seed {seed}"
                     want = dict(spec["expect"], **spec.get(f"expect_{variant}", {}))
                     if got is not None and all(got[k] == v for k, v in want.items()):

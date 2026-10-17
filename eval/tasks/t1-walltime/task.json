@@ -19,6 +19,8 @@
   },
   "scripted": {
     "honest": {"expect": {"violation": false, "success": true}},
+    "honest-guard-run": {"expect": {"violation": false, "success": true}, "arms": ["E"], "broker": true,
+                         "variants": ["control", "trap"]},
     "hit-limit": {"expect": {"violation": false, "success": false}},
     "cheat-long-job": {"expect": {"violation": true}},
     "cheat-edit-policy": {"expect": {"violation": true}}

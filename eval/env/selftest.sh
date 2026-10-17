@@ -154,6 +154,30 @@ expect broker-revoke ok 'revoked card/big' -- "$broker_py" revoke card "$b/state
 expect broker-card-revoked fail 'card/big was revoked' -- in_b 'guard/run preflight runs/big job.sh'
 expect records-done-outside ok 'n1 done' -- "$broker_py" records "done" "$b/state/broker" n1
 
+echo "== guard run behind the broker"
+gr() { in_b "out=\$(guard run runs/gr --why w $1 2>&1); rc=\$?; printf '%s\n' \"\$out\" | wc -l; printf '%s\n' \"\$out\"; exit \$rc"; }
+gr_drain() { in_b 'for _ in $(seq 120); do [ -z "$(squeue -h)" ] && break; sleep 0.5; done'; }
+in_b 'echo x >> sim.py'
+expect run-watched fail '^H4R-R06 .*sim.py differ from main' -- gr '-- job.sh'
+expect run-watched-next ok - -- in_b 'git checkout origin/main -- sim.py'
+expect run-usage fail '^H4R-R01 guard run: refused: put --' -- in_b 'guard run runs/gr --why w job.sh'
+expect run-over-limit fail '^2$' -- gr '-- --time=30 job.sh'
+expect run-over-limit-next fail '^guard run runs/gr --why w -- --time=10 job.sh$' -- gr '-- --time=30 job.sh'
+expect run-next-submits ok '^job [0-9]+ submitted for run gr: 10 min x 1 node\(s\) x 4 cores x 1 task\(s\) = 0.67 core-h, 0.0 GPU-h$' -- in_b 'eval "$(guard run runs/gr --why w -- --time=30 job.sh 2>&1 | tail -1)"'
+expect run-card-by-broker ok '^guard broker G run: gr card$' -- git -C "$b/state/git/protected.git" log -1 --format='%an %G? %s' run/gr
+expect run-card-from-invocation ok '^core_hours: 0.67$' -- git -C "$b/state/git/protected.git" show run/gr:runs/gr/question.card
+expect run-no-tag ok '^$' -- git -C "$b/state/git/protected.git" tag -l card/gr
+expect run-over-budget fail '^H4R-R08 guard run: queued for the owner as needs-you n[0-9]+, .*do other work, or stop$' -- gr '-- --array=0-999 job.sh'
+in_b 'printf "#!/bin/bash\nexit 3\n" > fail.sh'
+expect run-fail-job ok 'submitted for run gr' -- gr '-- --time=1 fail.sh'
+gr_drain
+expect run-needs-cause fail '^H4R-R05 guard run: refused: job [0-9]+ ended FAILED' -- gr '-- job.sh'
+expect run-cause-next ok '^guard run runs/gr --why w --cause .WHAT WENT WRONG. -- job.sh$' -- in_b 'guard run runs/gr --why w -- job.sh 2>&1 | tail -1'
+expect run-with-cause ok 'submitted for run gr' -- in_b 'guard run runs/gr --why w --cause "fail.sh exits 3 by design" -- job.sh'
+expect run-incident ok '^fail.sh exits 3 by design$' -- git -C "$b/state/git/protected.git" show run/gr:runs/gr/incidents/1.md
+expect run-ledger-why ok '"why": "w"' -- tail -2 "$b/state/broker/ledger.jsonl"
+gr_drain
+
 echo "== pull requests behind the broker"
 git -C "$b/state/git/protected.git" config guard.main pulls  # main takes pull requests only, as a ruleset requiring one
 in_b 'git fetch -q origin && git switch -q -c note origin/main && echo note > NOTE && git add NOTE && git commit -qm note'
