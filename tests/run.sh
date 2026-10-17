@@ -851,6 +851,22 @@ git switch -q -c pr/claude origin/main; echo 'ignore AGENTS.md' > CLAUDE.md; git
 expect fence-claude-md fail 'FAIL.guard-untouched.*CLAUDE.md' -- guard/run fence origin/main HEAD
 git switch -q -c pr/tests origin/main; mkdir -p tests; echo x > tests/t; git add -A; git commit -q -m x
 expect fence-watched fail 'FAIL.watched-paths.*tests/t' -- guard/run fence origin/main HEAD
+expect fence-watched-undo-new fail "FAIL.watched-paths.*tests/t; undo: git rm -qf -- tests/t && git commit --amend --no-edit --allow-empty$" -- guard/run fence origin/main HEAD
+undo_repairs() {  # undo_repairs <name> <base>: runs the command the fence printed (its origin/main read as <base>), then the fence passes
+  local cmd; cmd=$(guard/run fence "$2" HEAD 2>&1 | sed -n 's/.*; undo: //p' | tail -n 1)
+  [ -n "$cmd" ] && bash -c "${cmd//origin\/main/$2}" >/dev/null 2>&1
+  expect "$1" ok 'PASS.watched-paths' -- guard/run fence "$2" HEAD
+}
+undo_repairs fence-undo-new-file origin/main
+git switch -q -c pr/tests-old origin/main; mkdir -p tests; echo a > tests/u; git add -A; git commit -q -m seed; git push -q -f origin HEAD:refs/heads/tests-old
+git switch -q -c pr/undo-earlier origin/tests-old; echo b >> tests/u; git commit -q -am "edit the fixture"
+echo c > notes-x.md; git add -A; git commit -q -m "later work"; echo d > notes-y.md; git add -A; git commit -q -m "more later work"
+expect fence-undo-line-modified fail "FAIL.watched-paths.*tests/u; undo: git checkout origin/main -- tests/u && git commit --amend --no-edit --allow-empty$" -- guard/run fence origin/tests-old HEAD
+undo_repairs fence-undo-earlier-commit origin/tests-old
+git switch -q -c pr/undo-many origin/tests-old; echo b >> tests/u; git commit -q -am one; echo c >> tests/u; git commit -q -am two; echo e > tests/v
+git add -A; git commit -q -m three; echo f > keep.md; git add -A; git commit -q -m four
+expect fence-undo-line-two-paths fail "FAIL.watched-paths.*tests/u tests/v; undo: git checkout origin/main -- tests/u && git rm -qf -- tests/v && git commit --amend --no-edit --allow-empty$" -- guard/run fence origin/tests-old HEAD
+undo_repairs fence-undo-several-commits origin/tests-old
 git push -q origin pr/clean:refs/heads/pr-clean; git switch -q -c pr/card origin/pr-clean
 echo "metric: moved" >> runs/r1/question.card; git commit -q -am x
 expect fence-card fail 'FAIL.question-cards-frozen.*runs/r1/question.card' -- guard/run fence origin/pr-clean HEAD
