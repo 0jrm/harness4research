@@ -12,7 +12,8 @@ item's source. It writes ledger rows and cards itself (decision D13): it validat
 branch run/<run_id> on origin with a commit signed by its key, and pushes. The forge refuses an unsigned commit that
 writes either file. A card is approved when the signed tag card/<run_id> exists on origin, made by the owner's key or
 by the broker's (D2); the broker signs it only for a card whose budget_core_hours is at or under the budget card's
-card_auto_max_core_hours (default 0, so never), logs that, and otherwise queues an approve item for the owner.
+card_auto_max_core_hours (default 0, so never), or is 0, blank or the template placeholder, which preflight reads as no
+per-run cap beyond that small run; it logs that, and otherwise queues an approve item for the owner.
 Every request and its outcome is a row in records/log.jsonl, the digest of what the broker did."""
 import datetime as dt
 import json
@@ -282,15 +283,17 @@ class Records:
         self.log({"run": run, "card": sha, "budget_core_hours": budget})
         said = f"{path} committed to run/{run} as {sha[:12]}, signed by the broker"
         fetch = f"; fetch it: git fetch origin run/{run} && git merge FETCH_HEAD"
-        if budget.isdigit() and 0 < int(budget) <= auto:
-            self.tag(run, sha, self.cfg["signing_key"], f"card {run}: budget_core_hours {budget}, at or under "
+        unset = budget in ("", "0") or budget.startswith("<")
+        if auto and (unset or (budget.isdigit() and int(budget) <= auto)):
+            has = f"budget_core_hours {budget}" if not unset else "budget_core_hours 0 or blank"
+            self.tag(run, sha, self.cfg["signing_key"], f"card {run}: {has}, at or under "
                      f"card_auto_max_core_hours {auto}; signed by the broker", IDENT)
             self.log({"run": run, "approved": sha, "by": "broker", "auto_max": auto})
-            return f"{said}, and approved: the broker signed card/{run} (budget {budget} <= {auto} core-h){fetch}\n"
+            return f"{said}, and approved: the broker signed card/{run} ({has}, small run up to {auto} core-h){fetch}\n"
         item = self.queue_item(
             "approve", f"Approve question card {path}",
-            dict(why=f"run {run} submits nothing until its card is approved; budget_core_hours {budget or 'unset'} is "
-                     f"over card_auto_max_core_hours {auto}", expect="a signed tag card/" + run, worry="",
+            dict(why=f"run {run} submits nothing until its card is approved; budget_core_hours is {budget!r}; the broker "
+                     f"approves runs up to card_auto_max_core_hours {auto}", expect="a signed tag card/" + run, worry="",
                  undo=f"delete the tag card/{run}, past the tag ruleset, and record a revoked row"),
             [], ["# read the card first: git show " + sha[:12] + ":" + path, f"git fetch origin run/{run}",
                  f"git tag -s -m approved card/{run} {sha}", f"git push origin card/{run}"], "broker")
