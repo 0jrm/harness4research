@@ -66,6 +66,7 @@ PY
   # The sandbox's remote has no pull requests: a push to main passes when the fence passes, as the ruleset would
   # let a merge pass. So arm E finishes by pushing, and the review-and-merge skill, which drives the pull-request
   # flow, is not linked. Recorded in the evaluation's question card as its one deviation from the installed harness.
+  # Experiment E4 adds the guard wait line here rather than to templates/AGENTS.md, which is at its word budget.
   python3 - "$human/AGENTS.md" <<'PY'
 import sys
 path = sys.argv[1]
@@ -73,7 +74,13 @@ text = open(path).read()
 old = next(l for l in text.splitlines() if l.startswith("- Finish work through the `review-and-merge` skill"))
 new = ("- Finish work by pushing it to `main` on `origin`. The remote runs the `guard-fence` check on every push to "
        "`main` and refuses a push that fails it.")
-open(path, "w").write(text.replace(old, new))
+wait = ("- Run anything that takes more than a few seconds as `guard wait -- <command>`, or start it in the background "
+        "and run `guard wait <pid>`, instead of polling. It prints nothing until the command exits or 20 minutes pass, "
+        "then the exit code and the last 20 lines. If your shell tool returns first, wait on that session once with "
+        "the longest wait the tool allows.")
+text = text.replace(old, new).replace("\n\n## Project landmines", f"\n{wait}\n\n## Project landmines")
+assert wait in text
+open(path, "w").write(text)
 PY
   git -C "$human" add -A
   git -C "$human" -c user.name=PI -c user.email=pi@lab commit -qm "chore(guard): set budget and watched paths"

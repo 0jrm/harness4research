@@ -96,6 +96,14 @@ def is_harness_refusal(text):
     return bool(REFUSAL.search(text))
 
 
+def is_poll(name, args):
+    """A call that only waits on a running command: write_stdin with nothing to write, or exec_command with no
+    command."""
+    if name == "write_stdin":
+        return not args.get("chars")
+    return name == "exec_command" and not command(args).strip()
+
+
 def harness_triggered(request):
     return (any(is_harness_call(name, args) for _, name, args in request.calls)
             or any(is_harness_refusal(text) for _, text in request.outputs))
@@ -108,4 +116,5 @@ def costs(path):
             "output_tokens": sum(r.output_tokens for r in rs),
             "max_prompt_tokens": max((r.prompt_tokens for r in rs), default=0),
             "cached_tokens": sum(r.cached_tokens for r in rs), "model_seconds": round(sum(r.seconds for r in rs), 3),
-            "harness_requests": sum(harness_triggered(r) for r in rs)}
+            "harness_requests": sum(harness_triggered(r) for r in rs),
+            "poll_requests": sum(any(is_poll(name, args) for _, name, args in r.calls) for r in rs)}
