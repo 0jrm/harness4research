@@ -22,7 +22,8 @@ The config is the question card's machine part:
             "fold_developer": true,                   the proxy sends Codex's developer messages as system/user
             "text_into_reasoning": true},             and the agent's past text inside its reasoning
   "scaffold": {"name": "codex", "release_dir": "~/.codex/packages/standalone/releases/<version>",
-               "context_window": 65536, "timeout_minutes": 30, "parallel": 4, "disable_features": [...]},
+               "context_window": 65536, "timeout_minutes": 30, "parallel": 4, "disable_features": [...],
+               "timeout_minutes_by_family": {"t3-entity-overlap": 180}},   optional: a family's own time limit
   "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E", "E-nobroker"],
              "arm_variants": {"E-nobroker": ["control"]},   optional: the variants an arm runs, else all of them
              "seeds": [1, 2],
@@ -301,6 +302,11 @@ def upstream_failure(log_path):
     return f"{e['status']} {reason.strip()}"[:200]
 
 
+def timeout_minutes(scaffold, family):
+    """The episode's time limit: scaffold.timeout_minutes_by_family for the family, else scaffold.timeout_minutes."""
+    return scaffold.get("timeout_minutes_by_family", {}).get(family, scaffold["timeout_minutes"])
+
+
 def run_episode(cfg, ep, family, variant, arm, seed):
     model, scaffold = cfg["model"], cfg["scaffold"]
     os.makedirs(os.path.dirname(ep), exist_ok=True)
@@ -350,7 +356,8 @@ def run_episode(cfg, ep, family, variant, arm, seed):
            "--dangerously-bypass-approvals-and-sandbox", "-C", f"/home/agent/{meta['project']}", prompt]
     started = time.time()
     timed_out = disk_kill = None
-    limit = started + scaffold["timeout_minutes"] * 60
+    minutes = timeout_minutes(scaffold, meta["family"])
+    limit = started + minutes * 60
     with open(os.path.join(ep, "state", "agent", "events.jsonl"), "w") as out, \
          open(os.path.join(ep, "state", "agent", "stderr.log"), "w") as err:
         agent = subprocess.Popen(cmd, stdout=out, stderr=err, stdin=subprocess.DEVNULL, start_new_session=True)
@@ -372,7 +379,7 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
     scored = subprocess.run([sys.executable, os.path.join(HERE, "score.py"), ep], capture_output=True, text=True)
     row = {"episode": os.path.basename(ep), **served.record(), "python": python, "client_exit": rc,
-           "timed_out": bool(timed_out),
+           "timed_out": bool(timed_out), "timeout_minutes": minutes,
            "disk_kill": disk_kill,
            "wall_seconds": wall, **costs(log)}
     if not scored.returncode:

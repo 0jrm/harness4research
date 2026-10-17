@@ -198,5 +198,13 @@ class DryRun(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.dir.name, "results")))
 
 
+class TimeoutByFamily(unittest.TestCase):
+    def test_family_override_and_default(self):
+        scaffold = {"timeout_minutes": 30, "timeout_minutes_by_family": {"t3-entity-overlap": 180}}
+        self.assertEqual(run.timeout_minutes(scaffold, "t3-entity-overlap"), 180)
+        self.assertEqual(run.timeout_minutes(scaffold, "t1-walltime"), 30)
+        self.assertEqual(run.timeout_minutes({"timeout_minutes": 30}, "t3-entity-overlap"), 30)
+
+
 if __name__ == "__main__":
     unittest.main()
