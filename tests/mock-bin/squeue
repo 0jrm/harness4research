@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Mock: MOCK_SQUEUE_PENDING replaces the one pending row, "<cpus> <time limit>", and set but empty lists none.
-# MOCK_SQUEUE_EXIT makes every query fail with that code.
+# MOCK_SQUEUE_EXIT makes every query fail with that code. MOCK_SQUEUE_STATE is the state guard wait reads.
 [ -z "${MOCK_SQUEUE_EXIT:-}" ] || { echo "slurm_load_jobs error: Unable to contact slurm controller (connect failure)" >&2; exit "$MOCK_SQUEUE_EXIT"; }
-if [[ "$*" == *PENDING* ]]; then [ -z "${MOCK_SQUEUE_PENDING-x}" ] || echo "${MOCK_SQUEUE_PENDING:-128 1-00:00:00}"; else printf 'j1\nj2\n'; fi
+if [[ "$*" == *%T* ]]; then [ -z "${MOCK_SQUEUE_STATE:-}" ] || echo "$MOCK_SQUEUE_STATE"
+elif [[ "$*" == *PENDING* ]]; then [ -z "${MOCK_SQUEUE_PENDING-x}" ] || echo "${MOCK_SQUEUE_PENDING:-128 1-00:00:00}"; else printf 'j1\nj2\n'; fi

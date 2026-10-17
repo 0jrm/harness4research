@@ -40,7 +40,18 @@ class Log(unittest.TestCase):
                                  prompt=2000, cached=1500, out=30, seconds=30.0)])
         self.assertEqual(modellog.costs(path), {
             "requests": 3, "input_tokens": 6000, "output_tokens": 60, "max_prompt_tokens": 3000,
-            "cached_tokens": 3500, "model_seconds": 120.0, "harness_requests": 1})
+            "cached_tokens": 3500, "model_seconds": 120.0, "harness_requests": 1, "poll_requests": 0})
+
+    def test_a_poll_waits_on_a_running_command_and_writes_nothing(self):
+        poll = {"type": "function_call", "name": "write_stdin", "call_id": "c2",
+                "arguments": json.dumps({"session_id": 7, "chars": "", "yield_time_ms": 30000})}
+        typed = {"type": "function_call", "name": "write_stdin", "call_id": "c3",
+                 "arguments": json.dumps({"session_id": 7, "chars": "y\n"})}
+        path = self.write([entry([call(1, "python3 evaluate.py")]),
+                           entry([call(1, "python3 evaluate.py"), output(1, "Process running"), poll]),
+                           entry([poll, output(2, "Process running"), typed]),
+                           entry([typed, output(3, "ok"), call(4, "")])])
+        self.assertEqual(modellog.costs(path)["poll_requests"], 2)
 
     def test_costs_without_a_log(self):
         self.assertEqual(modellog.costs("/nonexistent/requests.jsonl")["requests"], 0)

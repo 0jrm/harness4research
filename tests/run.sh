@@ -2429,6 +2429,24 @@ echo "| W9.3 | hand edit | merged #99 |" >> "$ps/status.md"; plan_status >/dev/n
 expect plan-status-overwrites-hand-edit fail - -- grep -q 'hand edit' "$ps/status.md"
 expect plan-status-gh-fails fail '^plan-status: gh cannot list pull requests' -- env PATH="$(path_without gh)" bash -c '"$1/tools/plan-status.py" --plan "$2" --out /dev/null' _ "$here" "$ps/docs/plan-2099-01-01.md"
 
+echo "== wait"
+gw=$(mktemp -d)
+expect wait-command-code fail '^line 30$' -- bash -c '"$1" wait -- sh -c "seq -f \"line %g\" 30; exit 3" | tail -2 | head -1; exit ${PIPESTATUS[0]}' _ "$guard"
+expect wait-command-tail ok '^20$' -- bash -c '"$1" wait -- seq 30 | grep -c "^[0-9]"' _ "$guard"
+expect wait-command-status ok '^pid [0-9]+ exited with code 0; log ' -- bash -c '"$1" wait -- true | tail -1' _ "$guard"
+start=$SECONDS
+expect wait-timeout fail '^still running as pid [0-9]+ after the timeout; guard wait [0-9]+; log ' -- "$guard" wait --timeout 1 -- sleep 30
+expect wait-timeout-bounded ok - -- test $((SECONDS - start)) -le 3
+(echo started; sleep 2; echo finished) > "$gw/bg.log" & bg=$!
+expect wait-pid-log ok "^pid $bg exited; log $gw/bg.log$" -- "$guard" wait $bg
+echo '777|RUNNING|0:0' > "$gw/rows"; (sleep 2; echo '777|COMPLETED|0:0' > "$gw/rows") &
+touch "$gw/slurm-777.out"; echo 'step 9 done' > "$gw/slurm-777.out"
+expect wait-job ok '^job 777 RUNNING -> COMPLETED exit 0:0; log slurm-777.out$' -- bash -c 'cd "$1" && MOCK_SACCT_WAIT=rows "$2" wait 777 | tail -1' _ "$gw" "$guard"
+expect wait-job-ended ok '^job 777 COMPLETED exit 0:0' -- bash -c 'cd "$1" && MOCK_SACCT_WAIT=rows "$2" wait 777 | tail -1' _ "$gw" "$guard"
+expect wait-unknown fail '^guard wait: refused: 999999999 is neither a live process of yours nor a job' -- "$guard" wait 999999999
+expect wait-bad-timeout fail '^guard wait: refused: --timeout 5x is not a duration' -- "$guard" wait --timeout 5x -- true
+rm -rf "$gw"
+
 echo "== budget"
 expect budget-within ok '^budget: [0-9]+ files within their budgets$' -- "$here/tests/budget.sh"
 fx_budget=$(mktemp -d); mkdir -p "$fx_budget/tests" "$fx_budget/docs"; cp "$here/tests/budget.sh" "$fx_budget/tests/"

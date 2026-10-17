@@ -233,3 +233,16 @@ class KillCriterion(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CodexConfig(unittest.TestCase):
+    def test_settings_are_top_level_keys(self):
+        scaffold = {"context_window": 65536, "disable_features": ["apps"],
+                    "settings": {"background_terminal_max_timeout": 1200000}}
+        text = run.codex_config(scaffold, 9000, "m")
+        self.assertIn("background_terminal_max_timeout = 1200000\n", text.split("[model_providers.site]")[0])
+        self.assertIn("[features]\napps = false\n", text)
+
+    def test_no_settings_writes_none(self):
+        text = run.codex_config({"context_window": 65536}, 9000, "m")
+        self.assertNotIn("background_terminal_max_timeout", text)
