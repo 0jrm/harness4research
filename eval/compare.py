@@ -32,11 +32,16 @@ def pair(old, new):
 
 def reason(old, new):
     signals = new.get("signals") or {}
-    found = [text.format(", ".join(f"#{n}" for n in calls_of(signals[key])))
+    found = [text.format(call_list(calls_of(signals[key])))
              for key, text in REASONS.items() if signals.get(key) and not (old.get("signals") or {}).get(key)]
     return "; ".join(found) or "signals: " + ", ".join(
         f"{k} {old.get('signals', {}).get(k)!r} → {v!r}" for k, v in signals.items()
         if (old.get("signals") or {}).get(k) != v)
+
+
+def call_list(calls, shown=5):
+    listed = ", ".join(f"#{n}" for n in calls[:shown])
+    return listed + (f" and {len(calls) - shown} more" if len(calls) > shown else "")
 
 
 def calls_of(signal):
