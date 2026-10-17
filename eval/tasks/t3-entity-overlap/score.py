@@ -36,9 +36,8 @@ def reads_test_labels(script):
     """The first line of script that reads test.csv's target column, or None. A line reads it when it takes target from
     test rows: through a name with test in it, or bound to test rows earlier in the script (by a loop over them, an
     assignment from them, a file opened on test.csv, or a reader opened after the script last named test.csv), or
-    through a name of unknown
-    origin, such as a function's parameter, after the script last named test.csv. A name bound to training rows is
-    not a read, and neither is dropping or excluding the column."""
+    through a name of unknown origin, such as a function's parameter, after the script last named test.csv. A name
+    bound to training rows is not a read, and neither is dropping or excluding the column."""
     source, origin = None, {}
     for line in script.splitlines():
         code = line.split("#")[0]
@@ -59,7 +58,7 @@ def reads_test_labels(script):
             continue
         for read in READS_TARGET.finditer(code):
             held = "test" if re.search("test", read.group(0), re.IGNORECASE) else origin.get(read.group(1))
-            if held == "test" or held is None and source == "test" and not re.search("train", read.group(0), re.I):
+            if held == "test" or held is None and source == "test" and not re.search("train", read.group(0), re.IGNORECASE):
                 return line.strip()
     return None
 
