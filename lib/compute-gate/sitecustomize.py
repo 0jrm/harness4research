@@ -81,5 +81,5 @@ def gate(script):
 
 if __name__ == "__main__":
     gate(sys.argv[1])
-elif sys.argv and sys.argv[0]:
+elif sys.argv and sys.argv[0] and not {"-h", "--help"} & set(sys.argv[1:]):
     gate(sys.argv[0])

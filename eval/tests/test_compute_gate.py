@@ -66,6 +66,7 @@ class ComputeGate(unittest.TestCase):
     def test_inside_a_job_unlisted_or_unrelated_it_runs(self):
         self.assertEqual(sh(self.proj, "bash job.sh", SLURM_JOB_ID="1000").stdout, "ran\n")
         self.assertEqual(sh(self.proj, "python3 other.py").stdout, "ran\n")
+        self.assertEqual(sh(self.proj, "python3 sim.py --help").stdout, "ran\n")
         self.assertEqual(sh(self.proj, "python3 -c 'print(1)' && echo ok").stdout, "1\nok\n")
 
     def test_the_card_on_the_protected_branch_decides(self):
