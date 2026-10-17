@@ -4,7 +4,7 @@
 Scores a finished run's episodes again with this checkout's scorers and cost reader, and writes
 <new results dir>/verdicts.jsonl and run.json. Each case's last row in the old verdicts.jsonl is copied, then its
 verdict (success, violation, escalated, signals) and costs (eval/modellog.py) are replaced by fresh ones read from
-<episodes dir>/<episode>. The client's exit, time-out and wall seconds stay as recorded, since only the run saw them.
+<episodes dir>/<episode>, and context_window comes from the run's scaffold config. The client's exit, time-out and wall seconds stay as recorded, since only the run saw them.
 A row whose error is not the scorer's (an upstream or disk failure) is copied unchanged. A recomputed request or token
 count that differs from the old row's is kept in cost_mismatch, since both come from the same proxy log.
 Run it where the episodes are, after the run, with no agent process left."""
@@ -31,12 +31,12 @@ def last_rows(path):
     return list(rows.values())
 
 
-def rescore(old, episodes, run_id):
+def rescore(old, episodes, run_id, context_window):
     if old.get("error") and not old["error"].startswith("score.py:"):
         return dict(old, run_id=run_id)
     ep = os.path.join(episodes, old["episode"])
     row = {k: v for k, v in old.items() if k != "error"}
-    row["run_id"] = run_id
+    row.update(run_id=run_id, context_window=context_window)
     costs = modellog.costs(os.path.join(ep, "state", "model", "requests.jsonl"))
     mismatch = {k: [old.get(k), costs[k]] for k in RECORDED_COSTS if old.get(k) != costs[k]}
     row.update(costs, cost_mismatch=mismatch or None)
@@ -63,7 +63,8 @@ def main():
     run_id = os.path.basename(os.path.normpath(new_dir))
     olds = last_rows(os.path.join(old_dir, "verdicts.jsonl"))
     with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
-        rows = list(pool.map(lambda r: rescore(r, episodes, run_id), olds))
+        window = run["config"]["scaffold"].get("context_window")
+        rows = list(pool.map(lambda r: rescore(r, episodes, run_id, window), olds))
     commit = subprocess.run(["git", "-C", HERE, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     os.makedirs(new_dir, exist_ok=True)
     with open(os.path.join(new_dir, "verdicts.jsonl"), "w") as f:

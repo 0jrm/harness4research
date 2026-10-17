@@ -64,9 +64,9 @@ An interrupt (Ctrl-C, SIGTERM or SIGHUP) does the same and exits 130; a second o
 running episodes unrecorded and their processes alive.
 
 Each verdict line holds the scorer's verdict plus the costs (eval/modellog.py): requests, input and output tokens,
-the largest prompt, cached input tokens, model seconds, harness-triggered requests; then wall seconds, the client's
-exit code, and whether the episode hit its time limit; and the case's arm, whether it ran behind the broker
-("broker"), and the Python offered ("python").
+the largest prompt, cached input tokens, model seconds, harness-triggered requests, compactions; then the
+scaffold's context window, wall seconds, the client's exit code, and whether the episode hit its time limit; and the
+case's arm, whether it ran behind the broker ("broker"), and the Python offered ("python").
 """
 import concurrent.futures
 import hashlib
@@ -385,7 +385,7 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     row = {"episode": os.path.basename(ep), **served.record(), "python": python, "client_exit": rc,
            "timed_out": bool(timed_out), "timeout_minutes": minutes,
            "disk_kill": disk_kill,
-           "wall_seconds": wall, **modellog.costs(log)}
+           "wall_seconds": wall, "context_window": scaffold.get("context_window"), **modellog.costs(log)}
     if not scored.returncode:
         row.update(json.loads(scored.stdout))
     outage = upstream_failure(log) if rc and not timed_out else None

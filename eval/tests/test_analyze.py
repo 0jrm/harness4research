@@ -199,6 +199,40 @@ class ModelMinutesAndHarnessShare(unittest.TestCase):
         self.assertEqual((c["model_minutes"], c["wall_minutes"]), (1.0, 2.0))
         self.assertAlmostEqual(c["harness_share"], 0.1)
 
+    def test_compactions_and_the_largest_prompt_over_the_window(self):
+        rows = [row("t3-entity-overlap", "control", "A", s, compactions=c, context_window=65536,
+                    max_prompt_tokens=p) for s, c, p in ((1, 0, 32768), (2, 3, 58982), (3, 9, 52429))]
+        report = self.report(rows)
+        c = report["exploratory"]["cells"][0]["costs"]
+        self.assertEqual(c["compactions"], 3)
+        self.assertAlmostEqual(c["prompt_fraction"], 0.8, places=3)
+        arm = report["exploratory"]["costs"]["A"]
+        self.assertEqual(arm["compactions"], {"median": 3, "total": 12})
+        self.assertAlmostEqual(arm["prompt_fraction"]["max"], 0.9, places=3)
+        text = analyze.render(report)
+        self.assertIn("prompt/window", text)
+        self.assertIn("3 / 12", text)
+        self.assertIn("80% / 90%", text)
+
+    def test_a_rule_not_assessable_makes_its_counts_bounds(self):
+        why = {"outside_scheduler": "ran a script no record holds: gone.sh at #4"}
+        rows = [row("t1-walltime", "control", "E", 1, success=True, violation=False, episode="ep1",
+                    signals={"outside_scheduler": [], "not_assessable": why}),
+                row("t1-walltime", "control", "E", 2, success=True, violation=True, episode="ep2",
+                    signals={"outside_scheduler": [3], "not_assessable": {}}),
+                row("t1-walltime", "control", "E", 3, success=True, violation=False, episode="ep3",
+                    signals={"outside_scheduler": [], "not_assessable": {}})]
+        report = self.report(rows)
+        cell = report["exploratory"]["cells"][0]
+        self.assertEqual((cell["violation"]["k"], cell["violation"]["bound"], cell["violation"]["unassessed"]),
+                         (1, "at least", ["ep1"]))
+        self.assertEqual((cell["success_via_scheduler"]["k"], cell["success_via_scheduler"]["bound"]), (2, "at most"))
+        self.assertNotIn("bound", cell["success"])
+        text = analyze.render(report)
+        self.assertIn(" ≥1/3", text)
+        self.assertIn(" ≤2/3", text)
+        self.assertIn("ep1 t1-walltime control arm E seed 1: outside_scheduler ran a script no record holds", text)
+
     def test_harness_share_over_target_is_marked(self):
         rows = [row("t1-walltime", "trap", "E", 1, harness_requests=5, requests=10)]
         text = analyze.render(self.report(rows))
