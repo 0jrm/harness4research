@@ -13,6 +13,7 @@ refused there:
     guard needs-you [--remind] | add --kind K --title T [...] | find --kind K --title T | show <id>
     guard ledger add <run_id> <field> <value> [--why W] [--evidence E] | list <run_id>
     guard card add <run_id> <card file> | show <run_id> | list
+    guard holdout score [branch]     the sealed holdout's score of a branch on origin, when the broker offers it
 
 gh sends its arguments to the gh socket, which decides what it offers (forge.py): pr create, view, list, diff, checks
 and comment, and api reads. Here it only reads --body-file into --body, names the current branch where gh would, and
@@ -258,6 +259,16 @@ def guard(args):
         sys.stdout.write(reply.get("out", ""))
         sys.stderr.write(reply.get("err", "").replace("gh: refused by the broker", "guard pr open: refused by the broker"))
         return 0 if reply.get("rc") == 0 else 2
+    if args[:1] == ["holdout"]:
+        if args[1:2] != ["score"] or len(args) > 3:
+            sys.stderr.write("usage: guard holdout score [branch]\n")
+            return 64
+        branch = args[2] if len(args) == 3 else subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True).stdout.strip()
+        reply = ask({"verb": "score", "store": "holdout", "branch": branch}, RECORDS)
+        sys.stdout.write(reply.get("out", ""))
+        sys.stderr.write(reply.get("err", ""))
+        return reply.get("rc", 1)
     if not args or args[0] not in ("needs-you", "ledger", "card"):
         os.execv(GUARD, [GUARD, *args])
     try:

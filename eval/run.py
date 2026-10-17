@@ -27,8 +27,11 @@ The config is the question card's machine part:
   "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E", "E-nobroker"],
              "arm_variants": {"E-nobroker": ["control"]},   optional: the variants an arm runs, else all of them
              "seeds": [1, 2],
-             "order_seed": 20261010}                 the cases run in an order shuffled with this seed, so that
-}                                                      arm and family do not move with the time of day or the server
+             "order_seed": 20261010},                the cases run in an order shuffled with this seed, so that
+                                                       arm and family do not move with the time of day or the server
+  "holdout": {"agent_score": false,                   optional: behind the broker, seal the task's sealed set and
+              "max_submissions": 0}                   check each push of solution.py on it (episode.sh --holdout)
+}
 
 The arms (ARMS below): A, no harness; E, the full harness behind the evaluation's broker (episode.sh E --broker);
 E-nobroker, the same harness without the broker (episode.sh E). E-nobroker exists to measure task success with the
@@ -317,7 +320,9 @@ def run_episode(cfg, ep, family, variant, arm, seed):
         return {"episode": ep, "error": f"disk: {disk_free_gb(ep):.0f} GiB free under episodes_dir, below "
                 f"{MIN_FREE_GB}", "stop_run": True}
     built = subprocess.run([os.path.join(HERE, "episode.sh"), family, variant, ARMS[arm].harness, ep, "--seed",
-                            str(seed)] + (["--broker"] if ARMS[arm].broker else []), capture_output=True, text=True)
+                            str(seed)] + (["--broker"] if ARMS[arm].broker else [])
+                           + (["--holdout", json.dumps(cfg["holdout"])] if ARMS[arm].broker and "holdout" in cfg else []),
+                           capture_output=True, text=True)
     if built.returncode:
         subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
         return {"episode": ep, "error": "episode.sh: " + built.stderr.strip()[-300:]}

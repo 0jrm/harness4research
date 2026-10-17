@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
-# usage: eval/episode.sh <family> <variant> <arm> <episode_dir> [--seed N] [--broker]
+# usage: eval/episode.sh <family> <variant> <arm> <episode_dir> [--seed N] [--broker] [--holdout JSON]
 # Builds one episode of a task: the project, the hidden evaluator data, the prompt, and the harness for the arm.
 #   family    a directory under eval/tasks, such as t1-walltime
 #   variant   trap or control
 #   arm       A (no harness) or E (the full harness: guard, AGENTS.md, the skills, needs-you)
 #   --broker  the scheduler only through eval/broker/broker.py (up.sh --broker)
+#   --holdout with --broker, seal the task's hidden/sealed_* set (eval/broker/holdout.py) before the agent starts;
+#             JSON is the run config's holdout: {"agent_score": bool, "max_submissions": N}
 # After it, run the agent with eval/env/sandbox.sh <episode_dir> -- ..., give it <episode_dir>/prompt.md, then run
 # eval/env/down.sh <episode_dir> and eval/score.py <episode_dir>. Arms B to D come with the first result.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-usage() { echo "usage: episode.sh <family> <trap|control> <A|E> <episode_dir> [--seed N] [--broker]" >&2; exit 64; }
+usage() { echo "usage: episode.sh <family> <trap|control> <A|E> <episode_dir> [--seed N] [--broker] [--holdout JSON]" >&2; exit 64; }
 [ $# -ge 4 ] || usage
 family=$1 variant=$2 arm=$3 ep=$4; shift 4
-seed=0 broker=()
+seed=0 broker=() holdout=""
 while [ $# -gt 0 ]; do
-  case $1 in --seed) seed=$2; shift 2 ;; --broker) broker=(--broker); shift ;; *) usage ;; esac
+  case $1 in --seed) seed=$2; shift 2 ;; --broker) broker=(--broker); shift ;; --holdout) holdout=$2; shift 2 ;; *) usage ;; esac
 done
+[ -z "$holdout" ] || [ ${#broker[@]} = 1 ] || { echo "episode.sh: --holdout needs --broker" >&2; exit 64; }
 task=$here/tasks/$family
 [ -f "$task/task.json" ] || { echo "episode.sh: no task $family under $here/tasks" >&2; exit 2; }
 case $variant in trap|control) ;; *) usage ;; esac
@@ -38,6 +41,11 @@ harness=(); [ "$arm" = E ] && harness=(--harness "$(cd "$here/.." && pwd)")
 ep=$(cd "$ep" && pwd)
 cp -R "$stage/hidden/." "$ep/hidden/"
 cp "$stage/prompt.md" "$ep/prompt.md"
+if [ -n "$holdout" ]; then
+  [ -f "$ep/hidden/sealed_test.csv" ] || { echo "episode.sh: --holdout: $family writes no hidden/sealed_test.csv" >&2; exit 2; }
+  read -r -a knobs < <(python3 -c 'import json, sys; h = json.loads(sys.argv[1]); print(*(["--agent-score"] if h.get("agent_score") else []), "--max-submissions", int(h.get("max_submissions", 0)))' "$holdout")
+  python3 "$here/broker/broker.py" holdout seal "$ep/state/broker" "$ep/hidden" "$(j gap_threshold)" "${knobs[@]}" > /dev/null
+fi
 name=$(basename "$project")
 
 if [ "$arm" = E ]; then

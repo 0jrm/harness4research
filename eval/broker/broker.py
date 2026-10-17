@@ -11,6 +11,7 @@ the evaluation.
     broker.py review <state_dir> <pr>                   # guard review, the reviewer in its own sandbox (forge.py)
     broker.py merge <state_dir> <pr>                    # guard merge: only a verdict the broker recorded merges
     broker.py ship <state_dir>                          # guard ship: review, then merge what is approved
+    broker.py holdout seal|push ...                     # the sealed holdout (holdout.py): episode setup, the forge hook
 
 It runs outside the agent's sandbox, which sees only its socket, and it is the only client of the scheduler. The
 sandbox's sbatch, squeue, sacct and scancel are eval/broker/client.py, which sends one request per call:
@@ -65,6 +66,7 @@ import threading
 import time
 import traceback
 
+import holdout
 from forge import Forge
 from records import Records, Refused, approve_card, needs_you, read_rows, revoke_card
 
@@ -605,7 +607,8 @@ def serve(state_dir, config_path):
 
     signal.signal(signal.SIGTERM, stop)
     records = Server("records.sock", Handler)
-    records.answer = lambda req: broker.locked(broker.records.handle, req)
+    records.answer = lambda req: holdout.answer(broker.dir, broker.mirror, req) if req.get("store") == "holdout" \
+        else broker.locked(broker.records.handle, req)
     threading.Thread(target=records.serve_forever, daemon=True).start()
     gh = Server("gh.sock", Handler)
     gh.answer = lambda req: broker.locked(broker.forge.handle, req)
@@ -648,6 +651,8 @@ def approve(state_dir, what, run):
 
 
 def main(argv):
+    if len(argv) > 1 and argv[1] == "holdout":
+        sys.exit(holdout.main(argv[2:]))
     if len(argv) == 3 and argv[1] == "setup":
         return setup(argv[2])
     if len(argv) == 4 and argv[1] == "serve":
