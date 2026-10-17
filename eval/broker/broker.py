@@ -20,6 +20,8 @@ sandbox's sbatch, squeue, sacct and scancel are eval/broker/client.py, which sen
     queue    squeue's arguments, answered for this session's ledger jobs only
     acct     sacct's arguments, the same
     cancel   job ids, each one of this session's ledger jobs
+    run      guard run: {run_dir, why, cause, cwd, options, script, args, fields}; the broker writes the run's card
+             from the invocation, prices the job, and submits it, refuses it with the next command, or queues it
 
 A submission is checked against guard/budget.card, guard/watch.list and guard/ as they are on main in the broker's
 own mirror of origin, fetched before each submission, never against the agent's clone or environment. The agent's
@@ -76,6 +78,26 @@ JOB_ID = re.compile(r"^[0-9]+(_[0-9]+)?$")
 DEPENDENCY = re.compile(r"^(after|afterany|afterok|afternotok):[0-9]+(_[0-9]+)?(:[0-9]+(_[0-9]+)?)*$")
 OUTPUT = re.compile(r"^[A-Za-z0-9_.%/-]+$")
 FAILED = ("TIMEOUT", "OUT_OF_ME", "NODE_FAIL", "FAILED", "PREEMPTED")
+LIMIT_FLAGS = {"time": ("--time", "-t"), "nodes": ("--nodes", "-N"), "gpus": ("--gpus", "-G")}
+# guard run's replies start with one of these codes, so a reader or a script can tell them apart without parsing prose.
+CODES = {"usage": "H4R-R01", "time": "H4R-R02", "nodes": "H4R-R03", "gpus": "H4R-R04", "cause": "H4R-R05",
+         "watched": "H4R-R06", "refused": "H4R-R07", "queued": "H4R-R08"}
+
+
+class OverLimit(Refused):
+    """A job over one of the budget card's per-job limits; fits is the largest value of flag that the card allows."""
+
+    def __init__(self, message, flag, fits):
+        super().__init__(message)
+        self.flag, self.fits = flag, fits
+
+
+class OverBudget(Refused):
+    pass
+
+
+class SchedulerRefused(Refused):
+    pass
 
 
 def to_minutes(text):
@@ -273,9 +295,10 @@ class Broker:
     # verbs ---------------------------------------------------------------------------------------------------------
     def handle(self, req):
         verb = req.get("verb")
-        handler = {"submit": self.submit, "queue": self.queue, "acct": self.acct, "cancel": self.cancel}.get(verb)
+        handler = {"submit": self.submit, "run": self.guard_run, "queue": self.queue, "acct": self.acct,
+                   "cancel": self.cancel}.get(verb)
         if handler is None:
-            return {"rc": 1, "err": f"guard broker: no verb {verb!r}; it offers submit, queue, acct and cancel\n"}
+            return {"rc": 1, "err": f"guard broker: no verb {verb!r}; it offers submit, run, queue, acct and cancel\n"}
         if not self.cfg.get("slurm_bin"):
             return {"rc": 1, "err": "guard broker: refused: this host has no scheduler; nothing was submitted\n"}
         return self.locked(handler, req)
@@ -337,6 +360,24 @@ class Broker:
         return {"rc": rc, "out": out, "err": err}
 
     def submit(self, req):
+        """sbatch behind guard/run preflight: the card is the agent's, approved by the signed tag card/<run>."""
+        job = self.plan(req)
+        run = job["run"]
+        card_sha, qcard = self.card_check(run, self.records.approved(run)[0]) if not job["explore"] else (None, {})
+        approval = self.approval(run)
+        ripples = self.ripples(job["tree"], run, job["acct"], job["user"], job["start"], job["max_ch"], job["ignore"])
+        if ripples and approval is None:
+            raise Refused("ripples: " + " | ".join(ripples) + f"; a person approves one diagnostic job outside the "
+                          f"sandbox with: guard approve reserve {run}")
+        try:
+            job_id, note = self.launch(job, card_sha, qcard, approval)
+        except SchedulerRefused as e:
+            return {"rc": 1, "err": f"guard broker: the scheduler refused: {e}\n"}
+        return {"rc": 0, "out": job_id + "\n" if req.get("parsable") else f"Submitted batch job {job_id}\n",
+                "err": note + "\n"}
+
+    def plan(self, req):
+        """The request checked against main's budget card and its per-job limits, as the facts launch needs."""
         run, fields = req.get("run"), req.get("fields")
         if not isinstance(run, str) or not RUN.match(run):
             raise Refused(f"run id {run!r} is not a run id")
@@ -429,38 +470,41 @@ class Broker:
             if n != 1:
                 raise Refused("explore- runs submit one task at a time")
         if nodes > max_nodes:
-            raise Refused(f"nodes {nodes} exceeds max_nodes_per_job={max_nodes}")
+            raise OverLimit(f"nodes {nodes} exceeds max_nodes_per_job={max_nodes}", "nodes", max_nodes)
         if wmin > max_wall:
-            raise Refused(f"time {fields['time']} ({wmin} min) exceeds max_walltime_minutes={max_wall}")
+            raise OverLimit(f"time {fields['time']} ({wmin} min) exceeds max_walltime_minutes={max_wall}", "time",
+                            max_wall)
         if int(gpus) and (int(card.get("explore_max_gpus") or 0) < int(gpus) if explore
                           else card.get("max_gpu_hours", "0") in ("", "0")):
-            raise Refused(f"gpus {gpus}: the budget card allows this run none, or fewer")
+            raise OverLimit(f"gpus {gpus}: the budget card allows this run none, or fewer", "gpus", 0)
+        return dict(run=run, fields=fields, args=args, cwd_in=cwd_in, script_in=script_in, output=output, tree=tree,
+                    card=card, ignore=ignore, explore=explore, acct=acct, start=start, user=user, max_ch=max_ch, reserve=reserve,
+                    max_conc=max_conc, cpn=cpn, wmin=wmin, nodes=nodes, n=n, gpus=int(gpus))
 
-        card_sha, qcard = None, {}
-        if not explore:
-            q = f"runs/{run}/question.card"
-            qtext = self.records.approved(run)[0].encode()
-            card_sha = hashlib.sha256(qtext).hexdigest()
-            first = next((r["card_sha"] for r in self.rows if r["state"] == "intent" and r["run"] == run), None)
-            if first and first != card_sha:
-                raise Refused(f"{q} changed since this run's first job; start a new run id for a new design")
-            if card.get("card_on_main") == "yes" and self.mirror.show(q) != qtext.decode(errors="replace"):
-                raise Refused(f"card_on_main is yes and {q} is not on main as it is here; a person merges it first")
-            qcard = {k: v for k, v in card_values(qtext.decode(errors="replace")).items() if v and "<" not in v}
-            waiver = qcard.get("checks") or card.get("checks", "")
-            checks = [p for p, (mode, _) in self.mirror.files.items()
-                      if p.startswith(f"runs/{run}/checks/") and mode == "100755"]
-            if not re.match(r"^waived\s+[^\s<]", waiver) and not checks:
-                raise Refused(f"no executable domain check in runs/{run}/checks/ on main, and no checks: waived")
-            if qcard.get("deadline") and dt.date.today().isoformat() > qcard["deadline"]:
-                raise Refused(f"past deadline {qcard['deadline']} in {q}")
+    def card_check(self, run, qtext):
+        """(sha256, values) of the run's question card, once it agrees with the run's first job and main's rules."""
+        q, card = f"runs/{run}/question.card", card_values(self.mirror.show("guard/budget.card") or "")
+        card_sha = hashlib.sha256(qtext.encode()).hexdigest()
+        first = next((r["card_sha"] for r in self.rows if r["state"] == "intent" and r["run"] == run), None)
+        if first and first != card_sha:
+            raise Refused(f"{q} changed since this run's first job; start a new run id for a new design")
+        if card.get("card_on_main") == "yes" and self.mirror.show(q) != qtext:
+            raise Refused(f"card_on_main is yes and {q} is not on main as it is here; a person merges it first")
+        qcard = {k: v for k, v in card_values(qtext).items() if v and "<" not in v}
+        waiver = qcard.get("checks") or card.get("checks", "")
+        checks = [p for p, (mode, _) in self.mirror.files.items()
+                  if p.startswith(f"runs/{run}/checks/") and mode == "100755"]
+        if not re.match(r"^waived\s+[^\s<]", waiver) and not checks:
+            raise Refused(f"no executable domain check in runs/{run}/checks/ on main, and no checks: waived")
+        if qcard.get("deadline") and dt.date.today().isoformat() > qcard["deadline"]:
+            raise Refused(f"past deadline {qcard['deadline']} in {q}")
+        return card_sha, qcard
 
-        approval = self.approval(run)
-        ripples = self.ripples(tree, run, acct, user, start, max_ch, ignore)
-        if ripples and approval is None:
-            raise Refused("ripples: " + " | ".join(ripples) + f"; a person approves one diagnostic job outside the "
-                          f"sandbox with: guard approve reserve {run}")
-
+    def launch(self, job, card_sha, qcard, approval, record=None):
+        """Checks the job against the remaining budget, writes its ledger row, then submits it: (job id, note)."""
+        run, fields, card, acct, start, user = (job[k] for k in ("run", "fields", "card", "acct", "start", "user"))
+        max_ch, reserve, max_conc, cpn = (job[k] for k in ("max_ch", "reserve", "max_conc", "cpn"))
+        wmin, nodes, n, output, cwd_in, script_in = (job[k] for k in ("wmin", "nodes", "n", "output", "cwd_in", "script_in"))
         spent = sum(int(x or 0) for x in self.must("sacct", "-A", acct, "-u", user, "-S", start, "-X", "-n", "-P",
                                                      "-o", "CPUTimeRAW").split()) // 3600
         queued = 0
@@ -471,7 +515,7 @@ class Broker:
         proj = nodes * cpn * wmin * n // 60
         held = 0 if approval is not None else reserve
         if spent + queued + proj > max_ch - held:
-            raise Refused(f"spent {spent} + queued {queued} + this job {proj} core-h exceeds {max_ch - held} available "
+            raise OverBudget(f"spent {spent} + queued {queued} + this job {proj} core-h exceeds {max_ch - held} available "
                           f"(max {max_ch}, reserve held {held})")
         run_max = qcard.get("budget_core_hours") or card.get("default_run_core_hours", "0")
         if run_max.isdigit() and int(run_max) > 0:
@@ -503,19 +547,108 @@ class Broker:
         argv = (["--export=NONE", "--ignore-pbs", "--parsable"]
                 + [f"--{named[k]}={v}" for k, v in fields.items() if k in named] + extra
                 + [f"--account={acct}", f"--job-name={run}", f"--comment={comment}", f"--time={wmin}",
-                   f"--nodes={nodes}", f"--chdir={cwd_in}", f"--output={spool}/slurm-%j.out", wrapper, *args])
+                   f"--nodes={nodes}", f"--chdir={cwd_in}", f"--output={spool}/slurm-%j.out", wrapper, *job["args"]])
         self.write({"seq": seq, "state": "intent", "run": run, "comment": comment, "fields": fields, "argv": argv,
                     "card_sha": card_sha, "reserve": approval, "job_sandbox": "bare" if bare else "bwrap",
-                    "why_bare": bare})
+                    "why_bare": bare, **(record or {})})
         rc, out, err = self.slurm("sbatch", *argv)
         job = out.strip().split(";")[0]
         if rc or not JOB_ID.match(job):
             self.write({"seq": seq, "state": "failed", "why": err.strip() or out.strip()})
-            return {"rc": 1, "err": f"guard broker: the scheduler refused: {err.strip() or out.strip()}\n"}
+            raise SchedulerRefused(err.strip() or out.strip())
         self.write({"seq": seq, "state": "submitted", "job": job})
-        note = (f"guard: job {job}, run {run}: {n} task(s) x {nodes} node(s) x {wmin} min, projected {proj} core-h, "
-                f"job_sandbox: {'bare (' + bare + ')' if bare else 'bwrap'}\n")
-        return {"rc": 0, "out": job + "\n" if req.get("parsable") else f"Submitted batch job {job}\n", "err": note}
+        return job, (f"guard: job {job}, run {run}: {n} task(s) x {nodes} node(s) x {wmin} min, projected {proj} core-h, "
+                     f"job_sandbox: {'bare (' + bare + ')' if bare else 'bwrap'}")
+
+    def guard_run(self, req):
+        try:
+            return self.run_job(req)
+        except Refused as e:
+            return refusal("refused", str(e))
+
+    def run_job(self, req):
+        """guard run runs/<run> --why W [--cause C] -- <sbatch options> <script> [args]: the broker prices the job from
+        its own flags and #SBATCH lines, writes and commits the run's card from the invocation, and submits the job,
+        refuses it with the next command, or queues it for the owner. A failed job of the run must get a --cause first,
+        which the broker records as the run's incident."""
+        run_dir, why, cause = str(req.get("run_dir")), req.get("why"), req.get("cause") or ""
+        options, script, args = req.get("options") or [], str(req.get("script")), req.get("args") or []
+        run = os.path.basename(os.path.normpath(run_dir))
+        if not isinstance(why, str) or not why.strip() or "\n" in why or "\n" in cause:
+            return refusal("usage", "--why is one sentence on one line, and so is --cause")
+        command = ["guard", "run", run_dir, "--why", why, "--", *options, script, *args]
+        self.mirror.fetch()
+        failed = self.unhandled_failures(run)
+        if failed and not cause.strip():
+            return refusal("cause", f"job {' '.join(f'{j} ended {s}' for j, s in failed)}; read its output, then say "
+                                    "what went wrong", command[:5] + ["--cause", "WHAT WENT WRONG"] + command[5:])
+        if failed:
+            self.incident(run, [j for j, _ in failed], cause)
+        try:
+            job = self.plan({"run": run, "fields": req.get("fields"), "cwd": req.get("cwd"), "script": script,
+                             "args": args})
+        except OverLimit as e:
+            split = "; split the work into jobs that fit, each resuming from a checkpoint" if e.flag == "time" else ""
+            fixed = without_flag(options, LIMIT_FLAGS[e.flag]) + [f"--{e.flag}={e.fits}"]
+            return refusal(e.flag, f"{e}{split}", command[:6] + fixed + [script, *args])
+        moved = self.watched_changes(job["tree"], job["ignore"])
+        if moved:
+            return refusal("watched", f"{' '.join(moved)} differ from main, and the human owns them; restore them",
+                           ["git", "checkout", "origin/main", "--", *moved])
+        price = cost(job)
+        try:
+            card_sha, qcard = self.card_check(run, self.run_card(run, why, command, price))
+            job_id, _ = self.launch(job, card_sha, qcard, self.approval(run), record={"why": why, "cost": price})
+        except OverBudget as e:
+            item = self.records.queue_item(
+                "approve", f"Approve a job of run {run} over the remaining budget",
+                dict(why=f"{e}; the job: {shlex.join(command)}", expect=f"the agent reruns guard run for {run}",
+                     worry="", undo=""),
+                [], [f"eval/broker/broker.py approve reserve {self.dir} {run}"], "broker")
+            return {"rc": 3, "err": f"{CODES['queued']} guard run: queued for the owner as needs-you {item}, since {e}; "
+                                    "do other work, or stop\n"}
+        return {"rc": 0, "out": f"job {job_id} submitted for run {run}: {price['minutes']} min x {price['nodes']} node(s) "
+                                f"x {price['cores_per_node']} cores x {price['tasks']} task(s) = {price['core_hours']} "
+                                f"core-h, {price['gpu_hours']} GPU-h\n"}
+
+    def run_card(self, run, why, command, price):
+        """runs/<run>/question.card as the broker wrote it from the run's first invocation; written now if absent."""
+        path, tip = f"runs/{run}/question.card", self.records.tip(run)
+        text = (self.records.blob(tip, path) if tip else None) or self.mirror.show(path)
+        if text is not None:
+            return text
+        text = "".join(f"{k}: {v}\n" for k, v in [
+            ("why", why), ("command", shlex.join(command)), *price.items(), ("session", self.cfg["session"]),
+            ("written_by", "guard broker, from the guard run invocation")])
+        self.records.commit(run, path, text, f"run: {run} card\n\nWritten by guard run for session {self.cfg['session']}.")
+        return text
+
+    def incident(self, run, jobs, cause):
+        """The agent's --cause for failed jobs, committed as runs/<run>/incidents/<n>.md and kept in incidents.jsonl."""
+        path = os.path.join(self.dir, "incidents.jsonl")
+        n = 1 + sum(r["run"] == run for r in read_rows(path))
+        text = "".join(f"job: {j}\n" for j in jobs) + f"\n{cause}\n"
+        self.records.commit(run, f"runs/{run}/incidents/{n}.md", text,
+                            f"run: {run} incident {n}\n\nRecorded by guard run --cause for session {self.cfg['session']}.")
+        with open(path, "a") as f:
+            f.write(json.dumps({"ts": time.time(), "run": run, "jobs": jobs, "cause": cause}) + "\n")
+
+    def unhandled_failures(self, run):
+        """(job id, state) for this run's jobs that ended badly with no incident on main or from guard run --cause."""
+        mine = self.jobs(run)
+        if not mine:
+            return []
+        handled = {j for r in read_rows(os.path.join(self.dir, "incidents.jsonl")) if r["run"] == run for j in r["jobs"]}
+        for p in self.mirror.files:
+            if p.startswith(f"runs/{run}/incidents/") and p.endswith(".md"):
+                handled |= {m.group(1) for m in re.finditer(r"(?m)^job: *([0-9A-Za-z_.-]+) *$", self.mirror.show(p))}
+        out = self.must("sacct", "-X", "-n", "-P", "-o", "JobID,State", "--jobs=" + ",".join(mine))
+        return [tuple(l.split("|")[:2]) for l in out.splitlines()
+                if "|" in l and any(s in l.split("|")[1] for s in FAILED) and l.split("|")[0] not in handled]
+
+    def watched_changes(self, tree, ignore):
+        watch = [l.split("#")[0].strip() for l in (self.mirror.show("guard/watch.list") or "").splitlines()]
+        return tree.changed(self.mirror, [w for w in watch if w], ignore)
 
     def approval(self, run):
         used = {r["reserve"] for r in self.rows if r["state"] == "intent" and r.get("reserve")}
@@ -526,26 +659,42 @@ class Broker:
 
     def ripples(self, tree, run, acct, user, start, max_ch, ignore):
         found = []
-        watch = [l.split("#")[0].strip() for l in (self.mirror.show("guard/watch.list") or "").splitlines()]
-        moved = tree.changed(self.mirror, [w for w in watch if w], ignore)
+        moved = self.watched_changes(tree, ignore)
         if moved:
             found.append(f"watched paths differ from main: {' '.join(moved)}")
-        mine = self.jobs(run)
-        if mine:
-            handled = set()
-            for p in self.mirror.files:
-                if p.startswith(f"runs/{run}/incidents/") and p.endswith(".md"):
-                    handled |= {m.group(1) for m in re.finditer(r"(?m)^job: *([0-9A-Za-z_.-]+) *$", self.mirror.show(p))}
-            out = self.must("sacct", "-X", "-n", "-P", "-o", "JobID,State", "--jobs=" + ",".join(mine))
-            bad = [l.split("|")[0] for l in out.splitlines()
-                   if "|" in l and any(s in l.split("|")[1] for s in FAILED) and l.split("|")[0] not in handled]
-            if bad:
-                found.append(f"jobs ended badly with no incident on main: {' '.join(bad)}")
+        bad = self.unhandled_failures(run)
+        if bad:
+            found.append(f"jobs ended badly with no incident on main: {' '.join(j for j, _ in bad)}")
         cpu = self.must("sacct", "-A", acct, "-u", user, "-S", start, "-X", "-n", "-P", "-o", "CPUTimeRAW").split()
         spent = sum(int(x or 0) for x in cpu) // 3600
         if spent * 100 > max_ch * 80:
             found.append(f"budget {spent} of {max_ch} core-h, over 80%")
         return found
+
+
+def cost(job):
+    """What the job charges: whole nodes, as the scheduler allocates and bills them, for its walltime and tasks."""
+    hours = job["wmin"] * job["n"] / 60
+    return {"minutes": job["wmin"], "nodes": job["nodes"], "cores_per_node": job["cpn"], "gpus": job["gpus"],
+            "tasks": job["n"], "core_hours": round(hours * job["nodes"] * job["cpn"], 2),
+            "gpu_hours": round(hours * job["gpus"], 2)}
+
+
+def refusal(code, reason, next_command=None):
+    """guard run's refusal: the code and the reason, then the exact command to run next when there is one."""
+    err = f"{CODES[code]} guard run: refused: {reason}\n"
+    return {"rc": 2, "err": err + (shlex.join(next_command) + "\n" if next_command else "")}
+
+
+def without_flag(words, names):
+    """sbatch option words with every --name=V, --name V, -xV and -x V of the given flag removed."""
+    out, it = [], iter(words)
+    for w in it:
+        if w in names:
+            next(it, None)
+        elif not any(w.startswith(n + "=") or (len(n) == 2 and w.startswith(n) and len(w) > 2) for n in names):
+            out.append(w)
+    return out
 
 
 def expand_flags(args):

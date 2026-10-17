@@ -12,6 +12,7 @@ refused there:
 
     guard needs-you [--remind] | add --kind K --title T [...] | find --kind K --title T | show <id>
     guard ledger add <run_id> <field> <value> [--why W] [--evidence E] | list <run_id>
+    guard run <run_dir> --why W [--cause C] -- <sbatch options> <script> [args]   (the scheduler socket, broker.py)
     guard card add <run_id> <card file> | show <run_id> | list
 
 gh sends its arguments to the gh socket, which decides what it offers (forge.py): pr create, view, list, diff, checks
@@ -39,6 +40,7 @@ SHORT = {"-t": "time", "-N": "nodes", "-n": "ntasks", "-c": "cpus-per-task", "-G
 # Options preflight passes whose values the broker sets itself, or that change nothing it renders.
 SET_BY_BROKER = {"account", "job-name", "comment"}
 FLAGS = {"ignore-pbs", "parsable"}
+RUN_USAGE = 'guard run runs/<run_id> --why "<one sentence>" -- <sbatch options> <script>'
 
 
 class Refused(Exception):
@@ -91,9 +93,11 @@ def script_words(path):
     return words
 
 
-def sbatch_request(args):
+def job_words(words):
+    """(the option words, script, its arguments, the fields): the command line's sbatch options over the script's
+    #SBATCH lines, as sbatch reads them."""
     cli = {}
-    rest = parse(args, cli)
+    rest = parse(words, cli)
     if not rest:
         raise Refused("no batch script given")
     opts = {}
@@ -102,12 +106,39 @@ def sbatch_request(args):
     except OSError as e:
         raise Refused(f"cannot read {rest[0]}: {e.strerror}")
     opts.update(cli)
+    return words[:len(words) - len(rest)], rest[0], rest[1:], opts
+
+
+def sbatch_request(args):
+    _, script, rest, opts = job_words(args)
     run = str(opts.get("comment", ""))
     if not run.startswith("run:"):
-        raise Refused("a job belongs to a run: submit it with guard/run preflight runs/<run_id> " + rest[0])
+        raise Refused(f"a job belongs to a run: submit it with {RUN_USAGE.replace('<script>', script)}")
     fields = {FIELDS[k]: v for k, v in opts.items() if k in FIELDS}
-    return {"verb": "submit", "run": run[4:], "cwd": os.getcwd(), "script": rest[0], "args": rest[1:],
+    return {"verb": "submit", "run": run[4:], "cwd": os.getcwd(), "script": script, "args": rest,
             "fields": fields, "parsable": bool(opts.get("parsable"))}
+
+
+def run_request(args):
+    """guard run <run_dir> --why W [--cause C] -- <sbatch options> <script> [args]."""
+    if "--" not in args:
+        raise Refused("put -- between guard run's own options and the job's sbatch options and script")
+    head, words = args[:args.index("--")], args[args.index("--") + 1:]
+    named, run_dir, it = {"why": None, "cause": ""}, None, iter(head)
+    for a in it:
+        name, eq, value = a[2:].partition("=")
+        if a.startswith("--") and name in named:
+            named[name] = value if eq else next(it, None)
+        elif not a.startswith("-") and run_dir is None:
+            run_dir = a
+        else:
+            raise Refused(f"{a} is not one of guard run's options; they are --why and --cause")
+    if not run_dir or not named["why"]:
+        raise Refused("name the run directory and say why in one sentence")
+    options, script, rest, opts = job_words(words)
+    return {"verb": "run", "run_dir": run_dir, "why": named["why"], "cause": named["cause"] or "", "cwd": os.getcwd(),
+            "options": options, "script": script, "args": rest,
+            "fields": {FIELDS[k]: v for k, v in opts.items() if k in FIELDS}}
 
 
 def records_request(args):
@@ -248,6 +279,16 @@ def guard(args):
                          "outside the sandbox; a person or the orchestrating session runs them there. Open the pull "
                          "request with guard pr open and stop.\n")
         return 2
+    if args[:1] == ["run"]:
+        try:
+            request = run_request(args[1:])
+        except Refused as e:
+            sys.stderr.write(f"H4R-R01 guard run: refused: {e}\n{RUN_USAGE}\n")
+            return 2
+        reply = ask(request)
+        sys.stdout.write(reply.get("out", ""))
+        sys.stderr.write(reply.get("err", ""))
+        return reply.get("rc", 1)
     if args[:2] == ["pr", "open"]:
         try:
             request = pr_open(args[2:])
