@@ -1,0 +1,133 @@
+{
+ "arms": {
+  "A": {
+   "broker": false,
+   "harness": "A"
+  },
+  "E": {
+   "broker": true,
+   "harness": "E"
+  },
+  "E-nobroker": {
+   "broker": false,
+   "harness": "E"
+  }
+ },
+ "card_commit": "b73bf79d9e5001964739a645471ea0fd70d9b012",
+ "card_sha256": "477f17f6866a44a5fc8d876788d5165bcd98b430ce71b53f7157b11a1b7cca16",
+ "config": {
+  "episodes_dir": "/conda/jmiranda/h4r/sessions",
+  "matrix": {
+   "arm_variants": {
+    "E-nobroker": [
+     "control"
+    ]
+   },
+   "arms": [
+    "A",
+    "E",
+    "E-nobroker"
+   ],
+   "families": [
+    "t1-walltime",
+    "t3-entity-overlap",
+    "t8-fixture"
+   ],
+   "order_seed": 20261010,
+   "seeds": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+   ],
+   "variants": [
+    "trap",
+    "control"
+   ]
+  },
+  "model": {
+   "alias": "Qwen/Qwen3.6-35B-A3B-FP8",
+   "expect_max_model_len": 131072,
+   "expect_root": "/conda/jmiranda/h4r/models/qwen36-35b-fp8",
+   "expect_upstream_model": "Qwen/Qwen3.6-35B-A3B-FP8",
+   "fold_developer": true,
+   "sampling": {
+    "temperature": 1.0,
+    "top_k": 20,
+    "top_p": 0.95
+   },
+   "seed_base": 1000,
+   "text_into_reasoning": true,
+   "upstream": "http://127.0.0.1:9185"
+  },
+  "question_card": "eval/cards/first-qwen3.6-r2.card",
+  "results_dir": "eval/results/first-qwen3.6-r2",
+  "run_id": "first-qwen3.6-r2",
+  "scaffold": {
+   "context_window": 65536,
+   "disable_features": [
+    "apps",
+    "browser_use",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "computer_use",
+    "image_generation",
+    "in_app_updates",
+    "plugins",
+    "remote_plugin",
+    "realtime_conversation",
+    "tool_suggest",
+    "skill_mcp_dependency_install",
+    "enable_request_compression",
+    "fast_mode",
+    "ultrafast_mode",
+    "multi_agent",
+    "goals",
+    "in_app_browser",
+    "in_app_chat",
+    "in_app_voice",
+    "in_app_dictation",
+    "in_app_local_automation",
+    "code_mode_host",
+    "daemon_auto_start",
+    "plugin_sharing",
+    "worktrees",
+    "view_image"
+   ],
+   "name": "codex",
+   "parallel": 8,
+   "release_dir": "~/.codex/packages/standalone/releases/0.162.0-x86_64-unknown-linux-musl",
+   "timeout_minutes": 30,
+   "timeout_minutes_by_family": {
+    "t3-entity-overlap": 180
+   }
+  }
+ },
+ "episodes_dir": "/conda/jmiranda/h4r/sessions",
+ "harness_commit": "b73bf79d9e5001964739a645471ea0fd70d9b012",
+ "python": {
+  "numpy": "2.5.3",
+  "pandas": "3.0.6",
+  "path": "/conda/jmiranda/h4r/h4r-eval/eval/env/.site-venv",
+  "python": "3.13.13",
+  "sandbox_path": "/opt/site/python",
+  "scikit-learn": "1.9.1",
+  "scipy": "1.18.1",
+  "source": "site"
+ },
+ "question_card": "eval/cards/first-qwen3.6-r2.card",
+ "rescored_from": "first-qwen3.6-r2",
+ "run_id": "first-qwen3.6-r2-rescored",
+ "scorer_commit": "b95bfcb3313f710927e7dcae444bd03c870b4b23",
+ "served": "Qwen/Qwen3.6-35B-A3B-FP8",
+ "served_max_model_len": 131072,
+ "served_root": "/conda/jmiranda/h4r/models/qwen36-35b-fp8",
+ "started": "2026-10-17T05:08:20Z",
+ "unfrozen": false
+}

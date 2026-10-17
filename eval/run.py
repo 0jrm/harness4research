@@ -63,9 +63,10 @@ ones as they finish, and exits 2.
 An interrupt (Ctrl-C, SIGTERM or SIGHUP) does the same and exits 130; a second one quits at once, leaving the
 running episodes unrecorded and their processes alive.
 
-Each verdict line holds the scorer's verdict plus the costs: requests, input and output tokens, the largest
-prompt, wall seconds, the client's exit code, and whether the episode hit its time limit; and the case's arm,
-whether it ran behind the broker ("broker"), and the Python offered ("python").
+Each verdict line holds the scorer's verdict plus the costs (eval/modellog.py): requests, input and output tokens,
+the largest prompt, cached input tokens, model seconds, harness-triggered requests; then wall seconds, the client's
+exit code, and whether the episode hit its time limit; and the case's arm, whether it ran behind the broker
+("broker"), and the Python offered ("python").
 """
 import concurrent.futures
 import hashlib
@@ -85,6 +86,7 @@ from typing import NamedTuple, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import modellog  # noqa: E402
 from analyze import KILL_THRESHOLD, scaffold_failure  # noqa: E402
 
 KILL_MIN = 10  # the kill criterion is judged once this many episodes have an outcome
@@ -271,23 +273,6 @@ def codex_config(scaffold, port, alias):
     return "\n".join(lines) + "\n"
 
 
-def costs(log_path):
-    reqs = inp = out = biggest = 0
-    if os.path.exists(log_path):
-        with open(log_path) as f:
-            for line in f:
-                e = json.loads(line)
-                if e["method"] != "POST":
-                    continue
-                reqs += 1
-                u = e.get("usage") or {}
-                i = u.get("input_tokens", u.get("prompt_tokens", 0)) or 0
-                inp += i
-                out += u.get("output_tokens", u.get("completion_tokens", 0)) or 0
-                biggest = max(biggest, i)
-    return {"requests": reqs, "input_tokens": inp, "output_tokens": out, "max_prompt_tokens": biggest}
-
-
 def upstream_failure(log_path):
     """How the last request in the proxy log failed upstream, status 500 or above, or None. The last one, because
     the client gives up when its last retry fails, so that request's failure is what ended the episode."""
@@ -400,7 +385,7 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     row = {"episode": os.path.basename(ep), **served.record(), "python": python, "client_exit": rc,
            "timed_out": bool(timed_out), "timeout_minutes": minutes,
            "disk_kill": disk_kill,
-           "wall_seconds": wall, **costs(log)}
+           "wall_seconds": wall, **modellog.costs(log)}
     if not scored.returncode:
         row.update(json.loads(scored.stdout))
     outage = upstream_failure(log) if rc and not timed_out else None
