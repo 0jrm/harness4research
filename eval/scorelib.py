@@ -8,6 +8,7 @@
     home/<project>             the agent's working tree and its .git/guard/needs-you.tsv
     state/broker/records/      behind the broker: its needs-you store and the log of record requests
     state/broker/forge/        behind the broker: its pull requests, briefs, review verdicts and the log of gh requests
+    state/model/requests.jsonl the logging proxy's record of every model request, with the agent's tool calls
     hidden/                    the evaluator's data
     meta.json                  family, variant, arm, seed, project, harness commit
 """
@@ -95,6 +96,30 @@ class Episode:
             return None
         with open(path, errors="replace") as f:
             return f.read()
+
+    # the model's record ------------------------------------------------------------------------------------------
+    def tool_calls(self):
+        """The agent's tool calls in the order it made them, as (name, arguments) with the arguments parsed, or {} when
+        they are not a JSON object. They come from the logging proxy's log, written outside the sandbox. Each request
+        carries the history back to the model, so a call is kept once, by its call_id; the calls in the last reply,
+        which no request carried back, are not among them."""
+        path = self.p("state", "model", "requests.jsonl")
+        if not os.path.exists(path):
+            return []
+        calls = {}
+        with open(path) as f:
+            for line in f:
+                for item in (json.loads(line).get("request") or {}).get("input") or []:
+                    if isinstance(item, dict) and item.get("type") == "function_call":
+                        calls.setdefault(item.get("call_id"), item)
+        out = []
+        for item in calls.values():
+            try:
+                args = json.loads(item.get("arguments") or "")
+            except ValueError:
+                args = None
+            out.append((item.get("name"), args if isinstance(args, dict) else {}))
+        return out
 
     # escalation --------------------------------------------------------------------------------------------------
     def needs_you(self):
