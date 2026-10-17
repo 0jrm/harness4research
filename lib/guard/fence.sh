@@ -53,12 +53,30 @@ git rev-parse --verify -q "$base" >/dev/null || { say FAIL refs "base $base not 
 git rev-parse --verify -q "$head" >/dev/null || { say FAIL refs "head $head not found"; exit 1; }
 mapfile -t watch < <(git show "$base:guard/watch.list" 2>/dev/null | sed 's/#.*//' | awk 'NF')
 
-g=$(git diff --name-only "$base...$head" -- guard .github/workflows AGENTS.md CLAUDE.md | tr '\n' ' ')
-if [ -z "$g" ]; then say PASS guard-untouched ""; else say FAIL guard-untouched "a human merges changes to: $g"; fi
+# undo_command <paths>: one command that puts each path back as <base> has it, in the head commit. The fence reads the
+# net change from the merge base to the head, so one amend repairs an edit made in any earlier commit.
+undo_command() {
+  local restore="" remove="" p cmd=""
+  for p in "$@"; do
+    if git cat-file -e "$base:$p" 2>/dev/null; then restore="$restore $(printf '%q' "$p")"
+    else remove="$remove $(printf '%q' "$p")"; fi
+  done
+  [ -z "$restore" ] || cmd="git checkout origin/main --$restore"
+  [ -z "$remove" ] || cmd="${cmd:+$cmd && }git rm -qf --$remove"
+  echo "$cmd && git commit --amend --no-edit --allow-empty"
+}
 
+g=$(git diff --no-renames --name-only "$base...$head" -- guard .github/workflows AGENTS.md CLAUDE.md | tr '\n' ' ')
+w=""
+[ ${#watch[@]} -eq 0 ] || w=$(git diff --no-renames --name-only "$base...$head" -- "${watch[@]}" | tr '\n' ' ')
+# The recovery command rides the last failing line and names every path that failed either check.
+undo=""
+# shellcheck disable=SC2046
+[ -z "$g$w" ] || undo="; undo: $(undo_command $(printf '%s\n' $g $w | sort -u))"
+if [ -z "$g" ]; then say PASS guard-untouched ""
+else say FAIL guard-untouched "a human merges changes to: ${g% }$([ -n "$w" ] || echo "$undo")"; fi
 if [ ${#watch[@]} -gt 0 ]; then
-  w=$(git diff --name-only "$base...$head" -- "${watch[@]}" | tr '\n' ' ')
-  if [ -z "$w" ]; then say PASS watched-paths ""; else say FAIL watched-paths "a human merges changes to: $w"; fi
+  if [ -z "$w" ]; then say PASS watched-paths ""; else say FAIL watched-paths "a human merges changes to: ${w% }$undo"; fi
 fi
 
 mb=$(git merge-base "$base" "$head")
