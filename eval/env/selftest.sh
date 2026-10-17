@@ -142,6 +142,14 @@ expect records-ledger-by-hand fail "without the broker's signature" -- in_b 'git
 draft big 50
 expect records-card-waits ok "waits for the owner's signed tag card/big: needs-you n2" -- in_b 'guard card add big ~/big.card'
 in_b 'git fetch -q origin run/big && git merge -q --no-edit FETCH_HEAD'
+expect records-card-over-says-number ok "budget_core_hours is '50'; the broker approves runs up to card_auto_max_core_hours 10" -- cat "$b/state/broker/records/needs-you.tsv"
+draft zero 0; draft blank ''
+in_b 'cp runs/_template/question.card ~/placeholder.card'
+expect broker-card-zero ok 'approved: the broker signed card/zero \(budget_core_hours 0 or blank' -- in_b 'guard card add zero ~/zero.card'
+expect broker-card-blank ok 'approved: the broker signed card/blank' -- in_b 'guard card add blank ~/blank.card'
+expect broker-card-placeholder ok 'approved: the broker signed card/placeholder' -- in_b 'guard card add placeholder ~/placeholder.card'
+in_b 'git fetch -q origin run/zero && git merge -q --no-edit FETCH_HEAD'
+expect broker-card-zero-submits ok 'Submitted batch job' -- in_b 'guard/run preflight runs/zero job.sh'
 expect forge-card-tag-refused fail 'card/big is not a signed tag object' -- in_b 'git tag card/big && git push origin card/big'
 expect broker-card-unapproved fail 'not approved: no signed tag card/big' -- in_b 'guard/run preflight runs/big job.sh'
 git -C "$b/state/git/protected.git" tag card/big run/big  # past the forge: the broker's verify-tag is its own wall
