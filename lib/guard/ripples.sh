@@ -86,10 +86,13 @@ else
   [ -n "$rows" ] || blind="no jobs yet: sacct lists $seen job(s) on account $acct since $start from this host, none named $run_id, so there is nothing to judge"
 fi
 if [ -z "$blind" ]; then
-  incident_step="diagnose, then merge $run_dir/incidents/<n>.md with a job: <id> line and the root cause for each, since ripples reads incidents from $base"
-  sort_out job-states "$(awk -F'|' '$3 ~ /TIMEOUT|OUT_OF_ME|NODE_FAIL|FAILED|PREEMPTED/ {printf "%s:%s ", $1, $3}' <<<"$rows")" \
-    "$incident_step; a resource stop of a launch continues with an execution.tsv restart or resume row instead"
-  sort_out walltime-headroom "$(awk -F'|' '$5>0 && $4 > 0.8*$5*60 {printf "%s:%d%% ", $1, 100*$4/($5*60)}' <<<"$rows")" "$incident_step"
+  incident_step="merge $run_dir/incidents/<n>.md with a job: <id> line and the root cause for each, since ripples reads incidents from $base"
+  # A job that ran to its limit, or near it, says the work does not fit one job: the remedy is smaller jobs.
+  split_step="the work needs more than max_walltime_minutes in one job: split it into jobs that each fit and resume from the last checkpoint, or ask a human to raise the limit; then $incident_step"
+  states=$(awk -F'|' '$3 ~ /TIMEOUT|OUT_OF_ME|NODE_FAIL|FAILED|PREEMPTED/ {printf "%s:%s ", $1, $3}' <<<"$rows")
+  step="diagnose, then $incident_step"; [[ $states != *:TIMEOUT* ]] || step=$split_step
+  sort_out job-states "$states" "$step; a resource stop of a launch continues with an execution.tsv restart or resume row instead"
+  sort_out walltime-headroom "$(awk -F'|' '$5>0 && $4 > 0.8*$5*60 {printf "%s:%d%% ", $1, 100*$4/($5*60)}' <<<"$rows")" "$split_step"
   nfail=0
   for id in $(awk -F'|' 'NF && $3 !~ /COMPLETED|RUNNING|PENDING/ {print $1}' <<<"$rows"); do
     if [ -n "${incident[$id]+x}" ]; then acked[$id]=1; else nfail=$((nfail+1)); fi
