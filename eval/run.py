@@ -11,6 +11,7 @@ The config is the question card's machine part:
   "question_card": "eval/cards/first-qwen3.6.card",    frozen: committed once, unchanged, no <placeholder>
   "episodes_dir": "~/.cache/hpc-sessions",            episode directories, named at random so nothing in a path
                                                        names the task, arm or seed (the mount table shows paths)
+  "agents_md": "eval/agents/E5.md",                   optional: arm E's AGENTS.md, replacing the template's whole file
   "results_dir": "eval/results/smoke-1",              verdicts.jsonl
   "model": {"upstream": "http://127.0.0.1:9090",      the model host's relay
             "alias": "default-model",                 the name the proxy pins every request to
@@ -316,8 +317,12 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     if disk_free_gb(ep) < MIN_FREE_GB:
         return {"episode": ep, "error": f"disk: {disk_free_gb(ep):.0f} GiB free under episodes_dir, below "
                 f"{MIN_FREE_GB}", "stop_run": True}
+    env = dict(os.environ)
+    if cfg.get("agents_md") and ARMS[arm].harness == "E":
+        env["H4R_AGENTS_MD"] = os.path.join(os.path.dirname(HERE), cfg["agents_md"])
     built = subprocess.run([os.path.join(HERE, "episode.sh"), family, variant, ARMS[arm].harness, ep, "--seed",
-                            str(seed)] + (["--broker"] if ARMS[arm].broker else []), capture_output=True, text=True)
+                            str(seed)] + (["--broker"] if ARMS[arm].broker else []), capture_output=True, text=True,
+                           env=env)
     if built.returncode:
         subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
         return {"episode": ep, "error": "episode.sh: " + built.stderr.strip()[-300:]}
