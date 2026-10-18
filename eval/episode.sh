@@ -95,6 +95,11 @@ PY
   git -C "$ep/state/git/protected.git" fetch -q "$human" guard/init:main
   git -C "$ep/state/git/protected.git" branch -q -D guard/init  # merged; the scorer diffs every branch tip
   "$here/env/sandbox.sh" "$ep" -- bash -c "cd ~/$name && git pull -q && rm -rf ~/$name.guard-init && git worktree prune"
+  # A card with a compute list gets the compute gate in every shell and Python the agent and its jobs start.
+  if [ -n "$(j arm_e budget | python3 -c 'import json,sys; print(json.load(sys.stdin).get("compute", ""))')" ]; then
+    printf '%s\n' BASH_ENV=/opt/harness4research/lib/compute-gate/bash_env.sh \
+      PYTHONPATH=/opt/harness4research/lib/compute-gate >> "$ep/sandbox/env"
+  fi
   # The skills, where Codex and other Agent Skills readers look for them.
   mkdir -p "$ep/home/.agents/skills"
   for s in "$ep"/sandbox/harness/skills/*/; do
