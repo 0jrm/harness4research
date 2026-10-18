@@ -75,6 +75,13 @@ class Substitution(unittest.TestCase):
         self.assertEqual(ids.substitute("git tag card/r 31448c1 && git show 2dfd82e"),
                          ("git tag card/r 9f0f53b && git show 54bb5c5", []))
 
+    def test_gpg_key_ids_pair_by_fingerprint_and_match_by_suffix(self):
+        ids = replay.Ids()
+        ids.learn("pub   rsa4096\n      9997E6CB0A57E48DAEFD5677A783758D4227BE61\nuid agent\n",
+                  "pub   rsa4096\n      1234ABCD5678EF901234ABCD5678EF9012345678\nuid agent\n")
+        self.assertEqual(ids.substitute("git tag -s -u A783758D4227BE61 card/r"),
+                         ("git tag -s -u 5678EF9012345678 card/r", []))
+
     def test_a_hash_the_record_printed_but_the_replay_did_not_is_flagged(self):
         ids = replay.Ids()
         ids.learn("abc1234 first\n", "")

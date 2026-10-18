@@ -103,10 +103,11 @@ def wait_for(step):
     return min(rec.wall, POLL_WAIT if step.op == "poll" else EXEC_CAP)
 
 
-# --- ids: Slurm job ids and git hashes -------------------------------------------------------------------------------
+# --- ids: Slurm job ids, git hashes, GPG keys-------------------------------------------------------------------------------
 
 JOB_ID = re.compile(r"Submitted batch job (\d+)|^guard: job (\d+),", re.M)
-HEX = re.compile(r"(?<![0-9A-Za-z])(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}(?![0-9A-Za-z])")
+HEX = re.compile(r"(?<![0-9A-Za-z])(?:(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}"
+                 r"|(?=[0-9A-F]*\d)(?=[0-9A-F]*[A-F])[0-9A-F]{16,40})(?![0-9A-Za-z])")
 
 
 def job_ids(text):
@@ -132,8 +133,8 @@ def hash_pairs(recorded_text, replay_text):
 
 
 class Ids:
-    """The record's job ids and commit hashes, paired with the replay's. Job ids pair in order of submission within a
-    command; hashes pair by the output line they sit in, and match a command's hash by prefix, as git does."""
+    """The record's job ids, commit hashes and GPG key ids, paired with the replay's. Job ids pair in order of
+    submission within a command; hashes and key ids pair by the output line they sit in."""
 
     def __init__(self, hashes=()):
         self.jobs, self.recorded_jobs = {}, set()
@@ -148,9 +149,15 @@ class Ids:
             self.hashes[a] = b
 
     def replay_hash(self, h):
+        """A commit hash matches by prefix; a GPG key id (upper case) by suffix, as a long key id ends its
+        fingerprint."""
         for a, b in self.hashes.items():
-            if (a.startswith(h) or h.startswith(a)) and len(b) >= len(h):
+            if len(b) < len(h):
+                continue
+            if a.startswith(h) or h.startswith(a):
                 return b[:len(h)]
+            if h.isupper() and (a.endswith(h) or h.endswith(a)):
+                return b[-len(h):]
         return None
 
     def substitute(self, cmd):
@@ -169,7 +176,7 @@ class Ids:
         def commit(m):
             h = m.group(0)
             new = self.replay_hash(h)
-            if new is None and any(r.startswith(h) or h.startswith(r) for r in self.recorded_hashes):
+            if new is None and any(r.startswith(h) or h.startswith(r) or r.endswith(h) for r in self.recorded_hashes):
                 flags.add("unmapped-hash")
             return new or h
         ids = self.recorded_jobs | set(self.jobs)
