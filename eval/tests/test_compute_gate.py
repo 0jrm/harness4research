@@ -44,7 +44,7 @@ class ComputeGate(unittest.TestCase):
         lines = r.stderr.splitlines()
         self.assertEqual(len(lines), 2, cmd)
         self.assertTrue(lines[0].startswith(f"guard compute: refused {what} outside a Slurm job"), cmd)
-        self.assertIn("guard/run preflight runs/sim job.sh", lines[1], cmd)
+        self.assertTrue(lines[1].endswith("guard run runs/sim --why 'Run job.sh for run sim.' -- job.sh"), cmd)
         return lines
 
     def test_listed_entrypoints_refused_on_the_login_node(self):
@@ -55,13 +55,13 @@ class ComputeGate(unittest.TestCase):
 
     def test_from_another_directory_the_command_starts_with_cd(self):
         lines = self.refused("cd .. && python3 ocean-sim/sim.py", "sim.py")
-        self.assertEqual(lines[1], "Submit it instead: cd ~/ocean-sim && guard/run preflight runs/sim job.sh")
+        self.assertEqual(lines[1], "cd ~/ocean-sim && guard run runs/sim --why 'Run job.sh for run sim.' -- job.sh")
 
     def test_a_committed_run_names_its_directory(self):
         os.makedirs(os.path.join(self.proj, "runs", "r1"))
         open(os.path.join(self.proj, "runs", "r1", "question.card"), "w").close()
         r = sh(self.proj, "python3 sim.py")
-        self.assertIn("guard/run preflight runs/r1 job.sh", r.stderr)
+        self.assertIn("guard run runs/r1 --why 'Run job.sh for run r1.' -- job.sh", r.stderr)
 
     def test_inside_a_job_unlisted_or_unrelated_it_runs(self):
         self.assertEqual(sh(self.proj, "bash job.sh", SLURM_JOB_ID="1000").stdout, "ran\n")

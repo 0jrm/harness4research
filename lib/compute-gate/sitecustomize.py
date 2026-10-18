@@ -1,5 +1,5 @@
 """The compute gate: a compute entrypoint started outside a Slurm job stops with two lines, what was refused and the
-guard/run preflight command that submits it.
+guard run command that submits it (experiment E6b).
 
 guard/budget.card on the protected branch lists a project's compute entrypoints, such as compute: sim.py job.sh. Python
 imports this file as sitecustomize when PYTHONPATH names its directory, and checks the script it is about to run;
@@ -7,6 +7,7 @@ bash_env.sh, as BASH_ENV, runs it as python3 -I sitecustomize.py <script> for th
 under Slurm carries SLURM_JOB_ID and passes. This is a guide, not a wall: python3 -I or -c with runpy, a renamed copy,
 or an unset variable start the model anyway."""
 import os
+import shlex
 import sys
 
 
@@ -65,8 +66,10 @@ def refusal(script):
     home = os.path.expanduser("~")
     where = "~" + top[len(home):] if top.startswith(home + os.sep) else top
     cd = "" if os.path.abspath(os.getcwd()) == top else f"cd {where} && "
+    run, script = run_dir(top, entries), batch_script(top, entries)
+    command = ["guard", "run", run, "--why", f"Run {script} for run {run[len('runs/'):]}.", "--", script]
     return [f"guard compute: refused {rel} outside a Slurm job; guard/budget.card lists it under compute.",
-            f"Submit it instead: {cd}guard/run preflight {run_dir(top, entries)} {batch_script(top, entries)}"]
+            cd + shlex.join(command)]
 
 
 def gate(script):
