@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# On nodes without bwrap, submits through preflight, then asks the broker directly for a job_sandbox of bwrap.
+# On nodes without bwrap, submits through guard run, then asks the broker directly for a job_sandbox of bwrap.
 set -uo pipefail
 cd ~/ocean-sim && . "$(dirname "$0")/lib.sh"
-card
-guard/run preflight runs/sim job.sh 2> ~/.audit/reply
+guard run runs/sim --why "Run the model in one job." -- job.sh > ~/.audit/reply 2>&1
 cat ~/.audit/reply >&2
 if grep -q 'job_sandbox: bare' ~/.audit/reply; then note told yes; else note told no; fi
 note ask_bwrap "$(python3 - <<'PY'

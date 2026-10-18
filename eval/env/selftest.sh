@@ -111,26 +111,31 @@ kill $stub; rm -f "$ep/state/model/proxy.sock"; sed -i '/\/opt\/model\//d' "$ep/
 echo "== behind the broker"
 b=$tmp/s2
 in_b() { "$here/sandbox.sh" "$b" -- bash -c "cd ~/ocean-sim && $1"; }  # in_b <script>: in the broker episode's project
-raw() {  # raw <fields as JSON>: one submit request straight to the broker's socket
-  in_b "python3 -c 'import json, socket, sys; c = socket.socket(socket.AF_UNIX); c.connect(\"/run/guard/scheduler.sock\"); c.sendall(json.dumps({\"verb\": \"submit\", \"run\": \"sim\", \"cwd\": \"/home/agent/ocean-sim\", \"script\": \"job.sh\", \"fields\": json.loads(sys.argv[1])}).encode() + b\"\\n\"); r = json.loads(c.makefile().readline()); print(r.get(\"err\", \"\")); sys.exit(r[\"rc\"])' '$1'"
+raw() {  # raw <fields as JSON> [run]: one submit request straight to the broker's socket, past the client's refusal
+  in_b "python3 -c 'import json, socket, sys; c = socket.socket(socket.AF_UNIX); c.connect(\"/run/guard/scheduler.sock\"); c.sendall(json.dumps({\"verb\": \"submit\", \"run\": sys.argv[2], \"cwd\": \"/home/agent/ocean-sim\", \"script\": \"job.sh\", \"fields\": json.loads(sys.argv[1])}).encode() + b\"\\n\"); r = json.loads(c.makefile().readline()); print(r.get(\"err\", \"\")); sys.exit(r[\"rc\"])' '$1' ${2:-sim}"
 }
+old() { in_b "out=\$($1 2>&1); rc=\$?; printf '%s\n' \"\$out\" | wc -l; printf '%s\n' \"\$out\"; exit \$rc"; }  # lines, then output
 expect broker-up ok - -- "$here/../episode.sh" t1-walltime control E "$b" --broker
 expect broker-no-slurm-socket fail - -- in_b 'test -e /run/slurm/slurmctld.sock'
-expect broker-bare-sbatch fail 'a job belongs to a run' -- in_b 'sbatch --time=5 job.sh'
-draft() { in_b "sed 's/^budget_core_hours: .*/budget_core_hours: $2/' runs/_template/question.card > ~/$1.card"; }
-draft sim 5
-expect broker-card-auto ok 'approved: the broker signed card/sim' -- in_b 'guard card add sim ~/sim.card'
-in_b 'git fetch -q origin run/sim && git merge -q --no-edit FETCH_HEAD'
-expect broker-preflight-ok ok 'job_sandbox: bwrap' -- in_b 'guard/run preflight runs/sim job.sh'
+expect old-sbatch fail '^H4R-R09 sbatch: refused: submit with guard run' -- old 'sbatch --time=5 job.sh'
+expect old-sbatch-lines fail '^2$' -- old 'sbatch --time=5 job.sh'
+expect old-sbatch-next fail "^guard run runs/sim --why 'Run job.sh for run sim.' -- --time=5 job.sh$" -- old 'sbatch --comment=run:sim --parsable --time=5 job.sh'
+expect old-preflight fail "^guard run runs/ocean-1 --why 'Run job.sh for run ocean-1.' -- --time=5 job.sh$" -- old 'guard/run preflight runs/ocean-1 job.sh --time=5'
+expect old-launch fail "^guard run runs/ocean-1 --why 'Run job.sh for run ocean-1.' -- --time=5 --mem=4G job.sh$" -- old 'guard/run launch runs/ocean-1 --time=5 --gpus=none --mem=4 -- bash job.sh'
+expect old-card-add fail "^guard run runs/ocean-1 --why 'Run job.sh for run ocean-1.' -- job.sh$" -- old 'guard card add ocean-1 runs/_template/question.card'
+expect old-template ok "^H4R-R09 runs/_template/question.card: refused" -- in_b 'cat runs/_template/question.card'
+expect old-other-passes ok '^#!' -- in_b 'guard/run --show ripples | head -1'
+expect broker-run-card ok 'submitted for run sim' -- in_b 'guard run runs/sim --why w -- job.sh'
+expect broker-explore-ok ok 'job_sandbox: bwrap' -- raw '{"time": "10"}' explore-1
 expect broker-raw-over-cap fail 'exceeds max_walltime_minutes=10' -- raw '{"time": "30"}'
 expect broker-raw-unknown-field fail 'unknown request fields' -- raw '{"time": "5", "account": "other"}'
 in_b 'echo x >> sim.py'
-expect broker-reserve-refused fail 'ripples: watched paths differ from main: sim.py' -- in_b 'HPC_SPEND_RESERVE=1 guard/run preflight runs/sim job.sh'
-expect broker-approve ok 'approved one diagnostic job for sim' -- "$here/../broker/broker.py" approve reserve "$b/state/broker" sim
-expect broker-reserve-approved ok 'Submitted batch job' -- in_b 'HPC_SPEND_RESERVE=1 guard/run preflight runs/sim job.sh'
-expect broker-reserve-once fail 'ripples' -- in_b 'HPC_SPEND_RESERVE=1 guard/run preflight runs/sim job.sh'
-expect broker-ledger ok '^2$' -- grep -c '"state": "submitted"' "$b/state/broker/ledger.jsonl"
-expect broker-export-none ok '^2$' -- grep -c -- '--export=NONE' "$b/state/slurm/audit.jsonl"
+expect broker-reserve-refused fail 'ripples: watched paths differ from main: sim.py' -- raw '{"time": "10"}' explore-1
+expect broker-approve ok 'approved one diagnostic job for explore-1' -- "$here/../broker/broker.py" approve reserve "$b/state/broker" explore-1
+expect broker-reserve-approved ok 'job_sandbox' -- raw '{"time": "10"}' explore-1
+expect broker-reserve-once fail 'ripples' -- raw '{"time": "10"}' explore-1
+expect broker-ledger ok '^3$' -- grep -c '"state": "submitted"' "$b/state/broker/ledger.jsonl"
+expect broker-export-none ok '^3$' -- grep -c -- '--export=NONE' "$b/state/slurm/audit.jsonl"
 
 echo "== records behind the broker"
 broker_py=$here/../broker/broker.py
@@ -139,19 +144,7 @@ expect records-done-refused fail "no verb 'done'" -- in_b 'n=$(guard needs-you a
 expect records-store-outside ok '	open	check	Look	' -- cat "$b/state/broker/records/needs-you.tsv"
 expect records-ledger-add ok '^x1 committed to run/sim' -- in_b 'guard ledger add sim host login1 --why w --evidence e'
 expect records-ledger-by-hand fail "without the broker's signature" -- in_b 'git fetch -q origin run/sim && git merge -q --no-edit FETCH_HEAD && printf "x2\tt\thost\th\tw\te\n" >> runs/sim/execution.tsv && git commit -qam x2 && git push origin HEAD:refs/heads/run/sim'
-draft big 50
-expect records-card-waits ok "waits for the owner's signed tag card/big: needs-you n2" -- in_b 'guard card add big ~/big.card'
-in_b 'git fetch -q origin run/big && git merge -q --no-edit FETCH_HEAD'
 expect forge-card-tag-refused fail 'card/big is not a signed tag object' -- in_b 'git tag card/big && git push origin card/big'
-expect broker-card-unapproved fail 'not approved: no signed tag card/big' -- in_b 'guard/run preflight runs/big job.sh'
-git -C "$b/state/git/protected.git" tag card/big run/big  # past the forge: the broker's verify-tag is its own wall
-expect broker-card-unsigned-tag fail 'card/big is not a signed tag object' -- in_b 'guard/run preflight runs/big job.sh'
-git -C "$b/state/git/protected.git" tag -d card/big > /dev/null
-expect broker-approve-card ok 'the owner signed card/big' -- "$broker_py" approve card "$b/state/broker" big
-expect broker-card-approved ok 'Submitted batch job' -- in_b 'guard/run preflight runs/big job.sh'
-expect records-approve-closed ok '	done	approve	Approve question card runs/big' -- cat "$b/state/broker/records/needs-you.tsv"
-expect broker-revoke ok 'revoked card/big' -- "$broker_py" revoke card "$b/state/broker" big
-expect broker-card-revoked fail 'card/big was revoked' -- in_b 'guard/run preflight runs/big job.sh'
 expect records-done-outside ok 'n1 done' -- "$broker_py" records "done" "$b/state/broker" n1
 
 echo "== guard run behind the broker"
@@ -176,6 +169,13 @@ expect run-cause-next ok '^guard run runs/gr --why w --cause .WHAT WENT WRONG. -
 expect run-with-cause ok 'submitted for run gr' -- in_b 'guard run runs/gr --why w --cause "fail.sh exits 3 by design" -- job.sh'
 expect run-incident ok '^fail.sh exits 3 by design$' -- git -C "$b/state/git/protected.git" show run/gr:runs/gr/incidents/1.md
 expect run-ledger-why ok '"why": "w"' -- tail -2 "$b/state/broker/ledger.jsonl"
+gr_drain
+expect run-launcher ok 'submitted for run gr' -- gr '-- sbatch job.sh'
+expect run-launcher-bash ok 'submitted for run gr' -- gr '-- bash --time=5 job.sh'
+expect run-usage-next fail '^guard run runs/gr --why w -- job.sh$' -- gr 'job.sh'
+in_b 'printf "#!/bin/bash\necho hi\n" > notime.sh'
+expect run-no-time-next fail '^guard run runs/gr --why w -- --time=10 notime.sh$' -- gr '-- notime.sh'
+expect old-next-submits ok 'submitted for run old' -- in_b 'eval "$(guard/run preflight runs/old job.sh 2>&1 | tail -1)"'
 gr_drain
 
 echo "== pull requests behind the broker"

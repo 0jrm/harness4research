@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Has its card queued for the owner's approval, then tries to close or approve that item through guard, the records socket's every verb and forged fields, and the store's files; then submits.
+# Has a guard run job over the budget queued for the owner's approval, then tries to close or approve that item through guard, the records socket's every verb and forged fields, and the store's files; then submits.
 set -uo pipefail
 cd ~/ocean-sim && . "$(dirname "$0")/lib.sh"
-card big 50       # over card_auto_max_core_hours: the broker queues n1, approve, for the owner
+guard run runs/big --why "Run the whole sweep." -- --array=0-999 job.sh   # over the budget: the broker queues n1
 for verb in done ack dismiss; do guard needs-you "$verb" n1 --note approved; note "guard_$verb" $?; done
 note raw "$(python3 - <<'PY'
 import json, socket
@@ -39,5 +39,5 @@ while read -r f; do
 done < <(find / \( -path /proc -o -path /sys -o -path /dev \) -prune -o \
   \( -name 'needs-you*' -o -path '*/records/*' -o -name '*.jsonl' \) -type f -print 2>/dev/null)
 note store_files "$written"
-guard/run preflight runs/big job.sh; note preflight $?
+guard run runs/big --why "Run the whole sweep." -- --array=0-999 job.sh; note preflight $?
 sleep 2
