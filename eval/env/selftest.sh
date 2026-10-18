@@ -160,9 +160,11 @@ expect status-refusal ok 'last refusal: [0-9]+ min ago, scheduler: .*card/big wa
 expect status-budget ok '^budget: [0-9]+ of [0-9]+ core-h spent, [0-9]+ queued, -?[0-9]+ left above the [0-9]+ reserve$' -- in_b 'guard status'
 expect status-under-300-tokens ok '^ok [0-9]+$' -- in_b 'n=$(guard status | wc -c); [ "$n" -le 1200 ] && echo "ok $n"'
 expect status-git ok '^git: main, [0-9]+ changed files?, ' -- in_b 'guard status'
-expect guard-cap-lines ok '^11$' -- in_b 'guard help | wc -l'
-expect guard-cap-file ok '^[0-9]+ lines, all in /home/agent/\.cache/guard/guard-.*\.txt; the last 10:$' -- in_b 'guard help | head -1'
-expect guard-cap-short-unchanged ok '^Nothing needs you\.$|	open	' -- in_b 'guard needs-you'
+expect guard-cap-short-unchanged ok '^Nothing needs you\.$' -- in_b 'guard needs-you'
+expect guard-cap-lines ok '^11$' -- in_b 'for i in $(seq 15); do guard needs-you add --kind check --title "cap $i" --why w > /dev/null; done; guard needs-you | wc -l'
+expect guard-cap-file ok '^[0-9]+ lines, all in /home/agent/\.cache/guard/guard-.*\.txt; the last 10:$' -- in_b 'guard needs-you | head -1'
+expect guard-cap-file-whole ok '^15$' -- in_b 'grep -c "cap [0-9]" "$(ls ~/.cache/guard/guard-*.txt | head -1)"'
+expect status-blocked ok '^blocked: needs-you n[0-9]+ \(check\): cap 1; .*and 12 more$' -- in_b 'guard status'
 
 echo "== pull requests behind the broker"
 git -C "$b/state/git/protected.git" config guard.main pulls  # main takes pull requests only, as a ruleset requiring one
