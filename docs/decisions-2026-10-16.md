@@ -1,6 +1,6 @@
 # Decisions 2026-10-16
 
-Made by the owner with the reviewer through twelve option cards; recommendations were taken except D5. Each row is a standing rule for [plan-2026-10-16.md](plan-2026-10-16.md). Edit a row to overrule it.
+Made by the owner with the reviewer through twelve option cards; recommendations were taken except D5. Each row is a standing rule for [plan-2026-10-16.md](archive/plan-2026-10-16.md). Edit a row to overrule it.
 
 | id | decision |
 |---|---|
