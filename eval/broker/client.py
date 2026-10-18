@@ -2,18 +2,20 @@
 """The sandbox's sbatch, squeue, sacct, scancel, sacctmgr, gh and guard, by the name they are called under, when the
 episode runs behind the broker. Each sends one request to one of the broker's sockets and prints the reply.
 
-sbatch never reaches the scheduler: it turns its options and the script's #SBATCH lines into the broker's request
-fields and refuses an option it cannot map. A request names its run with --comment=run:<id>, which guard/run
-preflight adds, so a bare sbatch call is refused. Only the broker decides what the scheduler sees.
+guard run is the only way to submit (experiment E2b): it turns its sbatch options and the script's #SBATCH lines
+into the broker's request fields, refuses an option it cannot map, and drops a leading sbatch, bash, sh or srun.
+sbatch, guard card add, and guard/run preflight and launch (which the project's guard/run hands here as
+client.py guard/run ...) refuse with the guard run command for the same submission. Only the broker decides what
+the scheduler sees.
 
-guard needs-you, guard ledger and guard card go to the records socket; every other guard subcommand runs the
-installed guard. The records socket offers add, list, show and find, so guard needs-you ack, done and dismiss are
+guard needs-you, guard ledger and guard card show and list go to the records socket; every other guard subcommand
+runs the installed guard. The records socket offers add, list, show and find, so guard needs-you ack, done and dismiss are
 refused there:
 
     guard needs-you [--remind] | add --kind K --title T [...] | find --kind K --title T | show <id>
     guard ledger add <run_id> <field> <value> [--why W] [--evidence E] | list <run_id>
     guard run <run_dir> --why W [--cause C] -- <sbatch options> <script> [args]   (the scheduler socket, broker.py)
-    guard card add <run_id> <card file> | show <run_id> | list
+    guard card show <run_id> | list
 
 gh sends its arguments to the gh socket, which decides what it offers (forge.py): pr create, view, list, diff, checks
 and comment, and api reads. Here it only reads --body-file into --body, names the current branch where gh would, and
@@ -23,6 +25,8 @@ they are refused."""
 import argparse
 import json
 import os
+import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -40,7 +44,12 @@ SHORT = {"-t": "time", "-N": "nodes", "-n": "ntasks", "-c": "cpus-per-task", "-G
 # Options preflight passes whose values the broker sets itself, or that change nothing it renders.
 SET_BY_BROKER = {"account", "job-name", "comment"}
 FLAGS = {"ignore-pbs", "parsable"}
-RUN_USAGE = 'guard run runs/<run_id> --why "<one sentence>" -- <sbatch options> <script>'
+# What agents put before the script after guard run's --, as they would on a command line; guard run drops it.
+LAUNCHERS = ("sbatch", "bash", "sh", "srun")
+# The old submission path (guard/run preflight and launch, guard card add, sbatch, the card template) refuses with this
+# code; guard run is the only way to submit, and the refusal's second line is the guard run command to use.
+OLD_PATH = "H4R-R09"
+RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 class Refused(Exception):
@@ -109,21 +118,105 @@ def job_words(words):
     return words[:len(words) - len(rest)], rest[0], rest[1:], opts
 
 
-def sbatch_request(args):
-    _, script, rest, opts = job_words(args)
-    run = str(opts.get("comment", ""))
-    if not run.startswith("run:"):
-        raise Refused(f"a job belongs to a run: submit it with {RUN_USAGE.replace('<script>', script)}")
-    fields = {FIELDS[k]: v for k, v in opts.items() if k in FIELDS}
-    return {"verb": "submit", "run": run[4:], "cwd": os.getcwd(), "script": script, "args": rest,
-            "fields": fields, "parsable": bool(opts.get("parsable"))}
+def without_launcher(words):
+    while words and words[0] in LAUNCHERS:
+        words = words[1:]
+    return words
+
+
+def batch_script():
+    """The first file here, by name, with #SBATCH lines: the script a submission most likely means."""
+    for name in sorted(os.listdir(".")):
+        try:
+            if os.path.isfile(name) and script_words(name):
+                return name
+        except (OSError, UnicodeDecodeError):
+            pass
+    return None
+
+
+def card_question(path):
+    try:
+        with open(path) as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+    q = next((l.split(":", 1)[1].strip() for l in text.splitlines() if l.startswith("question:")), "")
+    return q if q and "<" not in q and len(q) < 300 else None
+
+
+def guard_run_command(words, run=None, why=None, cause=None):
+    """The guard run command for a submission typed some other way, built from its words: the sbatch options
+    guard run takes, the script and its arguments. A run id not given comes from --comment=run:ID or the script's
+    name; a --why not given from the run's question card, or a sentence naming the script and the run."""
+    words, options, opts, i = without_launcher(list(words)), [], {}, 0
+    while i < len(words) and words[i].startswith("-") and words[i] != "-":
+        w = words[i]
+        takes_value = w in SHORT or (w.startswith("--") and w[2:] in list(FIELDS) + list(SET_BY_BROKER))
+        pair = [w, words[i + 1]] if takes_value and i + 1 < len(words) else [w]
+        i += len(pair)
+        try:
+            parse(pair, opts)
+        except Refused:
+            continue
+        name = SHORT.get(w[:2]) if not w.startswith("--") else w[2:].partition("=")[0]
+        if name in FIELDS:
+            options += pair
+    rest = words[i:]
+    if rest and os.path.isfile(rest[0]):
+        script, args = rest[0], rest[1:]
+    else:
+        script, args = batch_script() or (rest[0] if rest else "job.sh"), []
+    comment = str(opts.get("comment", ""))
+    run = run or (comment[4:] if comment.startswith("run:") else "")
+    if not RUN_ID.match(run or ""):
+        run = re.sub(r"[^A-Za-z0-9._-]", "-", os.path.splitext(os.path.basename(script))[0]).lstrip("._-") or "job"
+    why = why or card_question(f"runs/{run}/question.card") or f"Run {script} for run {run}."
+    return shlex.join(["guard", "run", f"runs/{run}", "--why", why, *(["--cause", cause] if cause else []), "--",
+                       *options, script, *args])
+
+
+def old_path(what, command):
+    """The old path's refusal: the code and what was refused, then the guard run command to use instead."""
+    return f"{OLD_PATH} {what}: refused: submit with guard run, which writes the run's card itself\n{command}\n"
+
+
+def refuse_old(what, command):
+    sys.stderr.write(old_path(what, command))
+    return 2
+
+
+def guard_script(args):
+    """guard/run preflight and launch, which the project's guard/run hands here behind the broker."""
+    cmd, rest = (args[0], args[1:]) if args else ("", [])
+    run = os.path.basename(os.path.normpath(rest[0])) if rest and not rest[0].startswith("-") else None
+    if cmd == "launch":
+        head, command = (rest[1:rest.index("--")], rest[rest.index("--") + 1:]) if "--" in rest else (rest[1:], [])
+        options = []
+        for a in head:
+            name, _, value = a[2:].partition("=")
+            if name == "time" and value:
+                options.append(a)
+            elif name == "mem" and value:
+                options.append(f"--mem={value}G" if value.isdigit() else a)
+            elif name == "gpus" and value and value != "none":
+                options.append(f"--gpus={len(value.split(','))}")
+        return refuse_old(f"guard/run {cmd}", guard_run_command(options + without_launcher(command), run))
+    script = rest[1:2] if len(rest) > 1 and not rest[1].startswith("-") else []
+    return refuse_old(f"guard/run {cmd}", guard_run_command(rest[2:] + script if script else rest[1:], run))
+
+
+def card_add(args):
+    run = args[0] if args and RUN_ID.match(args[0]) else None
+    why = card_question(args[1]) if len(args) > 1 else None
+    return refuse_old("guard card add", guard_run_command([], run, why))
 
 
 def run_request(args):
     """guard run <run_dir> --why W [--cause C] -- <sbatch options> <script> [args]."""
     if "--" not in args:
         raise Refused("put -- between guard run's own options and the job's sbatch options and script")
-    head, words = args[:args.index("--")], args[args.index("--") + 1:]
+    head, words = args[:args.index("--")], without_launcher(args[args.index("--") + 1:])
     named, run_dir, it = {"why": None, "cause": ""}, None, iter(head)
     for a in it:
         name, eq, value = a[2:].partition("=")
@@ -139,6 +232,25 @@ def run_request(args):
     return {"verb": "run", "run_dir": run_dir, "why": named["why"], "cause": named["cause"] or "", "cwd": os.getcwd(),
             "options": options, "script": script, "args": rest,
             "fields": {FIELDS[k]: v for k, v in opts.items() if k in FIELDS}}
+
+
+def corrected_run(args):
+    """guard run's corrected command from what the agent typed: its run directory and --why, and the job's words
+    after -- or, with no --, every word it did not take as its own."""
+    run_dir, why, cause, words, it = None, None, None, [], iter(args[:args.index("--")] if "--" in args else args)
+    for a in it:
+        name, eq, value = a[2:].partition("=")
+        if a.startswith("--") and name in ("why", "cause"):
+            value = value if eq else next(it, None)
+            why, cause = (value, cause) if name == "why" else (why, value)
+        elif run_dir is None and not a.startswith("-") and (a.startswith("runs/") or not os.path.isfile(a)):
+            run_dir = a
+        else:
+            words.append(a)
+    words += args[args.index("--") + 1:] if "--" in args else []
+    run = os.path.basename(os.path.normpath(run_dir)) if run_dir else None
+    one_line = lambda s: s.strip() if s and s.strip() and "\n" not in s else None
+    return guard_run_command(words, run if run and RUN_ID.match(run) else None, one_line(why), one_line(cause))
 
 
 def records_request(args):
@@ -283,7 +395,7 @@ def guard(args):
         try:
             request = run_request(args[1:])
         except Refused as e:
-            sys.stderr.write(f"H4R-R01 guard run: refused: {e}\n{RUN_USAGE}\n")
+            sys.stderr.write(f"H4R-R01 guard run: refused: {e}\n{corrected_run(args[1:])}\n")
             return 2
         reply = ask(request)
         sys.stdout.write(reply.get("out", ""))
@@ -299,6 +411,8 @@ def guard(args):
         sys.stdout.write(reply.get("out", ""))
         sys.stderr.write(reply.get("err", "").replace("gh: refused by the broker", "guard pr open: refused by the broker"))
         return 0 if reply.get("rc") == 0 else 2
+    if args[:2] == ["card", "add"]:
+        return card_add(args[2:])
     if not args or args[0] not in ("needs-you", "ledger", "card"):
         os.execv(GUARD, [GUARD, *args])
     try:
@@ -332,15 +446,17 @@ def ask(request, path=SOCKET):
 
 
 def main(cmd, args):
+    if cmd == "client.py" and args[:1] == ["guard/run"]:
+        return guard_script(args[1:])
     if cmd == "guard":
         return guard(args)
+    if cmd == "sbatch":
+        return refuse_old("sbatch", guard_run_command(args))
     if cmd == "gh":
         return gh(args)
     verbs = {"squeue": "queue", "sacct": "acct", "scancel": "cancel"}
     try:
-        if cmd == "sbatch":
-            request = sbatch_request(args)
-        elif cmd in verbs:
+        if cmd in verbs:
             request = {"verb": verbs[cmd], "args": args}
         else:
             raise Refused("not offered here")

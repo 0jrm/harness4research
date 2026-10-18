@@ -66,9 +66,18 @@ PY
   # The sandbox's remote has no pull requests: a push to main passes when the fence passes, as the ruleset would
   # let a merge pass. So arm E finishes by pushing, and the review-and-merge skill, which drives the pull-request
   # flow, is not linked. Recorded in the evaluation's question card as its one deviation from the installed harness.
-  # Behind the broker, guard run replaces the card, preflight and ripples steps (experiment E2), so AGENTS.md is the
-  # broker's own short version.
-  if [ ${#broker[@]} -gt 0 ]; then cp "$here/broker/AGENTS.md" "$human/AGENTS.md"; else
+  # Behind the broker, guard run is the only way to submit (experiments E2, E2b): AGENTS.md is the broker's own
+  # short version, guard/run preflight and launch hand off to the client's refusal, and the card template is that
+  # refusal, each naming the guard run command to use.
+  if [ ${#broker[@]} -gt 0 ]; then
+    cp "$here/broker/AGENTS.md" "$human/AGENTS.md"
+    sed -i 's|^cmd=${1:-}; shift \|\| true$|&\ncase $cmd in preflight\|launch) exec /opt/site/lib/client.py guard/run "$cmd" "$@" ;; esac|' \
+      "$human/guard/run"
+    grep -q '^case $cmd in preflight|launch) exec' "$human/guard/run" || { echo "episode.sh: guard/run has no cmd= line" >&2; exit 2; }
+    (cd "$human" && python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import client
+sys.stdout.write(client.old_path("runs/_template/question.card", client.guard_run_command([])))' "$here/broker") \
+      > "$human/runs/_template/question.card"
+  else
   python3 - "$human/AGENTS.md" <<'PY'
 import sys
 path = sys.argv[1]

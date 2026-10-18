@@ -584,6 +584,10 @@ class Broker:
                                     "what went wrong", command[:5] + ["--cause", "WHAT WENT WRONG"] + command[5:])
         if failed:
             self.incident(run, [j for j, _ in failed], cause)
+        wall = card_values(self.mirror.show("guard/budget.card") or "").get("max_walltime_minutes", "")
+        if not (req.get("fields") or {}).get("time") and wall.isdigit():
+            return refusal("usage", "state the walltime; a job must fit max_walltime_minutes",
+                           command[:6] + options + [f"--time={wall}", script, *args])
         try:
             job = self.plan({"run": run, "fields": req.get("fields"), "cwd": req.get("cwd"), "script": script,
                              "args": args})
@@ -598,7 +602,8 @@ class Broker:
         price = cost(job)
         try:
             card_sha, qcard = self.card_check(run, self.run_card(run, why, command, price))
-            job_id, _ = self.launch(job, card_sha, qcard, self.approval(run), record={"why": why, "cost": price})
+            job_id, note = self.launch(job, card_sha, qcard, self.approval(run), record={"why": why, "cost": price})
+            bare = note[note.index(", job_sandbox: bare"):] if ", job_sandbox: bare" in note else ""
         except OverBudget as e:
             item = self.records.queue_item(
                 "approve", f"Approve a job of run {run} over the remaining budget",
@@ -609,7 +614,7 @@ class Broker:
                                     "do other work, or stop\n"}
         return {"rc": 0, "out": f"job {job_id} submitted for run {run}: {price['minutes']} min x {price['nodes']} node(s) "
                                 f"x {price['cores_per_node']} cores x {price['tasks']} task(s) = {price['core_hours']} "
-                                f"core-h, {price['gpu_hours']} GPU-h\n"}
+                                f"core-h, {price['gpu_hours']} GPU-h{bare}\n"}
 
     def run_card(self, run, why, command, price):
         """runs/<run>/question.card as the broker wrote it from the run's first invocation; written now if absent."""
