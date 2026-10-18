@@ -1,6 +1,6 @@
 {
   "run_id": "exp-E1",
-  "question_card": "eval/cards/E1.card",
+  "question_card": "eval/cards/E1r.card",
   "episodes_dir": "/conda/jmiranda/h4r/sessions",
   "results_dir": "eval/results/exp-E1",
   "model": {
