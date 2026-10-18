@@ -70,14 +70,15 @@ def fed_to(before):
 
 
 def words_of(simple):
-    """The words of a simple command from its program on: leading assignments and wrappers such as timeout 120 go."""
+    """The words of a simple command from its program on: leading assignments and wrappers such as timeout 120 go, and
+    env -u NAME with its name."""
     try:
         words = shlex.split(simple)
     except ValueError:
         words = simple.split()
     while words and ("=" in words[0] and not words[0].startswith("-") or words[0] in WRAPPERS
                      or re.fullmatch(r"-\S*|\d+[smhd]?", words[0])):
-        words = words[1:]
+        words = words[2:] if words[0] in ("-u", "--unset") else words[1:]
     return words
 
 
