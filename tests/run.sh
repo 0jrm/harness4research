@@ -2437,5 +2437,17 @@ expect budget-over fail '^budget: a.md has 4 words, over 3$' -- "$fx_budget/test
 expect budget-no-match fail '^budget: missing.md matches no file$' -- "$fx_budget/tests/budget.sh"
 rm -rf "$fx_budget"
 
+echo "== guard/run output cap"
+cap=$(mktemp -d); git init -q -b main "$cap"; mkdir -p "$cap/guard/bin"; cp "$here/templates/guard/run" "$cap/guard/"
+printf 'account: x\n' > "$cap/guard/budget.card"
+printf '#!/bin/bash\nseq 1 "$1"; echo "refused: why" >&2; exit 3\n' > "$cap/guard/bin/manifest.sh"
+git -C "$cap" add -A && git -C "$cap" commit -qm cap
+expect cap-under ok '^40$' -- bash -c 'cd "$1" && { env HPC_GUARD_REF=main guard/run manifest 39 2>&1; true; } | wc -l' _ "$cap"
+expect cap-under-keeps-exit fail 'refused: why' -- bash -c 'cd "$1" && env HPC_GUARD_REF=main guard/run manifest 39' _ "$cap"
+expect cap-over-11-lines ok '^11$' -- bash -c 'cd "$1" && { env HOME="$1" HPC_GUARD_REF=main guard/run manifest 100; true; } | wc -l' _ "$cap"
+expect cap-over-tail fail '^101 lines, all in .*/\.cache/guard/guard-manifest-.*\.txt; the last 10:$' -- bash -c 'cd "$1" && env HOME="$1" HPC_GUARD_REF=main guard/run manifest 100' _ "$cap"
+expect cap-over-file ok '^101 100 refused: why$' -- bash -c 'f=$(ls "$1"/.cache/guard/guard-manifest-*.txt | head -1); echo "$(wc -l < "$f") $(sed -n 100p "$f") $(tail -1 "$f")"' _ "$cap"
+rm -rf "$cap"
+
 echo; echo "$pass passed, $fail failed$([ "$skipped" -eq 0 ] || echo ", $skipped skipped")"
 [ $fail -eq 0 ]

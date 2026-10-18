@@ -154,6 +154,16 @@ expect broker-revoke ok 'revoked card/big' -- "$broker_py" revoke card "$b/state
 expect broker-card-revoked fail 'card/big was revoked' -- in_b 'guard/run preflight runs/big job.sh'
 expect records-done-outside ok 'n1 done' -- "$broker_py" records "done" "$b/state/broker" n1
 
+echo "== guard status and output caps behind the broker"
+expect status-six-lines ok '^running: .*blocked: .*last refusal: .*budget: .*git: .*next: ' -- in_b 'guard status | tr "\n" " "'
+expect status-refusal ok 'last refusal: [0-9]+ min ago, scheduler: .*card/big was revoked' -- in_b 'guard status'
+expect status-budget ok '^budget: [0-9]+ of [0-9]+ core-h spent, [0-9]+ queued, -?[0-9]+ left above the [0-9]+ reserve$' -- in_b 'guard status'
+expect status-under-300-tokens ok '^ok [0-9]+$' -- in_b 'n=$(guard status | wc -c); [ "$n" -le 1200 ] && echo "ok $n"'
+expect status-git ok '^git: main, [0-9]+ changed files?, ' -- in_b 'guard status'
+expect guard-cap-lines ok '^11$' -- in_b 'guard help | wc -l'
+expect guard-cap-file ok '^[0-9]+ lines, all in /home/agent/\.cache/guard/guard-.*\.txt; the last 10:$' -- in_b 'guard help | head -1'
+expect guard-cap-short-unchanged ok '^Nothing needs you\.$|	open	' -- in_b 'guard needs-you'
+
 echo "== pull requests behind the broker"
 git -C "$b/state/git/protected.git" config guard.main pulls  # main takes pull requests only, as a ruleset requiring one
 in_b 'git fetch -q origin && git switch -q -c note origin/main && echo note > NOTE && git add NOTE && git commit -qm note'
