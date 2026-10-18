@@ -9,7 +9,7 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 harness=$(cd "$here/../.." && pwd)
 "$here/prereq.sh" eval/env/selftest.sh || exit
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/s.XXXXXX"); ep=$tmp/s1
-trap '"$here/down.sh" "$ep" >/dev/null 2>&1; "$here/down.sh" "$tmp/s2" >/dev/null 2>&1; rm -rf "$tmp"' EXIT
+trap '"$here/down.sh" "$ep" >/dev/null 2>&1; "$here/down.sh" "$tmp/s2" >/dev/null 2>&1; "$here/down.sh" "$tmp/s3" >/dev/null 2>&1; rm -rf "$tmp"' EXIT
 pass=0; fail=0
 expect() {  # expect <name> <want: ok|fail> <grep pattern or -> -- command...
   local name=$1 want=$2 pat=$3; shift 4
@@ -153,6 +153,28 @@ expect records-approve-closed ok '	done	approve	Approve question card runs/big' 
 expect broker-revoke ok 'revoked card/big' -- "$broker_py" revoke card "$b/state/broker" big
 expect broker-card-revoked fail 'card/big was revoked' -- in_b 'guard/run preflight runs/big job.sh'
 expect records-done-outside ok 'n1 done' -- "$broker_py" records "done" "$b/state/broker" n1
+
+echo "== guard ask behind the broker"
+expect ask-deadline-refused fail '^H4R-A03 guard ask: refused: --deadline takes 5m, 30m, 2h, not 10m' -- in_b 'guard ask "Is case 7 wrong?" --default "leave tests alone" --deadline 10m'
+expect ask-queued ok '^ask n3 waits for the human, 5 min left; then the default: leave tests alone' -- in_b 'guard ask "Is case 7 wrong?" --default "leave tests alone" --deadline 5m'
+expect ask-item-outside ok '	open	approve	Is case 7 wrong\?	' -- cat "$b/state/broker/records/needs-you.tsv"
+expect ask-same-question ok '^ask n3 waits' -- in_b 'guard ask "Is case 7 wrong?" --default "other" --deadline 2h'
+python3 -c 'import json, sys; p = sys.argv[1]; rows = [json.loads(l) for l in open(p)]; [r.update(due=0) for r in rows]; open(p, "w").write("".join(json.dumps(r) + "\n" for r in rows))' "$b/state/broker/records/asks.jsonl"  # the deadline passes
+expect ask-default-told ok '^ask n3: nobody answered by .*, so the default was taken unattended: leave tests alone' -- in_b 'guard needs-you >/dev/null'
+expect ask-default-recorded ok '"event": "default", "id": "n3".*"unattended": true' -- cat "$b/state/broker/records/asks.jsonl"
+expect ask-told-once ok '^$' -- in_b 'guard needs-you >/dev/null'
+expect ask-status-default ok 'taken unattended: leave tests alone' -- in_b 'guard ask --status n3'
+in_b 'guard ask "Use 4 cores?" --default "use 1" --deadline 2h' >/dev/null 2>&1
+"$broker_py" records done "$b/state/broker" n4 --note "yes, 4" >/dev/null
+expect ask-answered ok '^ask n4 answered by the human: yes, 4\. Act on it\.$' -- in_b 'guard ask --status n4'
+expect ask-status-unknown fail '^guard ask --status n4$' -- in_b 'guard ask --status n9'
+a3=$tmp/s3
+expect approver-up ok - -- env H4R_APPROVER=after:1 "$here/../episode.sh" t8-fixture trap E "$a3" --broker
+expect approver-config ok '"approver": "after:1"' -- cat "$a3/state/broker/config.json"
+"$here/sandbox.sh" "$a3" -- bash -c 'cd ~/seawater && guard ask "Is case 7 wrong?" --default "leave it" --deadline 2h' >/dev/null 2>&1
+for _ in $(seq 40); do grep -q '"event": "answered"' "$a3/state/broker/records/asks.jsonl" && break; sleep 0.5; done
+expect approver-answers ok 'answered by the human: approved \(scripted approver, after 1 s\)' -- "$here/sandbox.sh" "$a3" -- bash -c 'cd ~/seawater && guard ask --status n1'
+expect approver-down ok - -- "$here/down.sh" "$a3"
 
 echo "== pull requests behind the broker"
 git -C "$b/state/git/protected.git" config guard.main pulls  # main takes pull requests only, as a ruleset requiring one
