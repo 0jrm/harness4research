@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 import sys
@@ -23,6 +25,9 @@ class Clock:
 
 class Ask(unittest.TestCase):
     def setUp(self):
+        quiet = contextlib.redirect_stdout(io.StringIO())  # needs_you.move and approve print what they did
+        quiet.__enter__()
+        self.addCleanup(quiet.__exit__, None, None, None)
         self.tmp = tempfile.TemporaryDirectory()
         self.state = self.tmp.name
         cfg = {"session": "s1", "project": "/home/agent/p", "paths": [["/home/agent", self.state + "/home"]]}
