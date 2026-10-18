@@ -24,7 +24,8 @@ The config is the question card's machine part:
             "text_into_reasoning": true},             and the agent's past text inside its reasoning
   "scaffold": {"name": "codex", "release_dir": "~/.codex/packages/standalone/releases/<version>",
                "context_window": 65536, "timeout_minutes": 30, "parallel": 4, "disable_features": [...],
-               "timeout_minutes_by_family": {"t3-entity-overlap": 180}},   optional: a family's own time limit
+               "timeout_minutes_by_family": {"t3-entity-overlap": 180},    optional: a family's own time limit
+               "settings": {"background_terminal_max_timeout": 1200000}},   optional: top-level Codex config keys
   "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E", "E-nobroker"],
              "arm_variants": {"E-nobroker": ["control"]},   optional: the variants an arm runs, else all of them
              "seeds": [1, 2],
@@ -262,6 +263,9 @@ def codex_config(scaffold, port, alias):
         'approval_policy = "never"',
         'sandbox_mode = "danger-full-access"',
         'web_search = "disabled"',
+    ]
+    lines += [f"{k} = {json.dumps(v)}" for k, v in scaffold.get("settings", {}).items()]
+    lines += [
         "",
         "[model_providers.site]",
         'name = "site"',

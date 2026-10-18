@@ -273,9 +273,10 @@ class Broker:
     # verbs ---------------------------------------------------------------------------------------------------------
     def handle(self, req):
         verb = req.get("verb")
-        handler = {"submit": self.submit, "queue": self.queue, "acct": self.acct, "cancel": self.cancel}.get(verb)
+        handler = {"submit": self.submit, "queue": self.queue, "acct": self.acct, "cancel": self.cancel,
+                   "status": self.status}.get(verb)
         if handler is None:
-            return {"rc": 1, "err": f"guard broker: no verb {verb!r}; it offers submit, queue, acct and cancel\n"}
+            return {"rc": 1, "err": f"guard broker: no verb {verb!r}; it offers submit, queue, acct, cancel and status\n"}
         if not self.cfg.get("slurm_bin"):
             return {"rc": 1, "err": "guard broker: refused: this host has no scheduler; nothing was submitted\n"}
         return self.locked(handler, req)
@@ -285,6 +286,8 @@ class Broker:
             try:
                 return handler(req)
             except Refused as e:
+                if handler == self.submit:
+                    self.records.log({"verb": "submit", "store": "scheduler", "refused": str(e)})
                 return {"rc": 1, "err": f"guard broker: refused: {e}\n"}
 
     def scoped(self, args, take, drop):
@@ -461,13 +464,7 @@ class Broker:
             raise Refused("ripples: " + " | ".join(ripples) + f"; a person approves one diagnostic job outside the "
                           f"sandbox with: guard approve reserve {run}")
 
-        spent = sum(int(x or 0) for x in self.must("sacct", "-A", acct, "-u", user, "-S", start, "-X", "-n", "-P",
-                                                     "-o", "CPUTimeRAW").split()) // 3600
-        queued = 0
-        for line in self.must("squeue", "-A", acct, "-u", user, "-h", "-t", "PENDING", "-o", "%C %l").splitlines():
-            c, _, limit = line.partition(" ")
-            queued += int(c) * (to_minutes(limit.strip()) or 0)
-        queued //= 60
+        spent, queued = self.spend(acct, user, start)
         proj = nodes * cpn * wmin * n // 60
         held = 0 if approval is not None else reserve
         if spent + queued + proj > max_ch - held:
@@ -516,6 +513,57 @@ class Broker:
         note = (f"guard: job {job}, run {run}: {n} task(s) x {nodes} node(s) x {wmin} min, projected {proj} core-h, "
                 f"job_sandbox: {'bare (' + bare + ')' if bare else 'bwrap'}\n")
         return {"rc": 0, "out": job + "\n" if req.get("parsable") else f"Submitted batch job {job}\n", "err": note}
+
+    def spend(self, acct, user, start):
+        """(spent, queued): core-hours the account's finished and running jobs used since start, and the walltime its
+        pending jobs ask for."""
+        spent = sum(int(x or 0) for x in self.must("sacct", "-A", acct, "-u", user, "-S", start, "-X", "-n", "-P",
+                                                     "-o", "CPUTimeRAW").split()) // 3600
+        queued = 0
+        for line in self.must("squeue", "-A", acct, "-u", user, "-h", "-t", "PENDING", "-o", "%C %l").splitlines():
+            c, _, limit = line.partition(" ")
+            queued += int(c) * (to_minutes(limit.strip()) or 0)
+        return spent, queued // 60
+
+    def status(self, req):
+        """guard status's facts from what the broker already keeps: this session's ledger jobs as the scheduler
+        reports them, the budget left, the open needs-you items, the cards not approved, and the latest refusal
+        among the scheduler's, the records and gh sockets', and the forge's push log. Read-only."""
+        facts = {"jobs": [], "budget": None, "blocked": [], "refusal": None}
+        mine = self.jobs()
+        if mine:
+            rc, out, _ = self.slurm("sacct", "-X", "-n", "-P", "-o", "JobID,JobName,State,Elapsed,Timelimit",
+                                    "--jobs=" + ",".join(mine))
+            facts["jobs"] = [dict(zip(("id", "run", "state", "elapsed", "limit"), line.split("|")))
+                             for line in out.splitlines() if line.count("|") == 4] if rc == 0 else []
+        try:
+            self.mirror.fetch()
+            card = card_values(self.mirror.show("guard/budget.card") or "")
+            spent, queued = self.spend(card["account"], self.cfg["user"], card["start_date"])
+            facts["budget"] = {"spent": spent, "queued": queued, "max": int(card["max_core_hours"]),
+                               "reserve": int(card.get("verification_reserve_core_hours") or 0)}
+        except (KeyError, ValueError, Refused):
+            pass
+        for it in needs_you.read(self.records.queue):
+            if it.state in ("open", "acked"):
+                facts["blocked"].append(f"needs-you {it.id} ({it.kind}): {it.title}")
+        for line in self.records.card_list({"verb": "list", "store": "card"}).splitlines():
+            run, _, state = line.partition("\t")
+            if state.startswith("not approved"):
+                facts["blocked"].append(f"card {run}: {state.partition(chr(9))[2] or 'not approved'}")
+        refusals = [(r["ts"], r.get("store") or "gh", r["refused"])
+                    for path in (self.records.log_path, self.forge.log_path) for r in read_rows(path) if "refused" in r]
+        if os.path.exists(self.cfg.get("forge_log") or ""):
+            with open(self.cfg["forge_log"]) as f:
+                for line in f:
+                    when, decision, ref = (line.rstrip("\n").split("\t") + ["", "", ""])[:3]
+                    if decision.startswith("refuse"):
+                        ts = dt.datetime.strptime(when, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+                        refusals.append((ts.timestamp(), "push", f"{decision} of {ref}"))
+        if refusals:
+            ts, where, why = max(refusals)
+            facts["refusal"] = {"ago_min": max(0, round((time.time() - ts) / 60)), "where": where, "why": why}
+        return {"rc": 0, "out": json.dumps(facts)}
 
     def approval(self, run):
         used = {r["reserve"] for r in self.rows if r["state"] == "intent" and r.get("reserve")}

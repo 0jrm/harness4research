@@ -66,4 +66,14 @@ fi
 if [ $show = 1 ]; then printf '%s\n' "$script"; exit 0; fi
 export HPC_CALLER_DIR=$PWD
 cd "$top"
-exec bash -c "$script" "guard/bin/$cmd.sh" "$@"
+# A forge's hook runs in a bare repository and its pusher reads the output whole; anywhere else the caller is an agent,
+# which reads at most 40 lines: a longer output goes to a file, and the agent sees its path and the last 10 lines.
+[ "$(git rev-parse --is-bare-repository 2>/dev/null)" = false ] || exec bash -c "$script" "guard/bin/$cmd.sh" "$@"
+out=$(mktemp) err=$(mktemp); trap 'rm -f "$out" "$err"' EXIT
+rc=0; bash -c "$script" "guard/bin/$cmd.sh" "$@" > "$out" 2> "$err" || rc=$?
+lines=$(cat "$out" "$err" | wc -l)
+if [ "$lines" -le 40 ]; then cat "$out"; cat "$err" >&2; exit $rc; fi
+mkdir -p "$HOME/.cache/guard"; full=$(mktemp "$HOME/.cache/guard/guard-$cmd-XXXXXX.txt")
+cat "$out" "$err" > "$full"
+echo "$lines lines, all in $full; the last 10:"; tail -n 10 "$full"
+exit $rc

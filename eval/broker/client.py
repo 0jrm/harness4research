@@ -6,9 +6,11 @@ sbatch never reaches the scheduler: it turns its options and the script's #SBATC
 fields and refuses an option it cannot map. A request names its run with --comment=run:<id>, which guard/run
 preflight adds, so a bare sbatch call is refused. Only the broker decides what the scheduler sees.
 
-guard needs-you, guard ledger and guard card go to the records socket; every other guard subcommand runs the
-installed guard. The records socket offers add, list, show and find, so guard needs-you ack, done and dismiss are
-refused there:
+guard needs-you, guard ledger and guard card go to the records socket; guard status asks the scheduler socket for
+the broker's facts and prints them with the project's git state (status.py); every other guard subcommand runs the
+installed guard. No guard command prints more than 40 lines: a longer output goes to a file under ~/.cache/guard,
+and the command prints its path and the last 10 lines. The records socket offers add, list, show and find, so guard
+needs-you ack, done and dismiss are refused there:
 
     guard needs-you [--remind] | add --kind K --title T [...] | find --kind K --title T | show <id>
     guard ledger add <run_id> <field> <value> [--why W] [--evidence E] | list <run_id>
@@ -25,11 +27,15 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
+
+import status
 
 SOCKET = "/run/guard/scheduler.sock"
 RECORDS = "/run/guard/records.sock"
 GH = "/run/guard/gh.sock"
 GUARD = "/opt/harness4research/bin/guard"
+MAX_LINES, TAIL = 40, 10
 
 # sbatch option -> request field. Later values win, the command line over #SBATCH lines, as sbatch reads them.
 FIELDS = {"time": "time", "nodes": "nodes", "ntasks": "tasks", "cpus-per-task": "cpus_per_task", "mem": "mem",
@@ -242,37 +248,59 @@ def pr_open(args):
     return request
 
 
+def capped(out, err):
+    """(out, err) as the agent sees them: as they are up to 40 lines together; past that, the whole text goes to a file
+    and out is its path and the last 10 lines."""
+    lines = (out + err).splitlines()
+    if len(lines) <= MAX_LINES:
+        return out, err
+    keep = os.path.expanduser("~/.cache/guard")
+    os.makedirs(keep, exist_ok=True)
+    fd, path = tempfile.mkstemp(prefix="guard-", suffix=".txt", dir=keep)
+    with os.fdopen(fd, "w") as f:
+        f.write(out + err)
+    return f"{len(lines)} lines, all in {path}; the last {TAIL}:\n" + "\n".join(lines[-TAIL:]) + "\n", ""
+
+
 def guard(args):
+    out, err, rc = guard_reply(args)
+    out, err = capped(out, err)
+    sys.stdout.write(out)
+    sys.stderr.write(err)
+    return rc
+
+
+def guard_reply(args):
+    """(stdout, stderr, exit code) of one guard command."""
+    if args[:1] == ["status"]:
+        reply = ask({"verb": "status"})
+        if reply.get("rc"):
+            return "", reply.get("err", ""), 1
+        return status.render({**json.loads(reply["out"]), **status.local_facts()}), "", 0
     if args[:1] in (["review"], ["merge"], ["ship"]):
-        sys.stderr.write(f"guard {args[0]}: refused: guard review, guard merge and guard ship run in the broker, "
-                         "outside the sandbox; a person or the orchestrating session runs them there. Open the pull "
-                         "request with guard pr open and stop.\n")
-        return 2
+        return "", (f"guard {args[0]}: refused: guard review, guard merge and guard ship run in the broker, "
+                    "outside the sandbox; a person or the orchestrating session runs them there. Open the pull "
+                    "request with guard pr open and stop.\n"), 2
     if args[:2] == ["pr", "open"]:
         try:
             request = pr_open(args[2:])
         except Refused as e:
-            sys.stderr.write(f"guard pr open: {e}\n")
-            return 2
+            return "", f"guard pr open: {e}\n", 2
         reply = ask(request, GH)
-        sys.stdout.write(reply.get("out", ""))
-        sys.stderr.write(reply.get("err", "").replace("gh: refused by the broker", "guard pr open: refused by the broker"))
-        return 0 if reply.get("rc") == 0 else 2
+        return (reply.get("out", ""),
+                reply.get("err", "").replace("gh: refused by the broker", "guard pr open: refused by the broker"),
+                0 if reply.get("rc") == 0 else 2)
     if not args or args[0] not in ("needs-you", "ledger", "card"):
-        os.execv(GUARD, [GUARD, *args])
+        done = subprocess.run([GUARD, *args], capture_output=True, text=True, errors="replace")
+        return done.stdout, done.stderr, done.returncode
     try:
         request = records_request(args)
     except Refused as e:
-        sys.stderr.write(f"guard {args[0]}: refused: {e}\n")
-        return 2
+        return "", f"guard {args[0]}: refused: {e}\n", 2
     reply = ask(request, RECORDS)
     if request.get("remind") and "--format" in args and "claude-hook" in args:
-        if reply.get("out"):
-            sys.stdout.write(json.dumps({"systemMessage": reply["out"].strip()}) + "\n")
-        return 0
-    sys.stdout.write(reply.get("out", ""))
-    sys.stderr.write(reply.get("err", ""))
-    return reply.get("rc", 1)
+        return (json.dumps({"systemMessage": reply["out"].strip()}) + "\n" if reply.get("out") else ""), "", 0
+    return reply.get("out", ""), reply.get("err", ""), reply.get("rc", 1)
 
 
 def ask(request, path=SOCKET):

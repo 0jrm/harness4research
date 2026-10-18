@@ -47,7 +47,7 @@ printf 'agent:x:%s:\n' "$(id -g)" > "$ep/sandbox/etc/group"
 cp "$here/slurmclient.py" "$here/forge_connect.py" "$here/jobwrap.sh" "$ep/sandbox/tools/lib/"
 client=slurmclient.py
 if [ $broker = 1 ]; then
-  cp "$here/../broker/client.py" "$ep/sandbox/tools/lib/"; client=client.py
+  cp "$here/../broker/client.py" "$here/../broker/status.py" "$ep/sandbox/tools/lib/"; client=client.py
   mkdir -p "$ep/state/broker/bin" "$ep/state/broker/sock"
   for c in sbatch squeue sacct scancel; do ln -s "$here/slurmclient.py" "$ep/state/broker/bin/$c"; done
 fi
@@ -135,6 +135,7 @@ json.dump({"session": "s1", "project": f"/home/agent/{name}", "paths": [["/home/
            "user": "agent", "compute_bwrap": True, "signing_key": ep + "/state/broker/key",
            "owner_key": ep + "/state/owner/key", "allowed_signers": ep + "/state/git/allowed_signers",
            "gh_token_file": ep + "/state/broker/gh-token", "model_key_file": ep + "/state/broker/model-key",
+           "forge_log": ep + "/state/git/forge.log",
            "reviewer": {"cmd": None, "model_socket": ep + "/state/model/proxy.sock",
                         "passwd": ep + "/state/broker/reviewer-passwd"}},
           sys.stdout, indent=1)
