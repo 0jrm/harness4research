@@ -66,9 +66,9 @@ Agent sessions, on your machine or a login node:
                       ~/.config/guard/agents/, and a sandbox self-test
   broker status       whether the broker answers, its sessions, live jobs and recent refusals
   broker stop         stops the broker; every session's sockets then refuse
-  wait <job_id|pid> | wait -- <cmd...>  [--timeout 20m]
-                      blocks silently until the job changes state or the process exits, then prints its status and
-                      last 20 lines of output; never past the timeout
+  wait <job_id|pid> | wait -- <cmd...>  [--timeout 5m]
+                      blocks until the job changes state, the process exits or 5 minutes pass, then prints the last
+                      20 lines of output and its status, or how long it has run and how to keep waiting or stop it
 
 In any git repository, guarded or not:
   needs-you           list what only you can do, check, or approve; add, show, ack, done, dismiss manage the queue
