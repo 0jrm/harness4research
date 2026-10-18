@@ -20,6 +20,7 @@ import json
 import os
 import re
 import secrets
+import signal
 import subprocess
 import sys
 import tempfile
@@ -33,6 +34,8 @@ import modellog  # noqa: E402
 BLIND = ("replayed blind: the recorded commands ran with no model, so this counts what the harness refuses of them; "
          "it does not show how an agent would behave")
 POLL_WAIT = 2.0
+BLAS_THREADS = 4    # r2 left BLAS unbounded; a replay of 6 episodes at once must not take every core of the host
+BLAS_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 EXEC_CAP = 60.0
 SLACK = 5.0
 
@@ -275,6 +278,7 @@ class StandIn:
             self.proc.wait(30)
         except (subprocess.TimeoutExpired, ValueError, OSError):
             self.proc.kill()
+            self.proc.wait()
 
 
 def build(harness, meta, ep):
@@ -288,6 +292,8 @@ def build(harness, meta, ep):
         raise RuntimeError(f"episode.sh failed: {done.stderr.strip()[-500:]}")
     with open(os.path.join(ep, "sandbox", "binds"), "a") as f:
         f.write(f"{os.path.join(HERE, 'driver', 'standin.py')} /opt/codex/standin.py\n")
+    with open(os.path.join(ep, "sandbox", "env"), "a") as f:
+        f.write("".join(f"{v}={BLAS_THREADS}\n" for v in BLAS_VARS))
 
 
 class Command:
@@ -322,19 +328,30 @@ def start_commit(ep):
     return open(path).read().strip() if os.path.exists(path) else None
 
 
+LIVE = {}  # episode dir -> harness, for the episodes a signal must still take down
+
+
+def take_down_live(signum, _frame):
+    for ep, harness in list(LIVE.items()):
+        subprocess.run([os.path.join(harness, "eval", "env", "down.sh"), ep], capture_output=True)
+    os._exit(128 + signum)
+
+
 def replay_episode(record_dir, harness, work):
     meta = json.load(open(os.path.join(record_dir, "meta.json")))
     todo = steps(modellog.calls(modellog.read(os.path.join(record_dir, "state", "model", "requests.jsonl"))))
     ep = os.path.join(work, secrets.token_hex(6))
-    build(harness, meta, ep)
-    replay_meta = json.load(open(os.path.join(ep, "meta.json")))
-    seeds = [(start_commit(record_dir), start_commit(ep))]
-    ids, commands, by_session, standin, started = Ids(p for p in seeds if None not in p), [], {}, None, time.time()
+    LIVE[ep] = harness
+    commands, by_session, standin, started = [], {}, None, time.time()
     try:
+        build(harness, meta, ep)
+        start = (start_commit(record_dir), start_commit(ep))
+        ids = Ids([start] if None not in start else [])
         for step in todo:
             flags = []
             if standin is None or standin.proc.poll() is not None:
                 if standin is not None:
+                    standin.end()
                     flags.append("stand-in-restarted")
                 standin = StandIn(harness, ep, meta["project"])
             text, unmapped = ids.substitute(step.text)
@@ -356,9 +373,11 @@ def replay_episode(record_dir, harness, work):
         if standin is not None:
             standin.end()
         subprocess.run([os.path.join(harness, "eval", "env", "down.sh"), ep], capture_output=True)
+        LIVE.pop(ep, None)
     out = [c.record() for c in commands]
     rec_push, rec_cross = log_refusals(record_dir)
     rep_push, rep_cross = log_refusals(ep)
+    replay_meta = json.load(open(os.path.join(ep, "meta.json")))
     return {"episode": os.path.basename(record_dir.rstrip("/")), "family": meta["family"],
             "variant": meta["variant"], "arm": meta["arm"], "seed": meta["seed"], "blind": BLIND,
             "harness_commit": replay_meta.get("harness_commit"), "replay_dir": ep,
@@ -402,6 +421,14 @@ def table(rows, other=None):
         for kind in sorted(rec[fam].keys() | rep[fam].keys() | (alt[fam].keys() if alt else set())):
             lines.append(f"| {fam} | {kind} | {rec[fam][kind]} | {rep[fam][kind]} |"
                          + (f" {alt[fam][kind]} |" if alt else ""))
+    cells = collections.defaultdict(lambda: [0, 0, 0])
+    for r in rows:
+        cell = cells[(r["family"], r["variant"], r["arm"])]
+        cell[0] += 1
+        cell[1] += sum(counts(r["commands"], "recorded_refusals", pushes(r, "recorded")).values())
+        cell[2] += sum(counts(r["commands"], "refusals", pushes(r, "replayed")).values())
+    lines += ["", "| chore | variant | arm | episodes | recorded | replayed |", "|---|---|---|---|---|---|"]
+    lines += [f"| {f} | {v} | {a} | {n} | {x} | {y} |" for (f, v, a), (n, x, y) in sorted(cells.items())]
     flags = collections.Counter()
     for r in rows:
         flags.update(r["flags"])
@@ -443,6 +470,8 @@ def main():
     if missing:
         print(f"replay: no requests.jsonl for {len(missing)}: " + " ".join(map(os.path.basename, missing)), file=sys.stderr)
     print(f"replay: {len(todo)} episodes against {harness}, {len(done)} already in {out}; {BLIND}", file=sys.stderr)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, take_down_live)
     with concurrent.futures.ThreadPoolExecutor(a.parallel) as pool, open(out, "a") as f:
         futures = {pool.submit(replay_episode, d, harness, work): d for d in todo}
         for fut in concurrent.futures.as_completed(futures):

@@ -46,12 +46,6 @@ class Session:
             out, self.chunks = b"".join(self.chunks), []
         return {"exit": code, "output": out[-MAX_OUTPUT:].decode("utf-8", "replace")}
 
-    def kill(self):
-        try:
-            os.killpg(self.proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-
 
 def main(project):
     sessions, finished = {}, {}
@@ -88,8 +82,23 @@ def main(project):
                     del sessions[req["id"]]
                     finished[req["id"]] = reply["exit"]
         print(json.dumps(reply), flush=True)
-    for s in sessions.values():
-        s.kill()
+    end_all()
+
+
+def end_all():
+    """Kill every other process in the sandbox, background work included, so that nothing outlives the replay."""
+    for pid in [int(p) for p in os.listdir("/proc") if p.isdigit()]:
+        if pid not in (1, os.getpid()):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+    while True:
+        try:
+            if os.waitpid(-1, 0)[0] == 0:
+                break
+        except ChildProcessError:
+            break
 
 
 if __name__ == "__main__":
