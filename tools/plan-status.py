@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """usage: tools/plan-status.py [--plan PATH] [--out PATH] [--notes PATH] [--baseline PATH]
 Writes docs/status.md from the records, so a hand edit to it is overwritten: each item id in the plan's Workstreams
-table with the pull requests whose titles start with "[<id>]" (one gh pr list call), the audit's counts from
-eval/audit/baseline.json, the open needs-you items, and docs/status-notes.md, the one hand-written part, appended
-as it is. The plan defaults to the newest docs/plan-*.md. Run it before each hand-off. Exit 2 when gh cannot list."""
+table with the pull requests whose titles start with "[<id>]" or "[v<n>-<id>]" (one gh pr list call), the audit's
+counts from eval/audit/baseline.json, the open needs-you items, and docs/status-notes.md, the one hand-written part,
+appended as it is. The plan defaults to the newest docs/plan-*.md. Run it before each hand-off. Exit 2 when gh cannot list."""
 import glob
 import json
 import os
@@ -27,7 +27,7 @@ def plan_items(path):
     items = []
     for line in section.splitlines():
         cells = [c.strip() for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
-        if len(cells) >= 3 and re.fullmatch(r"W[0-9][0-9.\-]*", cells[0]):
+        if len(cells) >= 3 and re.fullmatch(r"[A-Z][0-9][0-9a-z.\-]*", cells[0]):
             items.append((cells[0], cells[1]))
     return items
 
@@ -46,7 +46,8 @@ def pull_requests():
 
 
 def state_of(item, prs):
-    mine = sorted((p for p in prs if p["title"].startswith(f"[{item}]")), key=lambda p: p["number"])
+    tag = re.compile(rf"\[(v[0-9]+-)?{re.escape(item)}\]")
+    mine = sorted((p for p in prs if tag.match(p["title"])), key=lambda p: p["number"])
     if not mine:
         return "not started"
     words = {"MERGED": "merged", "OPEN": "open", "CLOSED": "closed"}
