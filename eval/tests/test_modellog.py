@@ -40,7 +40,18 @@ class Log(unittest.TestCase):
                                  prompt=2000, cached=1500, out=30, seconds=30.0)])
         self.assertEqual(modellog.costs(path), {
             "requests": 3, "input_tokens": 6000, "output_tokens": 60, "max_prompt_tokens": 3000,
-            "cached_tokens": 3500, "model_seconds": 120.0, "harness_requests": 1})
+            "cached_tokens": 3500, "model_seconds": 120.0, "harness_requests": 1, "harness_reads": 0})
+
+    def test_harness_reads_are_file_readers_that_name_the_harness(self):
+        reads = ["cat guard/budget.card", "cd ~/p && sed -n 1,20p AGENTS.md 2>/dev/null", "grep -n preflight /opt/h/bin/guard | head",
+                 "FOO=1 cat runs/_template/question.card", "ls guard/"]
+        not_reads = ["guard/run preflight runs/a job.sh", "guard needs-you add --kind check --title t", "ls sim.py",
+                     "cat > runs/a/question.card << 'EOF'\nquestion: x\nEOF", "cat sim.py > guard/x", "python3 sim.py"]
+        for cmd in reads:
+            self.assertTrue(modellog.is_harness_read("exec_command", {"cmd": cmd}), cmd)
+        for cmd in not_reads:
+            self.assertFalse(modellog.is_harness_read("exec_command", {"cmd": cmd}), cmd)
+        self.assertFalse(modellog.is_harness_read("apply_patch", {"cmd": "cat guard/run"}))
 
     def test_costs_without_a_log(self):
         self.assertEqual(modellog.costs("/nonexistent/requests.jsonl")["requests"], 0)
