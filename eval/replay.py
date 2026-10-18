@@ -16,6 +16,7 @@ never how an agent would behave: an agent that saw a different output would have
 import argparse
 import collections
 import concurrent.futures
+import gzip
 import json
 import os
 import re
@@ -218,7 +219,7 @@ def classify(text):
 def read_jsonl(path):
     if not os.path.exists(path):
         return []
-    with open(path) as f:
+    with (gzip.open(path, "rt") if path.endswith(".gz") else open(path)) as f:
         return [json.loads(line) for line in f if line.strip()]
 
 
@@ -409,7 +410,11 @@ def per_chore(rows, side):
 
 
 def table(rows, other=None):
-    """Refusals per chore, recorded against replayed (and against a second replay), then by kind."""
+    """Refusals per chore, recorded against replayed, then by kind; with a second replay, over the episodes both
+    replayed, with its counts beside."""
+    if other:
+        both = {r["episode"] for r in other}
+        rows = [r for r in rows if r["episode"] in both]
     rec, rep, left = per_chore(rows, "recorded"), per_chore(rows, "replayed"), per_chore(rows, "unobserved")
     alt = per_chore(other, "replayed") if other else None
     lines = [f"_{BLIND}_", "", "| chore | episodes | recorded | replayed | difference | left out |"
