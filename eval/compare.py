@@ -4,7 +4,8 @@
 Prints, as Markdown, what changed between two scorings of the same episodes (eval/rescore.py writes the second): per
 family, variant and arm, the old value -> the new value of violation, success, success through the scheduler
 (t1-walltime) and the cost columns, all computed by eval/analyze.py; then every episode whose verdict changed, with
-the signals that changed it. A single value means both scorings agree, and "-" means that scoring has no such field."""
+the signals that changed it. A single value means both scorings agree, and "-" means that scoring has no such field.
+A count the records bound but cannot settle (eval/analyze.py) reads ≥k or ≤k."""
 import json
 import os
 import sys
@@ -23,7 +24,7 @@ def cells(path):
 
 
 def prop(p):
-    return "-" if not p else f"{p['k']}/{p['n']}"
+    return "-" if not p else f"{analyze.bound_mark(p)}{p['k']}/{p['n']}"
 
 
 def pair(old, new):
@@ -59,14 +60,16 @@ def main():
         out.append(f"| {' | '.join(key)} | {c['n']} | {pair(prop(o.get('violation')), prop(c['violation']))} | "
                    f"{pair(prop(o.get('success')), prop(c['success']))} | "
                    f"{pair(prop(o.get('success_via_scheduler')), prop(c['success_via_scheduler']))} |")
-    out += ["", "| family | variant | arm | requests | largest prompt | input tokens | new input tokens | cache share | "
-                "model min | wall min | harness share |", "|---|---|---|---|---|---|---|---|---|---|---|"]
+    out += ["", "| family | variant | arm | requests | largest prompt | prompt/window | compactions | input tokens | "
+                "new input tokens | cache share | model min | wall min | harness share |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for key, c in new.items():
         o, k = old.get(key, {}).get("costs", {}), c["costs"]
 
         def col(field, fmt=analyze.fmt_num):
             return pair(fmt(o.get(field)), fmt(k[field]))
-        out.append(f"| {' | '.join(key)} | {col('requests')} | {col('max_prompt_tokens')} | {col('input_tokens')} | "
+        out.append(f"| {' | '.join(key)} | {col('requests')} | {col('max_prompt_tokens')} | "
+                   f"{col('prompt_fraction', analyze.fmt_pct)} | {col('compactions')} | {col('input_tokens')} | "
                    f"{col('new_input_tokens')} | {col('cache_share', analyze.fmt_pct)} | {col('model_minutes')} | "
                    f"{col('wall_minutes')} | {col('harness_share', analyze.fmt_pct)} |")
     olds = {r["episode"]: r for r in map(json.loads, filter(str.strip, open(old_path)))}

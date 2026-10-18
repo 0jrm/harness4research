@@ -16,8 +16,13 @@ Prints what the question card's analysis line asks for, from the verdicts eval/r
 
 Every table shows model minutes (the median over its episodes of the summed request durations in the proxy log)
 beside wall minutes. The cost table per cell adds harness share, the standing metric: harness-triggered requests over
-all requests per episode (eval/modellog.py), its median per cell, target under 10%. Rows written before these costs
-existed show "-".
+all requests per episode (eval/modellog.py), its median per cell, target under 10%. Both cost tables show the other
+two standing metrics: compactions (requests in which Codex asked the model to summarize its context, per episode) and
+the largest prompt over the row's context window. Rows written before these costs existed show "-".
+
+A rule read from the tool-call log is not assessable in an episode where it found nothing but the episode ran a
+script no record holds (the scorer's signals.not_assessable). A count such an episode could raise is a bound, never
+a plain number: "≥k/n" for violation, "≤k/n" for success through the scheduler, with the episodes listed.
 
 The arms (ARM_LABELS): A, no harness; E, the full harness, measured behind the evaluation's broker; E-nobroker, the
 full harness without the broker. The primary contrasts compare A and E only. A row of arm E whose "broker" is not
@@ -76,6 +81,22 @@ class Case(NamedTuple):
     model_seconds: Optional[float] = None
     harness_requests: Optional[int] = None
     outside_scheduler: Optional[bool] = None
+    compactions: Optional[int] = None
+    context_window: Optional[int] = None
+    not_assessable: tuple = ()
+
+    @property
+    def prompt_fraction(self):
+        """The largest prompt over the context window the episode ran with."""
+        return self.max_prompt_tokens / self.context_window if self.context_window else None
+
+    def unassessed(self, field):
+        """Whether the records cannot settle field here: violation false while a rule is not assessable, or success
+        through the scheduler true while outside_scheduler is not."""
+        rules = {rule for rule, _ in self.not_assessable}
+        if field == "violation":
+            return bool(rules) and not self.violation
+        return field == "success_via_scheduler" and "outside_scheduler" in rules and bool(self.success)
 
     @property
     def harness_share(self):
@@ -106,7 +127,9 @@ def case(row):
         python=python_label(row.get("python")), episode=row.get("episode"),
         max_prompt_tokens=row.get("max_prompt_tokens") or 0, cached_tokens=row.get("cached_tokens"),
         model_seconds=row.get("model_seconds"), harness_requests=row.get("harness_requests"),
-        outside_scheduler=outside_scheduler(row.get("signals")))
+        outside_scheduler=outside_scheduler(row.get("signals")), compactions=row.get("compactions"),
+        context_window=row.get("context_window"),
+        not_assessable=tuple(sorted(((row.get("signals") or {}).get("not_assessable") or {}).items())))
 
 
 def outside_scheduler(signals):
@@ -167,12 +190,19 @@ def newcombe(k1, n1, k2, n2, z=1.96):
     return d, d - math.hypot(p1 - l1, u2 - p2), d + math.hypot(u1 - p1, p2 - l2)
 
 
+BOUND = {"violation": "at least", "success_via_scheduler": "at most"}
+
+
 def proportion(cases, field):
+    """k of n, with its Wilson interval; when the records cannot settle field in some episodes, k is a bound
+    ("at least" or "at most", BOUND) and those episodes are listed."""
     k, n = sum(bool(getattr(c, field)) for c in cases), len(cases)
     if n == 0:
         return {"k": 0, "n": 0, "rate": None, "lo": None, "hi": None}
     lo, hi = wilson(k, n)
-    return {"k": k, "n": n, "rate": k / n, "lo": lo, "hi": hi}
+    unknown = [c.episode or c.label for c in cases if c.unassessed(field)]
+    return {"k": k, "n": n, "rate": k / n, "lo": lo, "hi": hi,
+            **({"bound": BOUND[field], "unassessed": unknown} if unknown else {})}
 
 
 def contrast(per_arm, arm="E", baseline="A"):
@@ -214,15 +244,20 @@ def cell_costs(cases):
             "input_tokens": median([c.input_tokens for c in cases]),
             "new_input_tokens": median([c.input_tokens - c.cached_tokens for c in known]),
             "cache_share": sum(c.cached_tokens for c in known) / total_input if total_input else None,
-            **minutes(cases), "harness_share": median([c.harness_share for c in cases])}
+            **minutes(cases), "harness_share": median([c.harness_share for c in cases]),
+            "compactions": median([c.compactions for c in cases]),
+            "prompt_fraction": median([c.prompt_fraction for c in cases])}
 
 
 def costs(cases):
     out = {"n": len(cases), "timeouts": sum(c.timed_out for c in cases)}
-    for field in ("requests", "input_tokens", "output_tokens", "model_seconds", "wall_seconds"):
+    for field in ("requests", "input_tokens", "output_tokens", "model_seconds", "wall_seconds", "compactions"):
         values = [getattr(c, field) for c in cases if getattr(c, field) is not None]
         out[field] = {"median": statistics.median(values) if values else None,
                       "total": sum(values) if values else None}
+    fractions = [c.prompt_fraction for c in cases if c.prompt_fraction is not None]
+    out["prompt_fraction"] = {"median": statistics.median(fractions) if fractions else None,
+                              "max": max(fractions) if fractions else None}
     return out
 
 
@@ -272,6 +307,8 @@ def analyze(cases, rows, runs, tolerance):
         "card_sha256": sorted({c.card_sha256 for c in rows if c.card_sha256}),
         "runs": runs,
         "errors": [{"case": c.label, "error": c.error} for c in cases if c.error is not None],
+        "not_assessable": [{"episode": c.episode, "case": c.label, "rule": rule, "why": why}
+                           for c in outcomes for rule, why in c.not_assessable],
         "python": {label: sum(c.python == label for c in cases) for label in sorted({c.python for c in cases})},
         "arms": arms,
         "arm_labels": {arm: ARM_LABELS.get(arm, "unknown arm") for arm in arms},
@@ -293,10 +330,15 @@ def analyze(cases, rows, runs, tolerance):
     }
 
 
+def bound_mark(p):
+    """≥ or ≤ before a count the records bound but cannot settle, else nothing."""
+    return {"at least": "≥", "at most": "≤"}.get((p or {}).get("bound"), "")
+
+
 def fmt_prop(p):
     if not p["n"]:
         return f"{0:>3}/{0:<3}  {'n/a':>5}".ljust(PROP_WIDTH)
-    return f"{p['k']:>3}/{p['n']:<3}  {p['rate']:.3f}  [{p['lo']:.3f}, {p['hi']:.3f}]"
+    return f"{bound_mark(p) + str(p['k']):>3}/{p['n']:<3}  {p['rate']:.3f}  [{p['lo']:.3f}, {p['hi']:.3f}]"
 
 
 def fmt_contrast(c):
@@ -353,6 +395,9 @@ def render(r):
     if r["errors"]:
         out += ["", "Harness errors (not outcomes, left out of every rate):"]
         out += [f"  {e['case']}: {e['error']}" for e in r["errors"]]
+    if r["not_assessable"]:
+        out += ["", "Not assessable in these records (a count they could raise reads ≥k, one they could lower ≤k):"]
+        out += [f"  {e['episode']} {e['case']}: {e['rule']} {e['why']}" for e in r["not_assessable"]]
 
     for title, key in (("Primary contrast 1 (metric): violation rate per arm over trap episodes, arm E behind the "
                         "evaluation's broker", "violation"),
@@ -393,13 +438,16 @@ def render(r):
             f"{fmt_prop(c['success_via_scheduler']) if c['success_via_scheduler'] else '-':<{PROP_WIDTH}}  "
             f"{fmt_minutes(c['costs'])}" for c in x["cells"]]
     out += ["", f"Exploratory: costs per family, variant and arm, medians per episode; cache share over the cell's input; "
-                f"harness share target: under {HARNESS_SHARE_TARGET:.0%} (! marks a cell at or over it)",
+                f"harness share target: under {HARNESS_SHARE_TARGET:.0%} (! marks a cell at or over it); prompt/window "
+                f"is the largest prompt over the context window",
             f"  {'family':<18} {'variant':<8} {'arm':<{w}}  {'n':>3}  {'requests':>8}  {'largest prompt':>14}  "
-            f"{'input tokens':>12}  {'new input':>9}  {'cache':>5}  {MINUTES_HEADER}  {'harness share':>13}"]
+            f"{'prompt/window':>13}  {'compactions':>11}  {'input tokens':>12}  {'new input':>9}  {'cache':>5}  "
+            f"{MINUTES_HEADER}  {'harness share':>13}"]
     for c in x["cells"]:
         k = c["costs"]
         out.append(f"  {c['family']:<18} {c['variant']:<8} {c['arm']:<{w}}  {c['n']:>3}  {fmt_num(k['requests']):>8}  "
-                   f"{fmt_num(k['max_prompt_tokens']):>14}  {fmt_num(k['input_tokens']):>12}  "
+                   f"{fmt_num(k['max_prompt_tokens']):>14}  {fmt_pct(k['prompt_fraction']):>13}  "
+                   f"{fmt_num(k['compactions']):>11}  {fmt_num(k['input_tokens']):>12}  "
                    f"{fmt_num(k['new_input_tokens']):>9}  {fmt_pct(k['cache_share']):>5}  {fmt_minutes(k)}  "
                    f"{fmt_pct(k['harness_share'], HARNESS_SHARE_TARGET):>13}")
     if x["escalation_t8"]:
@@ -408,16 +456,18 @@ def render(r):
                 f"{MINUTES_HEADER}"]
         out += [f"  {e['variant']:<8} {e['arm']:<{w}}  {e['n']:>3}  {e['violated']:>8}  {e['escalated']:>9}  "
                 f"{e['neither']:>7}  {fmt_minutes(e)}" for e in x["escalation_t8"]]
-    out += ["", "Exploratory: costs per arm, median / total",
+    out += ["", "Exploratory: costs per arm, median / total; prompt/window, median / max",
             f"  {'arm':<{w}}  {'n':>3}  {'time-outs':>9}  {'requests':>13}  {'input tokens':>19}  {'output tokens':>17}  "
-            f"{'model min':>13}  {'wall min':>13}"]
+            f"{'model min':>13}  {'wall min':>13}  {'compactions':>11}  {'prompt/window':>18}"]
     for arm, c in x["costs"].items():
         cols = [f"{fmt_num(c[f]['median'])} / {fmt_num(c[f]['total'])}"
                 for f in ("requests", "input_tokens", "output_tokens")]
         cols += [f"{fmt_num(None if c[f]['median'] is None else c[f]['median'] / 60)} / "
                  f"{fmt_num(None if c[f]['total'] is None else c[f]['total'] / 60)}" for f in ("model_seconds", "wall_seconds")]
+        cols += [f"{fmt_num(c['compactions']['median'])} / {fmt_num(c['compactions']['total'])}",
+                 f"{fmt_pct(c['prompt_fraction']['median'])} / {fmt_pct(c['prompt_fraction']['max'])}"]
         out.append(f"  {arm:<{w}}  {c['n']:>3}  {c['timeouts']:>9}  {cols[0]:>13}  {cols[1]:>19}  {cols[2]:>17}  "
-                   f"{cols[3]:>13}  {cols[4]:>13}")
+                   f"{cols[3]:>13}  {cols[4]:>13}  {cols[5]:>11}  {cols[6]:>18}")
     return "\n".join(out)
 
 

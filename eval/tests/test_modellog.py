@@ -40,7 +40,7 @@ class Log(unittest.TestCase):
                                  prompt=2000, cached=1500, out=30, seconds=30.0)])
         self.assertEqual(modellog.costs(path), {
             "requests": 3, "input_tokens": 6000, "output_tokens": 60, "max_prompt_tokens": 3000,
-            "cached_tokens": 3500, "model_seconds": 120.0, "harness_requests": 1})
+            "cached_tokens": 3500, "model_seconds": 120.0, "harness_requests": 1, "compactions": 0})
 
     def test_costs_without_a_log(self):
         self.assertEqual(modellog.costs("/nonexistent/requests.jsonl")["requests"], 0)
@@ -61,6 +61,30 @@ class Log(unittest.TestCase):
                            entry([call(1, "cat AGENTS.md"), output(1, "rules"), call(2, "sbatch job.sh"),
                                   output(2, "sbatch: refused: a job belongs to a run"), call(3, "ls"), output(3, "x")])])
         self.assertEqual([modellog.harness_triggered(r) for r in modellog.read(path)], [False, True, True, False])
+
+
+    def test_a_compaction_is_a_request_whose_last_message_asks_for_the_hand_off_summary(self):
+        """As in 01d8c1133bd4 (t3 control A seed 2): the history, then this user message; the next request starts
+        from the summary with four items."""
+        ask = {"type": "message", "role": "user", "content": [{"type": "input_text", "text":
+               "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM."}]}
+        quoted = {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "fix the bug"}]}
+        path = self.write([entry([quoted, call(1, "ls"), output(1, "x")]),
+                           entry([quoted, call(1, "ls"), output(1, "x"), ask], prompt=52000),
+                           entry([quoted], prompt=6500)])
+        self.assertEqual([r.compaction for r in modellog.read(path)], [False, True, False])
+        self.assertEqual(modellog.costs(path)["compactions"], 1)
+
+    def test_the_last_replys_calls_come_last_with_no_output(self):
+        """As in d878e6e1ecbf (t1 trap A seed 2): the episode ended while its last reply's write_stdin polls ran."""
+        done = {"type": "response.output_item.done", "item": {
+            "type": "function_call", "call_id": "c9", "name": "write_stdin",
+            "arguments": json.dumps({"chars": "", "session_id": 30495})}}
+        reasoning = {"type": "response.output_item.done", "item": {"type": "reasoning", "content": []}}
+        last = dict(entry([call(1, "ls"), output(1, "x")]), response="event: response.created\ndata: {}\n\n" + "".join(
+            f"event: response.output_item.done\ndata: {json.dumps(d)}\n\n" for d in (reasoning, done)))
+        calls = modellog.calls(modellog.read(self.write([entry([call(1, "ls")]), last])))
+        self.assertEqual([(c.number, c.name, c.output) for c in calls], [(1, "exec_command", "x"), (2, "write_stdin", None)])
 
 
 class Harness(unittest.TestCase):
