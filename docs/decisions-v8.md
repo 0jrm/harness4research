@@ -1,4 +1,4 @@
-# Decisions for the v7 redesign
+# Decisions for the v8 redesign
 
 One dated line per decision, with its evidence. Edit a line to overrule it.
 
@@ -13,3 +13,7 @@ One dated line per decision, with its evidence. Edit a line to overrule it.
 - 2026-10-17. `guard wait` takes a job id or a local pid or command, so the leaky-set chore stays unchanged and E4 runs on it. Evidence: leaky-set polling is Codex `write_stdin` re-polls of a local `python3 evaluate.py`, 273 of them in r2 t3 control arm A seed 10 (551c815543b8). This decision is the owner's.
 - 2026-10-17. The login-node detour is closed by a compute list on the card (`sim.py`), which the guard run command refuses outside a job. A CPU-time limit does not close it. Evidence: t1's `sim.py` sleeps 0.5 s per step, so RLIMIT_CPU never fires. This decision is the owner's.
 - 2026-10-17. The redesign ships as v8 (tag and schema), because v7.0 is already a tagged release. The comparison run keeps the name second-qwen3.6-v7. This decision is the owner's.
+- 2026-10-17. The owner's addendum A1-A12 amends the plan; it wins where they conflict.
+- 2026-10-17. A1: both new rules are scorable in all r2 episodes. They read the tool-call log and follow calls into the scripts they run; a run of a script no record holds makes the rule not assessable and its counts bounds. Evidence: no count changed; the final tree holds only 11 of 38 flagged t3 episodes' scripts (eval/experiments/baseline-r2-rescored.md).
+- 2026-10-17. A6: compactions per episode and the largest prompt over the context window are standing metrics in every cost table. Evidence: 01d8c1133bd4 compacted 14 times; t3 prompts reach 90% of 65536.
+- 2026-10-17. A10, design rule: never ask the model for a free-form value that a machine must parse. Derive it, default it, or enumerate the choices in the refusal. --why is exempt, because nothing parses it. This decision is the owner's.
