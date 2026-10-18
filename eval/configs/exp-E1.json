@@ -80,5 +80,6 @@
       10
     ],
     "order_seed": 20261010
-  }
+  },
+  "agents_md": "eval/agents/E5.md"
 }
