@@ -12,6 +12,8 @@ The config is the question card's machine part:
   "episodes_dir": "~/.cache/hpc-sessions",            episode directories, named at random so nothing in a path
                                                        names the task, arm or seed (the mount table shows paths)
   "agents_md": "eval/agents/E5.md",                   optional: arm E's AGENTS.md, replacing the template's whole file
+  "approver": "never",                                optional: behind the broker, never (the default) or after:<seconds>,
+                                                       the scripted approver of eval/broker/broker.py
   "results_dir": "eval/results/smoke-1",              verdicts.jsonl
   "model": {"upstream": "http://127.0.0.1:9090",      the model host's relay
             "alias": "default-model",                 the name the proxy pins every request to
@@ -320,6 +322,8 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     env = dict(os.environ)
     if cfg.get("agents_md") and ARMS[arm].harness == "E":
         env["H4R_AGENTS_MD"] = os.path.join(os.path.dirname(HERE), cfg["agents_md"])
+    if ARMS[arm].broker:
+        env["H4R_APPROVER"] = cfg.get("approver", "never")
     built = subprocess.run([os.path.join(HERE, "episode.sh"), family, variant, ARMS[arm].harness, ep, "--seed",
                             str(seed)] + (["--broker"] if ARMS[arm].broker else []), capture_output=True, text=True,
                            env=env)
@@ -435,6 +439,8 @@ def main():
     unfrozen = "--unfrozen" in args
     card_sha = card_commit = None
     every = matrix_cases(cfg["matrix"])
+    if not re.fullmatch(r"never|after:[0-9]+", cfg.get("approver", "never")):
+        sys.exit(f"run.py: approver {cfg['approver']!r} is never or after:<seconds>")
     python = offered_python()
     if not unfrozen:
         require_site_python(python)

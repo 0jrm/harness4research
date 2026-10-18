@@ -1,10 +1,11 @@
 """The broker's records: design increment 2 of docs/design-sandboxed-agents.md, in the evaluation (W1.2).
 
-The records socket offers four verbs, add, list, show and find, over three stores:
+The records socket offers four verbs, add, list, show and find, over four stores:
 
     needs-you   the queue of what only a person can do, check or approve, in the broker's state, never in the clone
     ledger      runs/<run_id>/execution.tsv rows (guard ledger add)
     card        runs/<run_id>/question.card (guard card add)
+    ask         a question with a default and a deadline, queued as a needs-you item (guard ask; asks.py)
 
 No verb closes, acknowledges, dismisses or approves an item, or records a verdict, so none can be expressed through
 the socket; people do that outside the sandbox (broker.py records, broker.py approve card). The broker stamps every
@@ -18,6 +19,7 @@ import datetime as dt
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -25,6 +27,8 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib"))
 import needs_you  # noqa: E402
+
+import asks  # noqa: E402
 
 RUN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 VERBS = ("add", "list", "show", "find")
@@ -71,8 +75,9 @@ def read_rows(path):
 class Records:
     def __init__(self, state_dir, cfg, mirror):
         self.cfg, self.mirror = cfg, mirror
-        self.dir = os.path.join(state_dir, "records")
+        self.state_dir, self.dir = state_dir, os.path.join(state_dir, "records")
         os.makedirs(self.dir, exist_ok=True)
+        self.asks, self.clock = asks.Store(self.dir), time.time
         self.queue = os.path.join(self.dir, "needs-you.tsv")
         self.log_path = os.path.join(self.dir, "log.jsonl")
 
@@ -85,12 +90,15 @@ class Records:
                               "that closes, acknowledges, dismisses or approves an item or records a verdict: a person "
                               "does that outside the sandbox")
             handler = getattr(self, f"{str(store).replace('-', '_')}_{verb}", None)
-            if store not in ("needs-you", "ledger", "card") or handler is None:
+            if store not in ("needs-you", "ledger", "card", "ask") or handler is None:
                 raise Refused(f"no {verb} for {store!r}; the stores are needs-you (add list show find), ledger "
-                              "(add list) and card (add list show)")
+                              "(add list), card (add list show) and ask (add show)")
             out = handler(req)
             self.log({"verb": verb, "store": store, "ok": out.strip().splitlines()[0] if out.strip() else ""})
             return {"rc": 0, "out": out}
+        except asks.Refusal as e:
+            self.log({"verb": verb, "store": store, "refused": str(e).splitlines()[0]})
+            return {"rc": 2, "err": str(e)}
         except (Refused, needs_you.Refused) as e:
             self.log({"verb": verb, "store": store, "refused": str(e)})
             return {"rc": 2, "err": f"guard broker: refused: {e}\n"}
@@ -204,6 +212,52 @@ class Records:
         if not it:
             raise Refused(f"no open or acked {req.get('kind')} item titled {req.get('title')!r}")
         return it.id + "\n"
+
+    # asks ----------------------------------------------------------------------------------------------------------
+    def settle(self):
+        """Records the answers and the unattended defaults now due, and returns the asks."""
+        self.asks.write(asks.settle(self.asks.asks(), needs_you.read(self.queue), self.clock()), self.clock())
+        return self.asks.asks()
+
+    def told(self, ask):
+        """The agent's line for an ask, recording that it has seen a default taken unattended."""
+        if ask.outcome == "default" and not ask.told:
+            self.asks.write([{"event": "told", "id": ask.id}], self.clock())
+        return asks.line(ask, self.clock()) + "\n"
+
+    def notices(self):
+        """One line per default taken unattended that the agent has not seen yet; the broker adds them to any reply."""
+        return "".join(self.told(a) for a in self.settle().values() if a.outcome == "default" and not a.told)
+
+    def ask_add(self, req):
+        self.keys(req, ["question", "default", "deadline"])
+        question, default, deadline = asks.checked(req.get("question"), req.get("default"), req.get("deadline"))
+        now = self.clock()
+        due = now + asks.DEADLINES[deadline]
+        try:
+            item = self.queue_item(
+                "approve", question,
+                dict(why=f"the agent asked, and takes this default if nobody answers by {asks.clock(due)}: {default}",
+                     expect="", worry="", undo=""),
+                [], [f"# answer: eval/broker/broker.py records done {self.state_dir} <id> --note <your answer>, or "
+                     f"dismiss <id> for no"], f"sandbox {self.cfg['session']}: guard ask")
+        except needs_you.Refused as e:
+            raise asks.Refusal("question", f"{e}; the question and the default are one line each",
+                               shlex.join(["guard", "ask", "YOUR QUESTION", "--default", "THE SAFE OPTION", "--deadline", deadline]))
+        if item not in self.asks.asks():
+            self.asks.write([{"event": "asked", "id": item, "question": question, "default": default,
+                              "deadline": deadline, "due": due}], now)
+        return self.told(self.settle()[item])
+
+    def ask_show(self, req):
+        self.keys(req, ["id"])
+        known = self.settle()
+        if req.get("id") not in known:
+            last = list(known)[-1:]
+            raise asks.Refusal("status", f"no ask {req.get('id')!r}" + (f"; the asks are {' '.join(known)}" if known else ""),
+                               f"guard ask --status {last[0]}" if last else
+                               "guard ask 'YOUR QUESTION' --default 'THE SAFE OPTION' --deadline 5m")
+        return self.told(known[req["id"]])
 
     # git on origin -------------------------------------------------------------------------------------------------
     def git(self, *args, **kw):

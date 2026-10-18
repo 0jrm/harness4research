@@ -6,13 +6,17 @@ sbatch never reaches the scheduler: it turns its options and the script's #SBATC
 fields and refuses an option it cannot map. A request names its run with --comment=run:<id>, which guard/run
 preflight adds, so a bare sbatch call is refused. Only the broker decides what the scheduler sees.
 
-guard needs-you, guard ledger and guard card go to the records socket; every other guard subcommand runs the
-installed guard. The records socket offers add, list, show and find, so guard needs-you ack, done and dismiss are
+guard needs-you, guard ledger, guard card and guard ask go to the records socket; every other guard subcommand runs
+the installed guard. The records socket offers add, list, show and find, so guard needs-you ack, done and dismiss are
 refused there:
 
     guard needs-you [--remind] | add --kind K --title T [...] | find --kind K --title T | show <id>
     guard ledger add <run_id> <field> <value> [--why W] [--evidence E] | list <run_id>
     guard card add <run_id> <card file> | show <run_id> | list
+    guard ask "<question>" --default <the safe option> --deadline 5m|30m|2h | --status <id>
+
+guard ask sends what it was given and the broker checks it (asks.py); words outside the options join the question,
+so an unquoted question still arrives whole.
 
 gh sends its arguments to the gh socket, which decides what it offers (forge.py): pr create, view, list, diff, checks
 and comment, and api reads. Here it only reads --body-file into --body, names the current branch where gh would, and
@@ -156,6 +160,21 @@ def records_request(args):
     return {"verb": verb, "store": store, "args": rest}
 
 
+def ask_request(args):
+    """One records request from guard ask's arguments: --status <id>, or the question with --default and --deadline."""
+    opts, words, it = {}, [], iter(args)
+    for a in it:
+        name, eq, value = a.partition("=")
+        if name in ("--status", "--default", "--deadline"):
+            opts[name[2:]] = value if eq else next(it, "")
+        else:
+            words.append(a)
+    if "status" in opts:
+        return {"verb": "show", "store": "ask", "id": opts["status"]}
+    return {"verb": "add", "store": "ask", "question": " ".join(words), "default": opts.get("default", ""),
+            "deadline": opts.get("deadline", "")}
+
+
 def branch():
     done = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True)
     return done.stdout.strip()
@@ -258,10 +277,10 @@ def guard(args):
         sys.stdout.write(reply.get("out", ""))
         sys.stderr.write(reply.get("err", "").replace("gh: refused by the broker", "guard pr open: refused by the broker"))
         return 0 if reply.get("rc") == 0 else 2
-    if not args or args[0] not in ("needs-you", "ledger", "card"):
+    if not args or args[0] not in ("needs-you", "ledger", "card", "ask"):
         os.execv(GUARD, [GUARD, *args])
     try:
-        request = records_request(args)
+        request = ask_request(args[1:]) if args[0] == "ask" else records_request(args)
     except Refused as e:
         sys.stderr.write(f"guard {args[0]}: refused: {e}\n")
         return 2

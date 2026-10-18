@@ -47,7 +47,18 @@ config.json keys: session, project (the project's path inside the sandbox), path
 environment), user, compute_bwrap (true when every compute node has bwrap), signing_key (the broker's private key),
 owner_key (the owner's, for approve card in the evaluation), allowed_signers (the two public keys), gh_token_file and
 model_key_file (the credentials the broker holds), reviewer ({cmd, model_socket, passwd, binds, path, env, timeout}:
-the reviewer's command and what its sandbox binds; review refuses without cmd)."""
+the reviewer's command and what its sandbox binds; review refuses without cmd), and approver (never, the default, or
+after:<seconds>: the scripted approver below).
+
+guard ask (records.py, asks.py) queues a question with a default and a deadline. A thread of the broker settles the
+asks every few seconds, taking the default of each one past its deadline, and every records or scheduler reply ends
+with one line per default the agent has not yet been told of. The scripted approver stands in for the person in the
+evaluation: with after:<seconds>, it answers every open needs-you item once that long has passed since it was queued.
+An approve item for a question card signs card/<run> as the owner (approve card); one for a job over the budget
+(guard run, exp/E2) approves the reserve for its run (approve reserve); any other item, a guard ask among them, is
+closed done with the note "approved (scripted approver, after <seconds> s)", which is the answer guard ask reports.
+With never, nobody answers, and only the deadlines move an ask."""
+import calendar
 import datetime as dt
 import fnmatch
 import hashlib
@@ -67,6 +78,8 @@ import traceback
 
 from forge import Forge
 from records import Records, Refused, approve_card, needs_you, read_rows, revoke_card
+
+ATTEND_SECONDS = 5
 
 FIELDS = ("time", "nodes", "tasks", "cpus_per_task", "mem", "gpus", "array", "dependency", "partition", "output")
 RUN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -581,9 +594,69 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
 
 
+def approver_delay(mode):
+    """The scripted approver's delay in seconds from the config's approver, or None for never."""
+    if mode in (None, "never"):
+        return None
+    if isinstance(mode, str) and mode.startswith("after:") and mode[6:].isdigit():
+        return int(mode[6:])
+    raise SystemExit(f"broker.py: approver {mode!r} is never or after:<seconds>")
+
+
+def queued_at(item):
+    return calendar.timegm(time.strptime(item.ts, "%Y-%m-%dT%H:%M:%SZ"))
+
+
+def approve_due(broker, delay, now):
+    """The scripted approver: every open item queued at least delay seconds ago gets the approval a person would give."""
+    records = broker.records
+    note = f"approved (scripted approver, after {delay} s)"
+    for it in needs_you.read(records.queue):
+        if it.state != "open" or now - queued_at(it) < delay:
+            continue
+        card = re.fullmatch(r"Approve question card runs/(.+)/question\.card", it.title)
+        job = re.fullmatch(r"Approve a job of run (\S+) over the remaining budget", it.title)
+        try:
+            if card:
+                approve_card(records, card.group(1))
+            if job:
+                approve(broker.dir, "reserve", job.group(1))
+            if not card:
+                needs_you.move(records.queue, "done", it.id, note)
+            records.log({"approver": it.id, "after": delay})
+        except (SystemExit, Refused, needs_you.Refused) as e:
+            records.log({"approver": it.id, "after": delay, "failed": str(e)})
+
+
+def attend(broker, delay):
+    """Every few seconds: the scripted approver, if any, then the asks' answers and unattended defaults."""
+    while True:
+        time.sleep(ATTEND_SECONDS)
+        with broker.lock:
+            try:
+                if delay is not None:
+                    approve_due(broker, delay, time.time())
+                broker.records.settle()
+            except Exception:  # the next round tries again; daemon.log keeps the trace
+                traceback.print_exc()
+
+
+def with_notices(broker, answer):
+    """A socket's answer, then one line for each default the agent has not yet been told of."""
+    def answered(req):
+        reply = answer(req)
+        with broker.lock:
+            told = broker.records.notices()
+        if told:
+            reply["err"] = reply.get("err", "") + told
+        return reply
+    return answered
+
+
 def serve(state_dir, config_path):
     with open(config_path) as f:
         cfg = json.load(f)
+    delay = approver_delay(cfg.get("approver"))
     for key, name in (("gh_token_file", "GH_TOKEN"), ("model_key_file", "ANTHROPIC_API_KEY")):
         if cfg.get(key):  # held here, as a real broker holds them; every subprocess gets an explicit environment
             with open(cfg[key]) as f:
@@ -605,13 +678,14 @@ def serve(state_dir, config_path):
 
     signal.signal(signal.SIGTERM, stop)
     records = Server("records.sock", Handler)
-    records.answer = lambda req: broker.locked(broker.records.handle, req)
+    records.answer = with_notices(broker, lambda req: broker.locked(broker.records.handle, req))
     threading.Thread(target=records.serve_forever, daemon=True).start()
+    threading.Thread(target=attend, args=(broker, delay), daemon=True).start()
     gh = Server("gh.sock", Handler)
     gh.answer = lambda req: broker.locked(broker.forge.handle, req)
     threading.Thread(target=gh.serve_forever, daemon=True).start()
     with Server("scheduler.sock", Handler) as server:
-        server.answer = broker.handle
+        server.answer = with_notices(broker, broker.handle)
         server.serve_forever()
 
 
