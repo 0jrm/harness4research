@@ -2435,12 +2435,19 @@ expect wait-command-code fail '^line 30$' -- bash -c '"$1" wait -- sh -c "seq -f
 expect wait-command-tail ok '^20$' -- bash -c '"$1" wait -- seq 30 | grep -c "^[0-9]"' _ "$guard"
 expect wait-command-status ok '^pid [0-9]+ exited with code 0; log ' -- bash -c '"$1" wait -- true | tail -1' _ "$guard"
 start=$SECONDS
-expect wait-timeout fail '^still running as pid [0-9]+ after the timeout; guard wait [0-9]+; log ' -- "$guard" wait --timeout 1 -- sleep 30
+expect wait-timeout fail '^pid [0-9]+ still running after 0m0[0-9]s; log ' -- bash -c '"$1" wait --timeout 1 -- sleep 30 | tail -3 | head -1; exit ${PIPESTATUS[0]}' _ "$guard"
 expect wait-timeout-bounded ok - -- test $((SECONDS - start)) -le 3
+expect wait-timeout-commands ok '^keep waiting: guard wait ([0-9]+) stop it: kill -- -\1$' -- bash -c '"$1" wait --timeout 1 -- sleep 30 | tail -2 | paste -sd" "' _ "$guard"
+expect wait-unbuffered ok '^started$' -- bash -c '"$1" wait --timeout 2 -- python3 -c "import time; print(\"started\"); time.sleep(30)" | head -1' _ "$guard"
+sleep 30 & held=$!
+expect wait-pid-still-running fail "^stop it: kill" -- bash -c '"$1" wait --timeout 1 $2 | tail -1; exit ${PIPESTATUS[0]}' _ "$guard" $held
+kill $held
 (echo started; sleep 2; echo finished) > "$gw/bg.log" & bg=$!
 expect wait-pid-log ok "^pid $bg exited; log $gw/bg.log$" -- "$guard" wait $bg
-echo '777|RUNNING|0:0' > "$gw/rows"; (sleep 2; echo '777|COMPLETED|0:0' > "$gw/rows") &
 touch "$gw/slurm-777.out"; echo 'step 9 done' > "$gw/slurm-777.out"
+echo '777|RUNNING|0:0|00:12:30' > "$gw/rows"
+expect wait-job-still-running fail '^job 777 \(RUNNING\) still running after 00:12:30; log slurm-777.out keep waiting: guard wait 777 stop it: scancel 777$' -- bash -c 'cd "$1" && MOCK_SACCT_WAIT=rows "$2" wait --timeout 1 777 | tail -3 | paste -sd" "; exit ${PIPESTATUS[0]}' _ "$gw" "$guard"
+(sleep 2; echo '777|COMPLETED|0:0|00:12:32' > "$gw/rows") &
 expect wait-job ok '^job 777 RUNNING -> COMPLETED exit 0:0; log slurm-777.out$' -- bash -c 'cd "$1" && MOCK_SACCT_WAIT=rows "$2" wait 777 | tail -1' _ "$gw" "$guard"
 expect wait-job-ended ok '^job 777 COMPLETED exit 0:0' -- bash -c 'cd "$1" && MOCK_SACCT_WAIT=rows "$2" wait 777 | tail -1' _ "$gw" "$guard"
 expect wait-unknown fail '^guard wait: refused: 999999999 is neither a live process of yours nor a job' -- "$guard" wait 999999999
