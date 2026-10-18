@@ -176,6 +176,8 @@ expect run-usage-next fail '^guard run runs/gr --why w -- job.sh$' -- gr 'job.sh
 in_b 'printf "#!/bin/bash\necho hi\n" > notime.sh'
 expect run-no-time-next fail '^guard run runs/gr --why w -- --time=10 notime.sh$' -- gr '-- notime.sh'
 expect old-next-submits ok 'submitted for run old' -- in_b 'eval "$(guard/run preflight runs/old job.sh 2>&1 | tail -1)"'
+expect compute-refused fail '^guard compute: refused sim.py outside a Slurm job' -- in_b 'python3 sim.py'
+expect compute-next-submits ok 'submitted for run' -- in_b 'eval "$(python3 sim.py 2>&1 | tail -1)"'
 gr_drain
 
 echo "== pull requests behind the broker"
