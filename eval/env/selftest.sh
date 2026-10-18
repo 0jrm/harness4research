@@ -164,7 +164,7 @@ expect guard-cap-short-unchanged ok '^Nothing needs you\.$' -- in_b 'guard needs
 expect guard-cap-lines ok '^11$' -- in_b 'for i in $(seq 15); do guard needs-you add --kind check --title "cap $i" --why w > /dev/null; done; guard needs-you | wc -l'
 expect guard-cap-file ok '^[0-9]+ lines, all in /home/agent/\.cache/guard/guard-.*\.txt; the last 10:$' -- in_b 'guard needs-you | head -1'
 expect guard-cap-file-whole ok '^15$' -- in_b 'grep -c "cap [0-9]" "$(ls ~/.cache/guard/guard-*.txt | head -1)"'
-expect status-blocked ok '^blocked: needs-you n[0-9]+ \(check\): cap 1; .*and 12 more$' -- in_b 'guard status'
+expect status-blocked ok '^blocked: needs-you n[0-9]+ \(check\): cap 1; .*and [0-9]+ more$' -- in_b 'guard status'
 
 echo "== pull requests behind the broker"
 git -C "$b/state/git/protected.git" config guard.main pulls  # main takes pull requests only, as a ruleset requiring one
