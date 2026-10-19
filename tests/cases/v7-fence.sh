@@ -91,7 +91,7 @@ echo "metric: moved" >> runs/r1/question.card; git commit -q -am x
 expect fence-card fail 'FAIL.broker-cards.F03 runs/r1/question.card' -- guard/run fence origin/pr-clean HEAD
 fence_refusal fence-card-refusal F03 origin/pr-clean
 expect fence-card-restores ok '^git checkout origin/main -- runs/r1/question.card && git commit --amend' -- bash -c 'guard/run fence origin/pr-clean HEAD | tail -n 1'
-git switch -q -c pr/agent-card origin/main; mkdir -p runs/ag; cp runs/_template/question.card runs/ag/; git add -A; git commit -q -m "run: ag"
+git switch -q -c pr/agent-card origin/main; mkdir -p runs/ag; printf "question: q\\nbudget_core_hours: 5\\n" > runs/ag/question.card; git add -A; git commit -q -m "run: ag"
 expect fence-agent-card fail 'FAIL.broker-cards.F03 runs/ag/question.card is a card only the broker writes' -- guard/run fence origin/main HEAD
 fence_refusal fence-agent-card-refusal F03 origin/main
 expect fence-agent-card-rm ok '^git rm -qf -- runs/ag/question.card && git commit --amend --no-edit --allow-empty$' -- bash -c 'guard/run fence origin/main HEAD | tail -n 1'
