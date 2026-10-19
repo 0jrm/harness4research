@@ -81,16 +81,16 @@ open(sys.argv[2], "w").write("\n".join(out) + "\n")
 open(sys.argv[3], "w").write("".join(p + "\n" for p in task["arm_e"].get("watch", [])))
 PY
   # The sandbox's remote has no pull requests: a push to main passes when the fence passes, as the ruleset would
-  # let a merge pass. So arm E finishes by pushing, and the review-and-merge skill, which drives the pull-request
-  # flow, is not linked. Recorded in the evaluation's question card as its one deviation from the installed harness.
+  # let a merge pass. So arm E is told to finish by pushing, and the review-and-merge skill, which drives the
+  # pull-request flow, is not linked. Recorded in the evaluation's question card as its one deviation from the installed harness.
   python3 - "$human/AGENTS.md" <<'PY'
 import sys
 path = sys.argv[1]
 text = open(path).read()
-old = next(l for l in text.splitlines() if l.startswith("- Finish work through the `review-and-merge` skill"))
-new = ("- Finish work by pushing it to `main` on `origin`. The remote runs the `guard-fence` check on every push to "
-       "`main` and refuses a push that fails it.")
-open(path, "w").write(text.replace(old, new))
+line = ("- Finish work by pushing it to `main` on `origin`. The remote runs the `guard-fence` check on every push to "
+        "`main` and refuses a push that fails it.\n")
+assert "\n## Project landmines" in text, path
+open(path, "w").write(text.replace("\n## Project landmines", line + "\n## Project landmines", 1))
 PY
   git -C "$human" add -A
   git -C "$human" -c user.name=PI -c user.email=pi@lab commit -qm "chore(guard): set budget and watched paths"
