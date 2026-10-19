@@ -9,9 +9,9 @@ rules run in RULES order; the first that answers wins. A per-job overage (R02, R
 turns the second identical one into an ask (question 11). R08 is a queue: the broker makes the ask and fills {ask}
 and {due} in the reason.
 
-An effect ask in view.open_asks answered yes, for this run, script and spec, is the human's approval: it lifts the
-per-job and budget limits and approval: queue, never the host's safety (R13 memory and slurm-only flags, R14). One
-still unanswered for this run queues the run again on that ask."""
+An effect ask in view.open_asks answered yes, for this run, script and spec, is the human's approval: it lifts R08
+(the budget, the run's cap, approval: queue) and nothing else, so a yes to a repeated per-job overage is answered by
+that refusal again (coordinator, 2026-10-19). One still unanswered for this run queues the run again on that ask."""
 import dataclasses
 import datetime as dt
 import shlex
@@ -286,7 +286,7 @@ def r08_approval(inv, spec, cost, limits, view, b):
 RULES = (r12_outside, r07_script, r16_stop_date, r06_watched, r05_failed, r08_waiting, r11_identical, r17_partition,
          r18_dependency, r19_output, r13_slurm_only, r13_mem, r14_host, r02_time, r03_nodes, r04_gpus, r13_time,
          r13_gpu_hours, r10_concurrent, r08_budget, r08_approval)
-LIFTED_BY_YES = (r08_waiting, r02_time, r03_nodes, r04_gpus, r13_time, r13_gpu_hours, r08_budget, r08_approval)
+LIFTED_BY_YES = (r08_waiting, r08_budget, r08_approval)
 
 
 def decide(inv, spec, cost, limits, view):

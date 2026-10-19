@@ -54,13 +54,18 @@ expect run-r08-waiting ok '^queue R08 slurm \| a3$' -- \
 expect run-yes-lifts ok '^run None slurm \| a4$' -- dt '
 from policy import SbatchSpec
 yes = {"id": "a4", "answer": "yes", "effect": {"kind": "submit", "run_id": "sim", "script_sha256": "s0",
-       "spec": dataclasses.asdict(SbatchSpec(time_min=30))}}
-d(["--time=30"], limits=dataclasses.replace(L, approval="queue"), view=dataclasses.replace(V, open_asks=(yes,)), show="ask_id")'
-expect run-yes-pinned ok '^refuse R02' -- dt '
+       "spec": dataclasses.asdict(SbatchSpec(time_min=5))}}
+d(["--time=5"], limits=dataclasses.replace(L, approval="queue"), view=dataclasses.replace(V, open_asks=(yes,)), show="ask_id")'
+expect run-yes-not-r02 ok '^refuse R02' -- dt '
 from policy import SbatchSpec
-yes = {"id": "a4", "answer": "yes", "effect": {"kind": "submit", "run_id": "sim", "script_sha256": "other",
+yes = {"id": "a4", "answer": "yes", "effect": {"kind": "submit", "run_id": "sim", "script_sha256": "s0",
        "spec": dataclasses.asdict(SbatchSpec(time_min=30))}}
 d(["--time=30"], view=dataclasses.replace(V, open_asks=(yes,)))'
+expect run-yes-pinned ok '^queue R08' -- dt '
+from policy import SbatchSpec
+yes = {"id": "a4", "answer": "yes", "effect": {"kind": "submit", "run_id": "sim", "script_sha256": "other",
+       "spec": dataclasses.asdict(SbatchSpec(time_min=5))}}
+d(["--time=5"], limits=dataclasses.replace(L, approval="queue"), view=dataclasses.replace(V, open_asks=(yes,)))'
 expect run-r10 ok '^refuse R10 slurm \| guard wait 1001$' -- \
   dt 'd(["--time=5"], view=dataclasses.replace(V, live_jobs=tuple(job(i, "r%d" % i) for i in range(1, 5))))'
 live1='view=dataclasses.replace(V, live_jobs=(job(1, "sim", args=("a",)),), run_jobs={"sim": (job(1, "sim", args=("a",)),)})'
@@ -183,9 +188,10 @@ from broker import asks, local, run
 b = local.project_broker()
 a = asks.fold(asks.rows(b))[0][sys.argv[2]]
 r = run.redecide(b, a["effect"]); print(r.get("out", "") + r.get("err", ""))' "$here" "$1"); }
-  expect run-yes-submits ok '^job [0-9]+ submitted for run sim: 40 min' -- yes a2
-  expect run-yes-pinned-script ok '^H4R-R02' -- bash -c "echo '# changed' >> '$rp/job.sh'; $(declare -f yes); here='$here' rp='$rp' rb='$rb'; yes a2"
+  expect run-yes-pinned-script ok '^H4R-R08' -- bash -c "echo '# changed' >> '$rp/job.sh'; $(declare -f yes); here='$here' rp='$rp' rb='$rb'; yes a1"
   git -C "$rp" checkout -q -- job.sh
+  expect run-yes-submits ok '^job [0-9]+ submitted for run big: 10 min x 1 node\(s\) x 4 cores x 1000 tasks' -- yes a1
+  expect run-yes-overage-refuses ok '^H4R-R02' -- yes a2
   expect run-overage-ask ok '"question": "allow 40 min for run sim\?"' -- cat "$rp/.git/guard/broker/records/asks.jsonl"
 else
   skip run-r08-e2e "lib/broker/asks.py (U4) is not in this harness"

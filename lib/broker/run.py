@@ -43,6 +43,9 @@ CARD_KEYS = ("minutes", "nodes", "cores", "gpus", "tasks", "core_hours", "gpu_ho
 
 def handle(request, broker):
     with broker.lock:
+        asks = optional("asks")
+        if asks is not None:
+            asks.settle(broker)
         return run(broker, request)
 
 
@@ -127,7 +130,7 @@ def run(broker, req, yes=None):
     c = cost(spec, lim, b)
     d = decide(inv, spec, c, lim, view)
     if d.verdict == "refuse":
-        if d.code in LIMIT_CODES and optional("asks") and repeated(broker, d.code, inv):
+        if d.code in LIMIT_CODES and yes is None and optional("asks") and repeated(broker, d.code, inv):
             return ask(broker, inv, spec, lim, r, "limit", question=over_question(d.code, inv, spec), reason=d.reason)
         return refused(broker, refusals.Refusal(d.code, d.reason, d.next), r, inv)
     if d.verdict == "queue":
@@ -187,9 +190,9 @@ def ask(broker, inv, spec, lim, r, variant, question, decision=None, reason=None
             raise
         return refusals.reply(refusals.refuse("X00", verb="guard ask, which R08 queues on,"))
     spec_d = dataclasses.asdict(spec)
-    a = (decision and decision.ask_id and next((x for x in asks.open_asks(broker) if x["id"] == decision.ask_id), None)) \
-        or asks.create_effect(broker, "submit", inv.run_id, question, inv.script_sha256, spec_d, lim.ask_deadline)
-    due = time.strftime("%H:%M", time.gmtime(a["due_ts"]))
+    a = asks.open_effect(broker, inv.run_id) or asks.create_effect(broker, "submit", inv.run_id, question,
+                                                                    inv.script_sha256, spec_d, lim.ask_deadline)
+    due = asks.clock(a["due_ts"]).removesuffix(" UTC")
     text = decision.reason if decision else R08_MORE[variant].format(reason=reason, ask="{ask}", due="{due}")
     rf = refusals.Refusal("R08", text.format(ask=a["id"], due=due), "guard status")
     log_refusal(broker, rf, r, inv, request=dataclasses.asdict(r), spec=spec_d, ask=a["id"])
