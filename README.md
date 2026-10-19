@@ -2,7 +2,7 @@
 
 harness4research keeps an auditable record of what AI agents run on a research repository and on shared compute, and refuses at the point of action: a job over its budget or outside the scheduler, a merge that changes the guardrails, a number reported without evidence. Each refusal names the command to run instead, and a queue holds the steps only a person can take. The rules live in git, GitHub, and the scheduler, so they apply the same way to Claude Code, Codex, Cursor, and agents on local models.
 
-What it does not check, it does not prevent. In our benchmark of a local model, rule-breaking fell where a check exists and not elsewhere ([re-scored results](eval/experiments/baseline-r2-rescored.md)). The [enforcement audit](docs/enforcement-audit.md) attacks each rule with a script: 60 held, 1 bypassed of 61 rows.
+What it does not check, it does not prevent. In our benchmark of a local model, rule-breaking fell where a check exists and not elsewhere ([re-scored results](eval/experiments/baseline-r2-rescored.md)). The [enforcement audit](docs/enforcement-audit.md) attacks each rule with a script: 66 held, 2 bypassed of 68 rows.
 
 ## Who it is for
 
