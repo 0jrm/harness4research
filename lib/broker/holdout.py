@@ -23,12 +23,15 @@ Its verdict:
 Only the verdict and the ledger id leave the broker; the numbers stay in holdout/log.jsonl, which only the evaluator and
 the owner read, so no score is an oracle (E7 seed 7 tuned against printed scores). A solution_sha256 already scored
 answers with that verdict and a new receipt and counts nothing. A score counts; a push never counts and is never
-refused for the limit, so the deliverable push cannot deadlock, but a push that fails or is unscorable is refused."""
+refused for the limit, so the deliverable push cannot deadlock, but a push that fails or is unscorable is refused.
+Each row's receipt (receipts.receipt_add) carries the verdict, the commit and the sha, never a number.
+
+At the limit the broker opens one holdout_more ask for the session (asks.create_effect, default no); a person's yes
+calls redecide(), which grants N more scores."""
 import contextlib
 import csv
 import fcntl
 import hashlib
-import importlib
 import json
 import math
 import os
@@ -37,11 +40,13 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 
 if __name__ == "__main__":
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 import _path  # noqa: E402,F401
 import refusals  # noqa: E402
+from broker import asks, receipts, scheduler  # noqa: E402
 
 LIB = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 INPUTS = ("train.csv", "public_test.csv", "sealed_test.csv", "sealed_features.csv")
@@ -74,24 +79,6 @@ def judge(public, sealed, timed_out, threshold):
     return "pass"
 
 
-def receipt(state_dir, fields):
-    """The ledger id of a holdout receipt. U9's receipts.receipt_add publishes it signed; until U9 lands, an unsigned
-    l<hex> row in <state_dir>/receipts.jsonl, which F04 refuses by shape."""
-    try:
-        receipts = importlib.import_module("broker.receipts")
-    except ModuleNotFoundError as e:
-        if e.name != "broker.receipts":
-            raise
-    else:
-        return receipts.receipt_add("holdout", None, fields).id
-    ts = time.time()
-    lid = "l" + hashlib.sha256(json.dumps([ts, "holdout", fields], sort_keys=True).encode()).hexdigest()[:10]
-    with open(os.path.join(state_dir, "receipts.jsonl"), "a") as f:
-        f.write(json.dumps({"id": lid, "ts": ts, "kind": "holdout", "session": fields.get("session"),
-                            "fields": fields}) + "\n")
-    return lid
-
-
 def seal(state_dir, data_dir, threshold, max_submissions, scorer, timeout=300, python=None, origin=None):
     hold = os.path.join(os.path.abspath(state_dir), "holdout")
     os.makedirs(hold, exist_ok=True)
@@ -114,8 +101,10 @@ def sealed(state_dir):
 
 
 class Holdout:
-    def __init__(self, state_dir, session):
-        self.state, self.session = os.path.abspath(state_dir), session
+    """The seal and the log of one broker (its dir, cfg and mirror); the session is the broker's."""
+
+    def __init__(self, broker):
+        self.broker, self.state, self.session = broker, os.path.abspath(broker.dir), broker.cfg["session"]
         self.dir = os.path.join(self.state, "holdout")
         with open(os.path.join(self.dir, "seal.json")) as f:
             self.seal = json.load(f)
@@ -134,6 +123,11 @@ class Holdout:
 
     def used(self):
         return sum(1 for r in self.rows() if r.get("n") is not None and r["session"] == self.session)
+
+    def allowed(self):
+        """N, plus N more for each yes to a holdout_more ask in this session."""
+        grants = sum(1 for r in self.rows() if r["verdict"] == "grant" and r["session"] == self.session)
+        return self.seal["max_submissions"] * (1 + grants)
 
     def cached(self, sha):
         return next((r for r in reversed(self.rows()) if sha and r["solution_sha256"] == sha and r["verdict"] in SCORED),
@@ -207,13 +201,13 @@ class Holdout:
                 found["cached"] = hit.get("cached", hit["ledger_id"])
             elif sha is None:
                 found = {"verdict": "unscorable", "why": "no solution.py in the commit's tree"}
-            elif via == "score" and used >= self.seal["max_submissions"]:
+            elif via == "score" and used >= self.allowed():
                 found = {"verdict": "limit"}
             else:
                 found, counts = self.measure(work), via == "score"
         fields = {"via": via, "verdict": found["verdict"], "commit": commit, "solution_sha256": sha,
                   "session": self.session}
-        row = {"ledger_id": receipt(self.state, fields), **({"n": used + 1} if counts else {}), "via": via,
+        row = {"ledger_id": receipts.receipt_add(self.broker, "holdout", None, fields).id, **({"n": used + 1} if counts else {}), "via": via,
                "commit": commit, "branch": branch, "solution_sha256": sha, **found, "ts": time.time(),
                "session": self.session}
         with open(self.log_path, "a") as f:
@@ -222,7 +216,7 @@ class Holdout:
 
     def line(self, row):
         """The verdict as the agent sees it: a refusal, or the pass line for a score; never a number but k, N, s."""
-        cap = self.seal["max_submissions"]
+        cap = self.allowed()
         left = max(cap - self.used(), 0)
         if row["verdict"] == "fail":
             return refusals.refuse("H01", ledger_id=row["ledger_id"], k=left, n=cap)
@@ -250,7 +244,7 @@ def handle(request, broker):
     branch = request.get("branch")
     if request.get("action") != "score" or not isinstance(branch, str):
         return {"rc": 64, "out": "", "err": "usage: guard holdout score\n"}
-    h = Holdout(broker.dir, broker.cfg["session"])
+    h = Holdout(broker)
 
     def score():
         commit = None
@@ -261,17 +255,35 @@ def handle(request, broker):
                 commit = broker.mirror.git("rev-parse", ref).stdout.strip()
         return h.answer("score", ["git", "--git-dir", broker.mirror.path], commit, branch)
 
-    return reply(h.locked(score)[1])
+    row, said = h.locked(score)
+    if row["verdict"] == "limit":
+        with broker.lock:
+            asks.create_effect(broker, "holdout_more", f"holdout:{h.session}",
+                               f"Allow {h.seal['max_submissions']} more holdout scores for session {h.session}?")
+    return reply(said)
+
+
+def redecide(broker, effect):
+    """A yes to the holdout_more ask that H03 made: N more scores for this session. broker.lock is held."""
+    h = Holdout(broker)
+
+    def grant():
+        with open(h.log_path, "a") as f:
+            f.write(json.dumps({"via": "ask", "verdict": "grant", "solution_sha256": None, "ts": time.time(),
+                                "session": h.session}) + "\n")
+        return {"rc": 0, "out": f"holdout: {h.seal['max_submissions']} more scores, "
+                                f"{h.allowed() - h.used()} left this session\n", "err": ""}
+
+    return h.locked(grant)
 
 
 def push(state_dir, commit):
     """The pre-receive's check: exit 0 lets the push through; a refusal prints its two lines and its status."""
-    try:
-        with open(os.path.join(state_dir, "config.json")) as f:
-            session = json.load(f).get("session", "")
-    except (OSError, ValueError):
-        session = ""
-    h = Holdout(state_dir, session)
+    with open(os.path.join(state_dir, "config.json")) as f:
+        cfg = json.load(f)
+    broker = types.SimpleNamespace(dir=os.path.abspath(state_dir), cfg=cfg,
+                                   mirror=scheduler.Mirror(os.path.join(state_dir, "mirror.git"), cfg["origin"]))
+    h = Holdout(broker)
     _, said = h.locked(h.answer, "push", ["git"], commit)
     if isinstance(said, str):
         return 0

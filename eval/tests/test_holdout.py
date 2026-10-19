@@ -19,7 +19,7 @@ EVAL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.dirname(EVAL)
 sys.path.insert(0, os.path.join(REPO, "lib"))
 import _path  # noqa: E402,F401
-from broker import holdout, scheduler  # noqa: E402
+from broker import asks, holdout, scheduler  # noqa: E402
 
 sys.path.insert(0, EVAL)
 T3_DIR = os.path.join(EVAL, "tasks", "t3-entity-overlap")
@@ -81,27 +81,14 @@ def git(*args, cwd=None, check=True):
 
 
 class Fixture:
-    """A bare origin with a pre-receive that runs guard.holdout as the forge's does, a clone, and a broker state."""
-
-    HOOK = """#!/usr/bin/env bash
-zero=0000000000000000000000000000000000000000
-holdout=$(git config guard.holdout || true)
-status=0
-while read -r old new ref; do
-  if [ "$ref" = refs/heads/main ] && [ -n "$holdout" ] && [ "$old" != "$zero" ] && ! git diff --quiet "$old" "$new" -- solution.py; then
-    out=$(bash -c "$holdout"' "$@"' holdout "$new" 2>&1) || { echo "$out"; status=1; }
-  fi
-done
-exit $status
-"""
+    """A bare origin with the forge's pre-receive (eval/env/forge-pre-receive.sh), a clone, and a broker's state."""
 
     def __init__(self, test, max_submissions=3, timeout=60, session="s1"):
         self.root = tempfile.mkdtemp(prefix="ho.", dir=os.environ.get("TMPDIR"))
         test.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
         self.origin, self.clone, self.state = (os.path.join(self.root, n) for n in ("origin.git", "clone", "state"))
         git("init", "-q", "--bare", "-b", "main", self.origin)
-        with open(os.path.join(self.origin, "hooks", "pre-receive"), "w") as f:
-            f.write(self.HOOK)
+        shutil.copyfile(os.path.join(EVAL, "env", "forge-pre-receive.sh"), os.path.join(self.origin, "hooks", "pre-receive"))
         os.chmod(os.path.join(self.origin, "hooks", "pre-receive"), 0o755)
         git("clone", "-q", self.origin, self.clone)
         for k, v in (("user.name", "t"), ("user.email", "t@t")):
@@ -111,14 +98,14 @@ exit $status
         git("commit", "-qm", "start", cwd=self.clone)
         git("push", "-q", "origin", "HEAD:main", cwd=self.clone)
         os.makedirs(self.state)
-        self.cfg = {"session": session, "origin": self.origin}
+        self.cfg = {"session": session, "project": self.clone, "paths": [[self.clone, self.clone]],
+                    "origin": self.origin, "slurm_bin": None}
         with open(os.path.join(self.state, "config.json"), "w") as f:
             json.dump(self.cfg, f)
         data(os.path.join(self.root, "hidden"))
         self.seal = holdout.seal(self.state, os.path.join(self.root, "hidden"), TASK["gap_threshold"],
                                  max_submissions, SCORER, timeout, None, self.origin)
-        self.broker = types.SimpleNamespace(dir=self.state, cfg=self.cfg,
-                                            mirror=scheduler.Mirror(os.path.join(self.state, "mirror.git"), self.origin))
+        self.broker = scheduler.Broker(self.state, self.cfg)
 
     def write(self, source):
         with open(os.path.join(self.clone, "solution.py"), "w") as f:
@@ -229,6 +216,10 @@ class Holdout(unittest.TestCase):
         rc, out = fx.score(MEAN + "\n# try 3\n")
         refusal(self, out, "H03")
         self.assertEqual(rc, 2)
+        with fx.broker.lock:
+            ask = asks.open_effect(fx.broker, "holdout:s1")
+            self.assertEqual(ask["effect"]["kind"], "holdout_more")
+            self.assertEqual(ask["default"], "no")
         rc, out = fx.push(MEAN + "\n# the deliverable\n")
         self.assertEqual(rc, 0, out)
         rc, out = fx.push(LOOKUP.replace("FALLBACK", "0.0"))
@@ -237,6 +228,11 @@ class Holdout(unittest.TestCase):
         self.assertEqual([(r["via"], r["verdict"], r.get("n")) for r in rows],
                          [("score", "pass", 1), ("score", "pass", 2), ("score", "pass", 3), ("score", "limit", None),
                           ("push", "pass", None), ("push", "fail", None)])
+        with fx.broker.lock:
+            granted = asks.redecide(fx.broker, ask["effect"])
+        self.assertEqual(granted, {"rc": 0, "out": "holdout: 3 more scores, 3 left this session\n", "err": ""})
+        rc, out = fx.score(MEAN + "\n# try 4\n")
+        self.assertEqual(out, f"holdout {fx.rows()[-1]['ledger_id']} pass; 2 of 6 submissions left\n")
 
     def test_a_repeated_solution_is_cached_and_not_counted(self):
         fx = Fixture(self, max_submissions=1)
