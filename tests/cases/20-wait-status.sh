@@ -187,6 +187,10 @@ for seq, job, run, session in ((1, "12", "run-a", "s1"), (2, "13", "run-b", "s1"
 item = needs_you.Item("n1", "2026-10-19T00:00:00Z", "open", "approve", "more holdout submissions?", "", "", "", "", "", [], [], "agent")
 with open(b.records.queue, "w") as f: f.write(needs_you.to_row(item))
 with open(b.records.log_path, "w") as f: f.write(json.dumps({"ts": time.time() - 180, "store": "scheduler", "refused": "H4R-R02 time 60 exceeds max_walltime_minutes 30"}) + "\n")
+from broker import asks
+asks.add(b, {"question": "extend it?", "default": "no", "deadline": "30m"})
+asks.add(b, {"question": "ship it?", "default": "no", "deadline": "5m"})
+asks.write(b, [{"event": "answered", "id": "a2", "answer": "yes", "by": "human"}])
 s = server.bind("$sdir/sock/scheduler.sock", "scheduler", b)
 open("$sdir/ready", "w").close()
 s.serve_forever()
@@ -194,10 +198,14 @@ PY
 python3 "$sdir/serve.py" > "$sdir/serve.log" 2>&1 & spid=$!
 for _ in $(seq 100); do [ -e "$sdir/ready" ] && break; sleep 0.1; done
 cd "$tmp/proj" || exit 1
+# The first call shows the human's answer to a2 once; asks.report marks it seen, so no later call does.
+first=$(env GUARD_SESSION=s1 GUARD_SOCK_DIR="$sdir/sock" "$guard" status)
+expect status-e2e-asks-and-unseen-answer ok '^blocked: needs-you n1 waits for a person: more holdout submissions\?; ask a1 waits for a person, 30 min left, then no: extend it\?; ask a2 answered by a person: yes$' -- printf '%s\n' "$first"
 st() { env GUARD_SESSION=s1 GUARD_SOCK_DIR="$sdir/sock" "$guard" status; }
 expect status-e2e-six-lines ok '^6$' -- bash -c "$(declare -f st); guard='$guard'; sdir='$sdir'; st | wc -l"
 expect status-e2e-running ok '^running: job 12 \(run-a\) RUNNING 0:04:10 of 0:30:00; job 13 \(run-b\) PENDING' -- st
-expect status-e2e-ask ok '^blocked: ask n1 waits for a person: more holdout submissions\?$' -- st
+expect status-e2e-asks-answer-shown-once ok '^blocked: needs-you n1 waits for a person: more holdout submissions\?; ask a1 waits for a person, 30 min left, then no: extend it\?$' -- st
+expect status-e2e-needs-you-hides-ask-ids ok '^0$' -- bash -c "$(declare -f st); guard='$guard'; sdir='$sdir'; st | grep -c 'needs-you a[0-9]' || true"
 expect status-e2e-refusal ok '^last refusal: 3 min ago, scheduler: H4R-R02 time 60' -- st
 expect status-e2e-budget ok '^budget: 12 of 100 core-h spent, 0 queued, 78 left above the 10 reserve$' -- st
 expect status-e2e-git ok '^git: main, [0-9]+ changed files?, [0-9]+ commits? ahead of origin/main, [0-9]+ behind$' -- st
