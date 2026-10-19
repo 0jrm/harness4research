@@ -102,6 +102,14 @@ s = http.server.HTTPServer(("127.0.0.1", 0), H); open(sys.argv[1] + "/up-port", 
   expect proxy-forwards ok '^/v1/v2/x$' -- python3 -c "$post" "$(cat "$tmp/proxy-port")"
   expect proxy-pins ok '"request": \{"model": "pinned", "seed": 7\}' -- tail -1 "$tmp/proxy.jsonl"
   kill "$px" "$up" 2>/dev/null
+  expect box-gpu-usage fail '^box.sh: --gpu takes a device index$' -- "$here/lib/box.sh" --gpu x -- true
+  expect box-gpu-missing fail '^box.sh: no /dev/nvidia99 on this host$' -- "$here/lib/box.sh" --gpu 99 -- true
+  if [ -e /dev/nvidia0 ]; then
+    expect box-gpu-bound ok '^nvidia0 nvidiactl$' -- bash -c '"$1" --no-tty --gpu 0 -- ls /dev | grep -x -e nvidia0 -e nvidiactl | paste -sd " "' _ "$here/lib/box.sh"
+    expect box-gpu-probe-allows ok - -- "$here/lib/box.sh" --no-tty --gpu 0 --probe -- true
+  else
+    skip box-gpu-bound "no /dev/nvidia0 here"; skip box-gpu-probe-allows "no /dev/nvidia0 here"
+  fi
   expect box-relay-name fail 'box.sh: --relay takes PORT or PORT:NAME.sock' -- "$here/lib/box.sh" --relay 1:../x -- true
   mkdir -p "$ep_/.claude"; echo '{"env": {"GH_TOKEN": "x", "EDITOR": "vi"}}' > "$ep_/.claude/settings.local.json"
   expect enter-says-planted-token ok 'settings.local.json sets GH_TOKEN; the sandbox sees a copy without them' -- en enter "$ep_" -- true

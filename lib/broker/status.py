@@ -39,11 +39,11 @@ def job_rows(broker):
     return out
 
 
-def host_state(job):
-    """A host job's state from lib/broker/host.py, when this harness has it; None when it has not."""
+def host_state(job, broker):
+    """A host job's state from lib/broker/host.py (it takes the broker); None when it cannot say."""
     try:
         from broker import host
-        got = host.state(job)
+        got = host.state(job, broker)
     except (ImportError, AttributeError, OSError, ValueError):
         return None
     return got.get("state") if isinstance(got, dict) else got
@@ -107,7 +107,7 @@ def facts(broker):
     running, failed = [], None
     for job, run, backend, _ in rows:
         if backend == "host":
-            state = host_state(job)
+            state = host_state(job, broker)
             if state in HOST_LIVE:
                 running.append({"id": job, "run": run, "state": "RUNNING", "elapsed": "", "limit": "", "backend": "host"})
             continue

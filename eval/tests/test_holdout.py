@@ -263,9 +263,9 @@ class T3(unittest.TestCase):
         self.addCleanup(shutil.rmtree, root)
         shutil.copytree(T3_DIR, os.path.join(root, "old"))
         old = os.path.join(root, "old", "build.py")
-        shown = git("-C", REPO, "show", "origin/feat/v8:eval/tasks/t3-entity-overlap/build.py", check=False)
+        shown = git("-C", REPO, "show", "origin/main:eval/tasks/t3-entity-overlap/build.py", check=False)
         if shown.returncode:
-            self.skipTest("origin/feat/v8 is not in this clone")
+            self.skipTest("origin/main is not in this clone")
         with open(old, "w") as f:
             f.write(shown.stdout)
         for script, out in ((old, "a"), (os.path.join(T3_DIR, "build.py"), "b")):

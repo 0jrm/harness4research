@@ -4,8 +4,8 @@
 # the episodes under eval/ all start here (design increment 4).
 #
 # Always: its own user, PID, IPC, UTS and network namespaces (loopback only, so no host network), /usr and /etc
-# read-only, its own /proc and /dev (no GPUs), /tmp and /run in memory at 1 GiB each, a cleared environment, and per
-# process caps of 4 GiB per file and 32 GiB of address space. Nothing else of the host exists inside unless an option
+# read-only, its own /proc and /dev (GPUs only through --gpu), /tmp and /run in memory at 1 GiB each, a cleared
+# environment, and per process caps of 4 GiB per file and 32 GiB of address space. Nothing else of the host exists inside unless an option
 # binds it, so the host's home, ~/.ssh, ~/.config/gh, ~/.config/guard, /run/user/$UID (ssh-agent, dbus), /run/munge
 # (without which a real sbatch cannot authenticate), other sockets and the broker's state are all absent.
 #
@@ -36,6 +36,7 @@
 #   --hide PATH         with --probe: a host path the sandbox must not reach
 #   --relay PORT[:NAME] 127.0.0.1:PORT inside carries each connection to /run/guard/NAME (default net.sock, the
 #                       broker's proxy; model.sock is its model gateway); repeatable
+#   --gpu N             /dev/nvidiaN read-write, with the shared nvidia control devices that exist; repeatable
 #   --as BYTES|none     the address-space cap, per process
 #   --mem BYTES         the memory of all processes together, in the scope (default: half this host's, at most 32 GiB)
 #   --tasks N           the processes and threads allowed (default 512)
@@ -48,7 +49,7 @@ arity() { [ "$1" -ge "$2" ] || die "$3 takes $(($2 - 1)) value(s)"; }
 
 argv=("$@")
 user=${USER:-$(id -un)} host=$(hostname 2>/dev/null || uname -n) home=/ chdir="" tty=1 probe=0 relays=() print=0
-as=$((32 << 30)) binds=() envs=() path=() hide=() ro_paths=(/usr /etc) socks=() home_src=""
+as=$((32 << 30)) binds=() envs=() path=() hide=() ro_paths=(/usr /etc) socks=() home_src="" gpus=()
 mem=$(($(awk '/^MemTotal:/ { print $2 }' /proc/meminfo) << 9)) tasks=512 record=""
 [ "$mem" -le $((32 << 30)) ] || mem=$((32 << 30))
 while [ $# -gt 0 ]; do
@@ -71,6 +72,9 @@ while [ $# -gt 0 ]; do
     --hide) arity $# 2 "$1"; hide+=("$2"); shift 2 ;;
     --relay) arity $# 2 "$1"; [[ $2 =~ ^[0-9]+(:[a-z]+\.sock)?$ ]] || die "--relay takes PORT or PORT:NAME.sock"
       relays+=("$2"); shift 2 ;;
+    --gpu) arity $# 2 "$1"; [[ $2 =~ ^[0-9]+$ ]] || die "--gpu takes a device index"
+      [ -e "/dev/nvidia$2" ] || die "no /dev/nvidia$2 on this host"
+      [[ " ${gpus[*]} " == *" /dev/nvidia$2 "* ]] || gpus+=("/dev/nvidia$2"); shift 2 ;;
     --as) arity $# 2 "$1"; as=$2; shift 2 ;;
     --mem) arity $# 2 "$1"; [[ $2 =~ ^[0-9]+$ ]] || die "--mem takes bytes"; mem=$2; shift 2 ;;
     --tasks) arity $# 2 "$1"; [[ $2 =~ ^[0-9]+$ ]] || die "--tasks takes a count"; tasks=$2; shift 2 ;;
@@ -140,6 +144,12 @@ args=(
   --proc /proc --dev /dev "${tmpfs[@]}"
 )
 [ -e /lib64 ] && args+=(--symlink usr/lib64 /lib64)
+if [ ${#gpus[@]} -gt 0 ]; then
+  for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia-caps; do
+    [ ! -e "$d" ] || gpus+=("$d")
+  done
+fi
+for d in "${gpus[@]}"; do args+=(--dev-bind "$d" "$d"); done
 args+=(
   "${binds[@]}"
   --ro-bind "$here/box_inside.sh" /run/box/inside.sh
@@ -162,6 +172,7 @@ inner+=(-- "$@")
 checks=()
 for p in "${ro_paths[@]}"; do checks+=(ro "$p"); done
 for p in "${socks[@]}"; do checks+=(sock "$p"); done
+for p in "${gpus[@]}"; do checks+=(gpu "$p"); done
 [ -z "$home_src" ] || checks+=(home_ino "$(stat -L -c %i -- "$home_src")")
 for p in "${hide[@]}"; do
   id=$(stat -L -c %d:%i -- "$p" 2>/dev/null) || continue
