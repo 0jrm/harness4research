@@ -49,6 +49,11 @@ def bullet(text, labels):
             return m.group(2).strip()
     return ""
 
+def guard_run_cause(text):
+    """The cause of an incident guard run --cause wrote: job: <id> lines, a blank line, then the agent's text."""
+    head, sep, rest = (text or "").partition("\n\n")
+    return rest.strip() if sep and all(l.startswith("job:") for l in head.splitlines()) else ""
+
 def unset(v):
     return v is None or v == "" or bool(re.fullmatch(r"<[^>]*>", v))
 
@@ -275,6 +280,9 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
     names = {f.split("/")[1] for f in files | loose if f.startswith("runs/") and f.count("/") >= 2}
     if worktree and os.path.isdir(os.path.join(top, "runs")):
         names |= {d for d in os.listdir(os.path.join(top, "runs")) if os.path.isdir(os.path.join(top, "runs", d))}
+    # guard run's records branch per run (design-v8 section 3): the broker's CardRecord and the incidents --cause wrote
+    run_refs = {ref.split("/", 2)[2]: ref for ref in ahead_refs if ref.startswith("origin/run/") and ref.count("/") == 2}
+    names |= set(run_refs)
     names = sorted(r for r in names - {"_template"} if not globs or any(fnmatch.fnmatchcase(r, g) for g in globs))
 
     def read(path):
@@ -292,12 +300,15 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
         committed = sorted(f for f in files if f.startswith(d))
         uncommitted = sorted(f for f in loose if f.startswith(d))
         paths = sorted(set(committed) | set(uncommitted))
+        run_ref = run_refs.get(rid)
+        on_ref = sorted(f for f in elsewhere.get(run_ref, ()) if f.startswith(d) and f not in paths) if run_ref else []
         card_path = d + "question.card"
-        card_from = "here" if card_path in paths else base if card_path in elsewhere[base] else None
-        card = kv(read(card_path) if card_from == "here" else show(top, base, card_path) if card_from else None)
+        card_from = ("here" if card_path in paths else base if card_path in elsewhere[base]
+                     else run_ref if card_path in on_ref else None)
+        card = kv(read(card_path) if card_from == "here" else show(top, card_from, card_path) if card_from else None)
         on_disk = worktree and os.path.isfile(os.path.join(top, card_path))
         blob = (git(top, "hash-object", card_path) if on_disk else
-                git(top, "rev-parse", f"{'HEAD' if card_from == 'here' else base}:{card_path}", ok=True)) or ""
+                git(top, "rev-parse", f"{'HEAD' if card_from == 'here' else card_from}:{card_path}", ok=True)) or ""
         execution = None
         if d + "execution.tsv" in paths:
             header_ok, rows = ledger(read(d + "execution.tsv"))
@@ -311,13 +322,14 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
                 manifests.append(m)
         manifests.sort(key=lambda m: m.get("time", ""))
         incidents = []
-        for f in paths:
+        for f in paths + on_ref:
             if "/incidents/" in f and f.endswith(".md"):
-                text = read(f); i = kv(text)
-                cause = i.get("root_cause") if not unset(i.get("root_cause")) else bullet(text, ("cause", "root cause"))
+                text = show(top, run_ref, f) if f in on_ref else read(f); i = kv(text)
+                cause = (i.get("root_cause") if not unset(i.get("root_cause"))
+                         else bullet(text, ("cause", "root cause")) or guard_run_cause(text))
                 fix = i.get("fix") if not unset(i.get("fix")) else bullet(text, ("fix",))
                 incidents.append({"path": f, "job": i.get("job", ""), "root_cause": cause, "fix": fix,
-                                  "time": born(f, commits(top, f))})
+                                  "time": born(f, commits(top, f, run_ref if f in on_ref else "HEAD"))})
         stray = [f for f in paths if re.fullmatch(re.escape(d) + r"incident[^/]*\.md", f)]
         report_text = read(d + "report.md") if d + "report.md" in paths else None
         report = None
@@ -333,6 +345,8 @@ def collect(top, base, run_ripples=True, worktree=True, globs=(), given_code=Non
         hist, frozen_on = commits(top, card_path), "HEAD"
         if not hist and card_path in elsewhere[base]:
             hist, frozen_on = commits(top, card_path, base), base
+        if not hist and card_from == run_ref and run_ref:
+            hist, frozen_on = commits(top, card_path, run_ref), run_ref
         runs.append({"id": rid, "card": card, "card_blob": blob.strip(), "card_from": card_from,
                      "card_history": hist, "card_frozen_on": frozen_on if hist else None,
                      "manifests": manifests, "incidents": incidents, "stray_incidents": stray, "execution": execution, "report": report,
@@ -528,9 +542,14 @@ def violations(r, base, behind):
     for i in r["incidents"]:
         if unset(i["root_cause"]):
             out.append(f"{i['path'].split('/')[-1]} names no root cause")
-    if not explore and unset(r["card"].get("partner_metric")):
+    if not explore and not broker_card(r["card"]) and unset(r["card"].get("partner_metric")):
         out.append("no partner metric, so doing less could satisfy the metric")
     return out
+
+def broker_card(card):
+    """A CardRecord, the card guard run writes on run/<run_id> (schema 8), rather than a v7 question card."""
+    return "written_by" in card
+
 
 def severity(r):
     seen = {l["status"] for l in r["ripples"]}

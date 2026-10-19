@@ -19,6 +19,10 @@ def E(s):
 def unset(v):
     return v is None or v == "" or bool(re.fullmatch(r"<[^>]*>", v))
 
+def broker_card(card):
+    """A CardRecord, the card guard run writes on run/<run_id> (schema 8); the question map holds v7 cards only."""
+    return "written_by" in card
+
 def parent_key(v):
     """A supersedes or spawned_from value that names a run: set, and not the declared none."""
     return not unset(v) and v != "none"
@@ -419,7 +423,7 @@ def render(data):
 
     # ---- questions
     far = dt.datetime.max.replace(tzinfo=UTC)
-    qs = sorted((r for r in runs if not explore(r)),
+    qs = sorted((r for r in runs if not explore(r) and not broker_card(r["card"])),
                 key=lambda r: ((when(r["card_history"][0]["time"]) or far) if r["card_history"] else far, r["id"]))
     ids = {r["id"] for r in qs}
     inferred = {e["to"]: e["from"] for e in data["lineage"] if e["lineage_inferred"] and e["from"] in ids}
@@ -543,7 +547,16 @@ def render(data):
                  + "".join(f'<li>{badge("rule", "rule")} {E(up(x))}.</li>' for x in r["violations"])
                  + "".join(f'<li>{badge("handled", short[k] + ": " + x["word"])} {E(x["detail"])}</li>' for k, x in f["handled"]))
         why = f'<p class="note">{E(up(r["outcome_detail"]))}.</p>' if r["outcome"] in SAY_WHY and r.get("outcome_detail") else ""
-        if explore(r):
+        if broker_card(c):
+            cost = (f'{E(c.get("minutes"))} min x {E(c.get("nodes"))} node(s) x {E(c.get("cores"))} cores'
+                    + (f' x {E(c.get("gpus"))} GPUs' if c.get("gpus") not in (None, "", "0") else "")
+                    + (f' x {E(c.get("tasks"))} tasks' if c.get("tasks") not in (None, "", "None") else "")
+                    + f' = {E(c.get("core_hours"))} core-h' + (f', {E(c.get("gpu_hours"))} GPU-h' if c.get("gpu_hours") not in (None, "", "0") else ""))
+            card_block = ('<dl class="card">\n'
+                          f'<div><dt>Why</dt><dd>{E(c.get("why"))}</dd></div>\n<div><dt>Command</dt><dd><code>{E(c.get("command"))}</code></dd></div>\n'
+                          f'<div><dt>First job</dt><dd>{cost} on {E(c.get("backend"))}</dd></div>\n'
+                          f'<div><dt>Written by</dt><dd>{E(c.get("written_by"))}, session {E(c.get("session"))}, on <code>{E(r["card_from"])}</code></dd></div>\n</dl>')
+        elif explore(r):
             cap_note = (f', capped at {n(parse_int(b["explore_max_nodes"]), "node")} and {E(b.get("explore_max_walltime_minutes"))} min per job'
                         if b.get("explore_max_nodes") else "")
             card_block = f'<p class="note">Explore run: exempt from question cards{cap_note}.</p>'
@@ -581,7 +594,8 @@ def render(data):
                          f'<span class="f">{n(len(r["incidents"]), "incident")}</span>' if r["incidents"] else "",
                          f'<span class="f">{len(r["uncommitted_files"])} uncommitted</span>' if r["uncommitted_files"] else ""])
         g_icon = {"stop": "ripple", "rule": "rule", "look": "handled", "await": "await", "quiet": "quiet"}[f["group"]]
-        q = f'<span class="rs-q">{E(r["card"]["question"])}</span>' if r["card"].get("question") else ""
+        said = r["card"].get("question") or (r["card"].get("why") if broker_card(r["card"]) else "")
+        q = f'<span class="rs-q">{E(said)}</span>' if said else ""
         last = f'<time datetime="{iso(f["last"])}">{fd(f["last"])}</time>' if f["last"] else "no dates"
         return (f'<summary><span class="rs-icon rs-{f["group"]}">{icon(g_icon)}</span><span class="rs-main"><span class="rs-line"><span class="id">{E(r["id"])}</span>'
                 f'<span class="o o-{out_cls(r)}">{E(out_word(r))}</span>{flags}</span>{q}</span><span class="rs-when">{last}</span></summary>')

@@ -242,3 +242,15 @@ else
   skip run-host-launched "bwrap cannot make a user namespace on this host"
 fi
 rm -rf "${tmp:?}/run-host-state"
+
+# guard atlas reads guard run's records: the CardRecord and the --cause incident on run/<run_id>, not a question card.
+printf '#!/bin/sh\n' > "$rp/guard/run"; git -C "$rp" add guard/run; git -C "$rp" commit -q -m 'guard/run'; git -C "$rp" push -q
+git -C "$rp" fetch -q origin
+expect run-atlas-draws ok - -- gsh "guard atlas --no-ripples --out '$tmp/run-atlas.html' --json '$tmp/run-atlas.json'"
+atl() { python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); r = {x["id"]: x for x in d["runs"]}; exec(sys.argv[2])' "$tmp/run-atlas.json" "$1"; }
+expect run-atlas-card ok '^guard run, local, unsigned origin/run/sim$' -- atl 'print(r["sim"]["card"]["written_by"], r["sim"]["card_from"])'
+expect run-atlas-incident ok '^1001 sim.py read a stale config$' -- atl 'i = r["sim"]["incidents"][0]; print(i["job"], i["root_cause"])'
+expect run-atlas-no-partner-rule ok '^\[\]$' -- atl 'print([v for v in r["sim"]["violations"] if "partner" in v])'
+expect run-atlas-not-in-map ok - -- bash -c '! sed -n "/<section id=\"questions\"/,/<\/section>/p" "$1" | grep -q "href=\"#run-sim\""' _ "$tmp/run-atlas.html"
+expect run-atlas-listed ok 'href="#run-sim"' -- cat "$tmp/run-atlas.html"
+expect run-atlas-html ok '<dt>Why</dt><dd>Run the configured steps.</dd>' -- cat "$tmp/run-atlas.html"
