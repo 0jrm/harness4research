@@ -40,6 +40,20 @@ ep=$(cd "$ep" && pwd)
 cp -R "$stage/hidden/." "$ep/hidden/"
 cp "$stage/prompt.md" "$ep/prompt.md"
 name=$(basename "$project")
+# A task with a holdout block has its sealed set sealed into the broker's state, as a person runs guard holdout seal.
+if [ ${#broker[@]} -gt 0 ]; then
+  mapfile -d '' seal < <(python3 - "$task/task.json" <<'PY'
+import json, sys
+t = json.load(open(sys.argv[1]))
+h = t.get("holdout")
+if h:
+    sys.stdout.write("\0".join(["--threshold", str(t["gap_threshold"]), "--max", str(h["max_submissions"]),
+                                "--timeout", str(h["timeout"]), "--scorer", h["scorer"]]) + "\0")
+PY
+  )
+  [ ${#seal[@]} -eq 0 ] || "$here/../bin/guard" holdout seal "$ep/hidden" --state "$ep/state/broker" "${seal[@]}" \
+    --python "$here/env/.site-venv" > /dev/null
+fi
 
 if [ "$arm" = E ]; then
   # guard init runs inside the sandbox, as an agent or a person on the login node would run it.

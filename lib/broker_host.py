@@ -253,10 +253,10 @@ class Host:
         session = Session(sid, path, project, str(req.get("agent")), net, req.get("pid"))
         session.record = os.path.join(private_dir(os.path.join(self.state, "limits")), f"s-{sid}.jsonl")
         sched = sockets.bind(os.path.join(path, "scheduler.sock"), "scheduler", broker,
-                            lambda r, reply: self.logged(sid, "scheduler", r, reply))
+                             lambda r, reply: self.logged(sid, "scheduler", r, reply), session=sid)
         self.serve_socket(session, "scheduler", sched)
         recs = sockets.bind(os.path.join(path, "records.sock"), "records", broker,
-                            lambda r, reply: self.logged(sid, "records", r, reply))
+                            lambda r, reply: self.logged(sid, "records", r, reply), session=sid)
         self.serve_socket(session, "records", recs)
         if net:
             proxy = sockets.Server(os.path.join(path, "net.sock"), Connect)

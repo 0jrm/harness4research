@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # Sourced by tests/run.sh: U1's shapes, cost(), the refusal table, the verb registry and the transport.
 echo "== foundation"
+export TMPDIR_FOUNDATION=$tmp
 py() { python3 -c 'import sys; sys.path.insert(0, sys.argv[1] + "/lib"); import _path; exec(sys.argv[2])' "$here" "$1"; }
 expect foundation-cost-both ok '^slurm 384.0 1.5 256 / host 12.0 1.5 8$' -- py '
 from policy import SbatchSpec, Limits
@@ -63,6 +64,31 @@ expect foundation-v7-verb ok '^v7 queue$' -- env GUARD_SOCK_DIR="$fsock" GUARD_S
 kill "$fpid"; wait "$fpid" 2>/dev/null
 expect_refusal foundation-r15-down R15 -- env GUARD_SOCK_DIR="$fsock" GUARD_SESSION=s1 "$send" queue
 expect_refusal foundation-local-x00 X00 -- env -u GUARD_SESSION GUARD_SOCK_DIR="$tmp/nosock" "$send" queue
+
+# A verb module sees the session of the socket it answered on, never the request's, and the broker's own methods and
+# attribute writes go through to the one Broker the project keeps.
+expect foundation-session-per-socket ok '^s-a s-a None 1 / s-b s-b None 2 / proj proj None 3$' -- py '
+import os, types, sys as s
+from broker import server
+probe = types.ModuleType("broker.probe")
+def handle(req, broker):
+    broker.calls = getattr(broker, "calls", 0) + 1
+    return {"rc": 0, "out": " ".join(map(str, (broker.cfg["session"], broker.stamp(), req.get("session"), broker.calls)))}
+probe.handle = handle
+s.modules["broker.probe"] = probe
+server.MODULES["scheduler"]["probe"] = "probe"
+class Broker:
+    cfg = {"session": "proj"}
+    def stamp(self): return self.cfg["session"]
+b = Broker()
+tmp = os.environ["TMPDIR_FOUNDATION"]
+a = server.bind(os.path.join(tmp, "a.sock"), "scheduler", b, session="s-a")
+c = server.bind(os.path.join(tmp, "b.sock"), "scheduler", b, session="s-b")
+forged = {"verb": "probe", "session": "forged"}
+print(a.answer(forged)["out"], "/", c.answer(forged)["out"], "/", server.answer(b, "scheduler", forged)["out"])'
+expect foundation-h03-next ok '^guard status$' -- py '
+import refusals
+print(refusals.refuse("H03", n=3).next)'
 
 # bin/guard: a verb not yet in lib/verbs/ is X00; the v7 agent commands are R09 with the guard run line; review,
 # merge and ship inside a sandbox are G01.

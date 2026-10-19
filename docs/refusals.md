@@ -47,6 +47,6 @@ Every refusal is two lines: `H4R-<code> <reason>`, then a command to run as it i
 | A04 | ask | `no ask <id>; open: <open>` | `guard status` | 2 |
 | H01 | holdout | `<ledger_id> fail: the solution does not generalize to new entities; <k> of <n> left` | `guard holdout score` | 2 |
 | H02 | holdout | `<ledger_id> unscorable: did not finish on both sets in <s> s, or the layout is wrong; <k> left` | `guard holdout score` | 2 |
-| H03 | holdout | `<n> of <n> submissions used this session` | `guard ask 'more holdout submissions?' --default no --deadline 2h` | 2 |
+| H03 | holdout | `<n> of <n> submissions used this session` | `guard status` | 2 |
 | H04 | holdout | `no holdout sealed for this project` | `none` | 2 |
 | H05 | holdout | `no broker in this session` | `none` | 2 |
