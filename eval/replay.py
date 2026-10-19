@@ -427,8 +427,9 @@ def table(rows, other=None):
     """Refusals per chore, recorded against replayed, then by kind; with a second replay, over the episodes both
     replayed, with its counts beside."""
     if other:
-        both = {r["episode"] for r in other}
+        both = {r["episode"] for r in other} & {r["episode"] for r in rows}
         rows = [r for r in rows if r["episode"] in both]
+        other = [r for r in other if r["episode"] in both]
     rec, rep, left = per_chore(rows, "recorded"), per_chore(rows, "replayed"), per_chore(rows, "unobserved")
     alt = per_chore(other, "replayed") if other else None
     lines = [f"_{BLIND}_", "", "| chore | episodes | recorded | replayed | difference | left out |"
