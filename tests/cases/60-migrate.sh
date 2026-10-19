@@ -72,6 +72,7 @@ expect_refusal migrate7-preflight-r09 R09 -- guard/run preflight runs/x job.sh
 expect_refusal migrate7-ripples-r09-without-guard R09 -- env PATH="$(path_without guard)" guard/run ripples runs/x
 expect_refusal migrate7-launch-r09 R09 -- env HPC_HARNESS="$here" guard/run launch runs/x --time=10 --gpus=0,1 --mem=8 -- python3 train.py
 expect migrate7-launch-r09-guard-run-line ok '^guard run runs/x .*-- .*--gpus=2.* python3 train\.py$' -- bash -c 'env HPC_HARNESS="$1" guard/run launch runs/x --time=10 --gpus=0,1 --mem=8 -- python3 train.py 2>&1 | sed -n 2p' _ "$here"
+expect_refusal migrate7-card-r09 R09 -- env HPC_HARNESS="$here" guard/run card add runs/x/question.card
 expect_refusal migrate7-launch-stop-r09 R09 -- env HPC_HARNESS="$here" guard/run launch --stop host-20261019T000000Z
 expect_refusal migrate7-launch-r09-without-guard R09 -- env -u HPC_HARNESS PATH="$(path_without guard)" guard/run launch runs/x --time=10 --gpus=none --mem=8 -- python3 train.py
 expect migrate7-show-gone fail '^usage: guard/run <fence\|code\|manifest\|receipts-check>' -- guard/run --show fence

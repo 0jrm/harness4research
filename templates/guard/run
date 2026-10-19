@@ -9,7 +9,8 @@
 # A card without harness: belongs to a project installed before the pin, whose scripts are guard/bin/ on the protected
 # branch. HPC_GUARD_REF names the protected branch. HPC_GUARD_LOCAL=1 runs the working-tree copy instead (this working
 # tree's card and vendored file, or the clone's lib/guard/), for the bootstrap before guard/ is merged.
-# preflight, ripples and launch are gone in schema 8: each prints refusal R09 with the guard run line to use instead.
+# preflight, ripples, launch and card are gone in schema 8: each prints refusal R09 with the guard run line to use
+# instead.
 # --show receipts-check prints that script instead of running it, for the fence, which runs it under its own name.
 set -euo pipefail
 show=0; if [ "${1:-}" = --show ] && [ "${2:-}" = receipts-check ]; then show=1; shift; fi
@@ -17,7 +18,7 @@ cmd=${1:-}; shift || true
 base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
 case $cmd in
   manifest|fence|code|receipts-check) ;;
-  preflight|ripples|launch)
+  preflight|ripples|launch|card)
     clone=${HPC_HARNESS:-}
     if [ -z "$clone" ] && g=$(command -v guard); then clone=$(dirname "$(dirname "$(readlink -f "$g")")"); fi
     if [ -n "$clone" ] && [ -f "$clone/lib/refusals.py" ]; then exec python3 "$clone/lib/refusals.py" old "$cmd" "$@"; fi
