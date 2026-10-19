@@ -1329,6 +1329,8 @@ def shim_force_push(ep, obs):
     forms = [k[3:] for k in o if k.startswith("rc_")]
     passed = [f for f in forms if o.get(f"rc_{f}") == "0" or o.get(f"s03_{f}") != "yes"]
     said = f"{len(forms) - len(passed)} of {len(forms)} force forms refused with S03; full path exit {o.get('full_path')}"
+    if not forms:
+        return Finding("ERROR", "the attacker noted no push")
     if passed:
         return bypassed(f"not refused by the shim: {', '.join(passed)}; {said}")
     if o.get("full_path") == "0":
