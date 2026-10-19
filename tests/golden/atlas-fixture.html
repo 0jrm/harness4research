@@ -363,7 +363,7 @@ footer{margin-top:var(--s8);font-size:var(--t-xs);color:var(--sound);border-top:
 <div><dt>Protected branch</dt><dd><code>origin/main</code> at <code>COMMIT</code></dd></div>
 <div><dt>Runs read at</dt><dd>HEAD <code>COMMIT</code> plus the working tree (4 uncommitted files)</dd></div>
 <div><dt>Code repositories</dt><dd><code>casts-loader</code> at <code>/FIXTURE/casts-loader</code></dd></div>
-<div><dt>Guard version</dt><dd>schema 7, release v0.0-golden</dd></div>
+<div><dt>Guard version</dt><dd>schema 8, release v0.0-golden</dd></div>
 <div><dt>Spend source</dt><dd>core-hours from sacct, through the budget ripple</dd></div>
 <div><dt>Checkout</dt><dd><code>/FIXTURE/casts-v4-training</code></dd></div>
 </dl>
@@ -373,7 +373,7 @@ footer{margin-top:var(--s8);font-size:var(--t-xs);color:var(--sound);border-top:
 <section id="compute" aria-labelledby="compute-h"><h2 id="compute-h">Compute and budget</h2>
 <p class="lede">Where compute ran, read from job manifests, and what fence stood around it.</p>
 <div class="hosts"><article class="host host-fenced"><header><h3>Slurm cluster</h3><span class="fence fence-fenced"><svg class="i" aria-hidden="true"><use href="#i-pass"/></svg>Fenced</span><span class="host-count">4 nodes, 5 runs</span></header><p>Account gom: guard run prices each job, and a capped sub-account.</p></article><article class="host host-open"><header><h3>skynet</h3><span class="fence fence-open"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>No fence</span><span class="host-count">2 runs</span></header><p>Not in launch_hosts: compute here passed no gate. hand-run is placed here only by execution.tsv rows: recorded by hand, not by a scheduler, and not counted in the budget.</p><p class="host-runs idlist"><a class="id" href="#run-explore-07">explore-07</a><a class="id" href="#run-hand-run">hand-run</a></p></article></div>
-<dl class="kv kv-limits"><div><dt>Account</dt><dd>gom</dd></div><div><dt>Per job</dt><dd>2 nodes, 240 min walltime</dd></div><div><dt>Concurrent jobs</dt><dd>4</dd></div><div><dt>Explore runs</dt><dd>1 node, 60 min</dd></div><div><dt>Handled failures per run</dt><dd>2</dd></div><div><dt>Disk quota used</dt><dd>41%</dd></div></dl>
+<dl class="kv kv-limits"><div><dt>Account</dt><dd>gom</dd></div><div><dt>Per job</dt><dd>2 nodes, 240 min walltime</dd></div><div><dt>Concurrent jobs</dt><dd>4</dd></div><div><dt>Disk quota used</dt><dd>41%</dd></div></dl>
 </section>
 <section id="checks" aria-labelledby="checks-h"><h2 id="checks-h">Safety checks</h2>
 <p class="lede">Each run’s safety checks, read from the protected branch, sacct and the run’s <code>checks/</code>, from this checkout. Runs with something other than a pass come first.</p>
@@ -419,7 +419,7 @@ footer{margin-top:var(--s8);font-size:var(--t-xs);color:var(--sound);border-top:
 <nav class="jump" aria-label="Run groups"><a href="#runs-stop">Stop: a ripple fired <b>2</b></a><a href="#runs-rule">A rule was broken <b>4</b></a><a href="#runs-await">Awaiting a report <b>6</b></a><a href="#runs-quiet">Nothing flagged <b>2</b></a></nav><section class="rgroup" id="runs-stop" aria-labelledby="runs-stop-h"><h3 id="runs-stop-h">Stop: a ripple fired <span class="n">2</span></h3>
 <details class="run" id="run-explore-07" open><summary><span class="rs-icon rs-stop"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg></span><span class="rs-main"><span class="rs-line"><span class="id">explore-07</span><span class="o o-explore">explore</span><span class="f f-stop">1 ripple</span><span class="f f-rule">1 rule break</span></span><span class="rs-q">Does the loader stall on the new disk?</span></span><span class="rs-when"><time datetime="2026-09-22T11:05:00.000Z">Sep 22</time></span></summary><div class="run-body">
 <ul class="probs"><li><span class="b b-ripple"><svg class="i" aria-hidden="true"><use href="#i-ripple"/></svg>jobs: failed, no incident</span> job 4840 FAILED</li><li><span class="b b-rule"><svg class="i" aria-hidden="true"><use href="#i-rule"/></svg>rule</span> incident.md is a write-up not where the guard looks; move it to incidents/&lt;date&gt;-&lt;job&gt;.md.</li></ul>
-<p class="note">Explore run: exempt from question cards, capped at 1 node and 60 min per job.</p>
+<p class="note">Explore run: exempt from question cards.</p>
 <figure class="tl"><div class="tl-grid" aria-hidden="true"><div class="tl-labels"><span>card</span><span>jobs</span></div>
 <div class="tl-plot" style="--rows:2"><span class="tl-before tl-before-hit" style="width:12.12%"></span><span class="tl-freeze" style="left:12.12%"><em>card frozen Sep 22, 11:05 · after: compute allowed →</em></span>
 <div class="tl-lane"><span class="tl-cardbar" style="left:12.12%"></span></div><div class="tl-lane"><span class="m m-job" style="left:4.55%"></span></div></div>
