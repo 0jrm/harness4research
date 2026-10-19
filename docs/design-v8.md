@@ -60,15 +60,21 @@ Invocation  {run_id, why, cause?, options[], script, args[], cwd, session, ts}  
 SbatchSpec  {time_min, nodes=1, tasks?, cpus_per_task?, mem?, gpus=0, array_n=1, partition?, dependency?, output?}
                                                                                     argv over #SBATCH lines; the allowlist of today's FIELDS, nothing else
 Limits      {account, cores_per_node, max_walltime_minutes, max_nodes_per_job, max_concurrent_jobs, max_core_hours,
-             verification_reserve_core_hours, max_gpu_hours, compute[], holdout_max_submissions=3, ask_deadline=30m}
+             verification_reserve_core_hours, max_gpu_hours, compute[], holdout_max_submissions=3, ask_deadline=30m,
+             launch_hosts[], host_max_walltime_minutes, host_max_mem_gb, host_min_available_gb, host_stop_grace_seconds, host_state_dir}
                                                                                     guard/budget.card on the broker's mirror of main, never the checkout
-Cost        {minutes, nodes, cores_per_node, gpus, tasks, core_hours, gpu_hours}    E6b: core_hours = minutes×array_n/60 × nodes × cores_per_node (question 2)
-LedgerView  {spent_core_hours, queued_core_hours, live_jobs[], run_jobs{run_id: [JobRow]}, open_asks[]}   from sacct, squeue and the broker's ledger
+Backend     slurm | host                                                            host when `hostname -s` is in launch_hosts, else slurm; chosen by decide(), never by the agent
+Cost        {backend, minutes, nodes, cores, gpus, tasks, core_hours, gpu_hours}    slurm (E6b): core_hours = minutes×array_n/60 × nodes × cores_per_node, cores = cores_per_node
+                                                                                    host: core_hours = minutes/60 × cores, cores = cpus_per_task or 1; gpu_hours = minutes/60 × gpus, against max_gpu_hours
+LedgerView  {spent_core_hours, queued_core_hours, spent_gpu_hours, live_jobs[], run_jobs{run_id: [JobRow]}, open_asks[],
+             host{available_gb, gpus_free, bwrap}}                                  from sacct, squeue, the broker's ledger, and host.py's records for host jobs
 Decision    {verdict: run|queue|refuse, code?, reason?, next?, job_id?, ask_id?}     code, reason and next are set unless verdict is run
 CardRecord  why, command, minutes, nodes, cores_per_node, gpus, tasks, core_hours, gpu_hours, session, written_by
                                                                                     E6b's runs/<run_id>/question.card on branch run/<run_id>, signed by the broker, written once
 Incident    job: <id> lines, blank line, cause                                      E6b's runs/<run_id>/incidents/<n>.md on run/<run_id>
-JobRow      {seq, job_id, run_id, state: intent|submitted|failed|lost, submitted_ts, why, cost, comment}   today's ledger.jsonl row, plus why and cost
+JobRow      {seq, job_id, run_id, backend, state: intent|submitted|failed|lost, submitted_ts, why, cost, comment}
+                                                                                    today's ledger.jsonl row plus backend, why and cost; a host job_id is launch.sh's <host>-<UTC %Y%m%dT%H%M%SZ>,
+                                                                                    and its live state is derived from <host_state_dir>/<job_id>/{request,start,beat,end,stop} as today
 LedgerRow   {id, ts, kind: holdout|ask|refusal|job, run_id?, session, fields{}}    records/ledger.jsonl; id = "L" + first 10 hex of sha256(ts, kind, json(fields))
 AskRecord   {id, question, default, deadline, due_ts, asked_ts, session, answer?, answered_by?: human|unattended, answered_ts?}
                                                                                     E11's asks.jsonl events folded into one row per id; id is the needs-you item id
@@ -86,7 +92,11 @@ Invariants, each with the record it answers:
   running is refused (R11) with `guard wait <job_id>`. E2b seed 1.
 - A `run_id` whose last job ended `TIMEOUT`, `FAILED`, `OUT_OF_MEMORY`, `NODE_FAIL` or `PREEMPTED` with no `Incident`
   needs `--cause` (R05). The cause becomes the incident, as E6b does. This replaces the ripples incident rule.
-- `LedgerView` comes from `sacct`, `squeue` and the broker's ledger. The agent states no number that enters a decision.
+- `LedgerView` comes from `sacct`, `squeue`, the broker's ledger and, on a launch host, `lib/broker/host.py`'s
+  records. The agent states no number that enters a decision.
+- The backend is a fact of the host, not a flag: the same `guard run` line submits to Slurm on a login node and
+  launches under a supervisor on a host in `launch_hosts` (owner, 2026-10-19). A host job's `--time`, `--gpus`,
+  `--mem` and `--cpus-per-task` are the same sbatch spellings; `launch.sh` already accepts them.
 - A `LedgerRow.id` satisfies the fence rule `evidence-paths` wherever a backticked path does (A12).
 - A `Decision` with `verdict: queue` creates an `AskRecord` with `default: stop` and `deadline: ask_deadline`; if a
   human answers `yes` before `due_ts`, the broker submits the job itself and `guard status` shows it. An unanswered
@@ -112,15 +122,17 @@ Invariants, each with the record it answers:
 | `lib/broker/asks.py` | E11's `AskRecord`, deadlines, `attend`, the approver hook | yes (local queue file) |
 | `lib/broker/holdout.py` | E7's seal and score, metering, `HoldoutRow`, ledger ids | no (H05) |
 | `lib/broker/status.py` | E9's facts and `render` | yes (local facts only) |
-| `lib/wait.py` | E4b: job id, pid or `-- command`; unbuffered; 5-minute returns | yes |
+| `lib/wait.py` | E4b: job id, pid or `-- command`; unbuffered; 5-minute returns; a non-numeric id is a host job and goes to `host.py` | yes |
+| `lib/broker/host.py` | the `host` backend: `launch(spec, run_dir, cmd) -> job_id`, `state(job_id)`, `log(job_id)`, `stop(job_id)`, `view() -> LedgerView.host`; a thin Python face over `lib/guard/launch.sh` | yes (it is the no-Slurm case) |
+| `lib/guard/launch.sh` | today's supervisor and its records under `host_state_dir`; no longer a `guard/run` subcommand; `--supervise`, `--tick`, `--stop`, `--list`, `--here`, `--sacct`, `--handled` stay as its internal entry points, called by `host.py` only | yes |
 | `lib/broker_host.py`, `lib/enter.py` | serve `records.sock` too; link `guard` to `bin/guard`; set `BASH_ENV`, `PYTHONPATH` and the shim on PATH | |
 | `lib/compute-gate/`, `lib/shim/` | the walls | any shell that sources them |
 | `lib/guard/fence.sh`, `code.sh`, `manifest.sh` | unchanged roles; the fence gains codes and undo lines | yes |
 | `lib/init.sh`, `lib/version.sh`, `SCHEMA` | `guard init`, `--update` from schema 7 | yes |
 
-Without a broker, `guard run` runs the same `decide()` in-process, submits with `slurm_bin/sbatch`, and commits the
-`CardRecord` to `run/<id>` with the user's git; the record says `written_by: guard run, local, unsigned` and `guard
-status` says `no broker`. `guard holdout` refuses (H05): a holdout nobody sealed outside the sandbox is not one.
+Without a broker (owner, 2026-10-19: allowed), `guard run` runs the same `decide()` in-process, submits with
+`slurm_bin/sbatch` or launches through `host.py`, and commits the `CardRecord` to `run/<id>` with the user's git; the
+record says `written_by: guard run, local, unsigned` and `guard status` prints `unsigned: no broker` on its `git:` line. `guard holdout` refuses (H05): a holdout nobody sealed outside the sandbox is not one.
 
 ### Evaluation-only under `eval/`
 
@@ -150,7 +162,7 @@ from the pull request descriptions).
 | Deleted | Record | Migrated in the same change |
 |---|---|---|
 | `templates/runs/_template/question.card`; the agent-authored card and its keys | E1, E2, A2 | `lib/init.sh` stops writing it; `records.card_add` and its template check go; the fence rules `setting-key`, `hypothesis-line` and `no-exploration-reports` go (they judge agent-written keys); `question-cards-frozen` becomes F03; `lib/atlas.py` reads `CardRecord` keys |
-| `lib/guard/preflight.sh`, `lib/guard/ripples.sh`; `preflight`, `ripples`, `launch`, `card` as agent commands; `templates/guard/run`'s dispatch of them | E2, E2b, E6b | their job rules move into `decide.py` (R02 walltime, R03 nodes, R05 cause, R10 concurrency, R11 live job); `lib/atlas.py` reads the ledger; `eval/env/selftest.sh` and `examples/quickstart` use `guard run`; `launch.sh` stays in the tree for `launch_hosts`, not agent-facing (question 5) |
+| `lib/guard/preflight.sh`, `lib/guard/ripples.sh`; `preflight`, `ripples`, `launch`, `card` as agent commands; `templates/guard/run`'s dispatch of them | E2, E2b, E6b | their job rules move into `decide.py` (R02 walltime, R03 nodes, R05 cause, R10 concurrency, R11 live job); `lib/atlas.py` reads the ledger; `eval/env/selftest.sh` and `examples/quickstart` use `guard run`; `launch.sh` becomes the `host` backend behind `guard run` (U8), never agent-facing by name; its ripples-era checks (`--here`, `--sacct`, `--handled`) feed `LedgerView.host` and `guard status` |
 | the agent-stated `budget_core_hours`; `card_auto_max_core_hours`; the signed tag `card/<id>` as an agent step; `approve card`, `revoke card` | plan; E1; E2 seed 10 | the forge's `refuse-tag` and `refuse-unsigned` rows stay for pushes that carry such tags; the audit rows `card-forge-tag` and `records-approve` stay |
 | the `explore-` exemption | A2 (the loophole around the card gate), E2 seed 9 | with no card gate it protects nothing; `explore_max_*` keys are read no more (compatibility note) |
 | the raw `submit` verb; `client.py`'s `guard` path and `guard_script` | E2b | the stand-ins keep `queue acct cancel`; `guard` in the sandbox is `bin/guard` |
@@ -160,8 +172,8 @@ from the pull request descriptions).
 
 | Command | Arguments | Success, one line | Refusals |
 |---|---|---|---|
-| `guard run <run_dir> --why "<sentence>" [--cause "<text>"] -- <sbatch options> <script> [args]` | E6b's grammar; a leading `sbatch`, `bash`, `sh` or `srun` after `--` is dropped | `job <id> submitted for run <run_id>: <min> min x <nodes> node(s) x <cpn> cores = <ch> core-h; guard wait <id>` | R01 to R12 |
-| `guard wait <job_id> | <pid> | -- <command...> [--timeout 5m]` | E4b: a live process of your uid is a pid, any other number a job; `--timeout` at most 5m | last 20 log lines, then `job <id> <A> -> <B>` or `pid <n> exited <c>`; still running: `keep waiting: guard wait <id>` and `stop it: <scancel|kill line>`, exit 124 | W01 to W03 |
+| `guard run <run_dir> --why "<sentence>" [--cause "<text>"] -- <sbatch options> <script> [args]` | E6b's grammar; a leading `sbatch`, `bash`, `sh` or `srun` after `--` is dropped; on a host in `launch_hosts` the same line launches under `launch.sh`'s supervisor, with `--time`, `--gpus`, `--mem`, `--cpus-per-task` read the same way | `job <id> submitted for run <run_id>: <min> min x <nodes> node(s) x <cpn> cores = <ch> core-h; guard wait <id>`; on a host `job <host>-<ts> launched for run <run_id>: <min> min x <cores> cores x <gpus> GPUs = <ch> core-h, <gh> GPU-h; guard wait <id>` | R01 to R14 |
+| `guard wait <job_id> | <pid> | -- <command...> [--timeout 5m]` | E4b: a live process of your uid is a pid, any other number a job; `--timeout` at most 5m | last 20 log lines, then `job <id> <A> -> <B>` or `pid <n> exited <c>`; still running: `keep waiting: guard wait <id>` and `stop it: scancel <id>` (Slurm), `kill <pid>` (pid) or `guard wait --stop <id>` (host job, which runs `launch.sh --stop` with the card's grace), exit 124 | W01 to W03 |
 | `guard ask "<question>" --default <option> --deadline 5m|30m|2h`; `guard ask --status <id>` | E11; the default is `yes`, `no`, or one word the question offers in `[a|b]` brackets | `ask <id> waits for the human, <n> min left; then the default: <d>. Do other work; guard status shows the answer` | A01 to A04 |
 | `guard status` | none | E9's six lines: `running:`, `blocked:`, `last refusal:`, `budget:`, `git:`, `next:` | none; it never refuses |
 | `guard holdout score` | the solution on the current branch; only in a project that sealed one | `holdout <ledger_id> pass; <k> of <N> submissions left` | H01 to H05 |
@@ -192,6 +204,8 @@ E6b numbers; codes are stable, wording is free.
 | R10 | run | `<n> jobs live is max_concurrent_jobs` | `guard wait <oldest job_id>` |
 | R11 | run | `<run_id> has job <id> <STATE>` | `guard wait <job_id>` |
 | R12 | run | `<run_dir> is outside the project` | `cd <project> && guard run ...` |
+| R13 | run, host | `<time> min exceeds host_max_walltime_minutes <m>`, `mem <g> GB exceeds host_max_mem_gb`, or `<gh> GPU-h is over the remaining <r> of max_gpu_hours` | the command with `--time=<m>`, `--mem=<m>G` or `--gpus=<n>` |
+| R14 | run, host | `<host> has <a> GB available under host_min_available_gb <m>`, `no bwrap on <host>`, or `the supervisor did not start: <launch.sh's reason>` | `guard wait <running job>` when one holds the memory, else `guard ask '<host> is short of memory; wait or move hosts?' --default no --deadline 30m` |
 | C01 | compute gate | `<entry> runs only inside a job; guard/budget.card lists it under compute` | `guard run runs/<id> --why 'Run <script> for run <id>.' -- <script>` (E6b) |
 | S01 | shim | `pkill -f <pattern> would kill the model relay` | `pkill -f '<pattern> <script>'` or `kill <pid>` from `guard status` |
 | S02 | shim | `rm -rf <path> is outside <run_dir>` | `rm -rf <run_dir>/<basename>` |
@@ -255,8 +269,10 @@ exactly these files; a test diffs the fixture before and after.
 | `.github/workflows/guard-fence.yml` | the v8 file; name `guard-fence`, job `fence` unchanged | |
 
 Existing `runs/<id>/question.card` files on `main` stay as history; F03 judges added files only, per the fence ratchet.
-`docs/compatibility.md` gains a "removed in schema 8" table (the template, three commands, the `explore_*` keys); that
-breaks its "additions only" line once, on the owner's word (question 1).
+`docs/compatibility.md` gains one "removed in schema 8" table listing every removal (the template, `preflight`,
+`ripples`, `launch` and `card` as commands, the `explore_*` keys, the `submit` verb); the commands are gone, not stubbed
+(owner, 2026-10-19). The launch keys (`launch_hosts`, `max_gpu_hours`, `host_*`) are kept and read, since `guard run`
+launches on those hosts; `host_state_dir` records from v7 stay readable because their format does not change.
 
 ## 9. Tests and gates
 
@@ -266,7 +282,7 @@ breaks its "additions only" line once, on the owner's word (question 1).
 | `tests/refusals.sh` | `docs/refusals.md` equals the generated table | CI |
 | `tests/budget.sh` | `templates/AGENTS.md` at most 150 words | CI |
 | replay bench | `eval/replay.py` over the 144 October streams against the v8 harness: every recorded old-path command gets R09 with a line `bash -n` accepts; no command ends in a traceback or a refusal without a code; totals per chore reported beside E8's | mars, 6 at a time, 2 hours |
-| dry install | `tests/dry-install.sh`: `guard init` on a scratch repo with `tests/mock-bin`; a scripted agent (`eval/tasks/t1-walltime/scripted/honest-guard-run.sh` from exp/E6b, generalized) runs `guard status`, `guard run`, `guard wait` and nothing else, and ends with `job <id> COMPLETED`; the script's command list is the proof that no harness file was read | laptop |
+| dry install | `tests/dry-install.sh`: `guard init` on a scratch repo with `tests/mock-bin`; a scripted agent (`eval/tasks/t1-walltime/scripted/honest-guard-run.sh` from exp/E6b, generalized) runs `guard status`, `guard run`, `guard wait` and nothing else, and ends with `job <id> COMPLETED`; the script's command list is the proof that no harness file was read. Run twice: once with the mock `sbatch`, once with `launch_hosts: <mock hostname>` and no `sbatch` on PATH, so the host backend completes the same job | laptop |
 | audit gate | `eval/audit/run.py --gate eval/audit/baseline.json` with rows added: `raw-submit-verb`, `rename-compute` (reported, not gated, while the gate is advisory), `shim-pkill`, `shim-force-push`, `holdout-oracle` (no digit after a holdout code) | skynet or the laptop, where `main` passes |
 | per unit | a unit that changes a refusal replays t1 and t8 before its pull request opens | mars |
 
@@ -275,30 +291,36 @@ their cases and never edit one file together. U1 moves the existing cases into `
 
 ## 10. Units
 
-Seven units. No two write the same file. U1 lands first; U2 to U6 build in parallel on it and merge in any order; U7
-merges last because its dry install needs U2 and U3. One pull request each, titled `[v8-P2.<n>]`.
+Eight units. No two write the same file. U1 lands first; U2 to U6 and U8 build in parallel on it and merge in any
+order; U7 merges last because its dry install needs U2, U3 and U8. Interfaces that cross units are fixed here so a
+unit never waits for another's code: U1's `cost()` implements both backend formulas of section 3; U2's `decide()`
+chooses the backend from `Limits.launch_hosts` and implements R13 and R14 over `LedgerView.host`; U3's `lib/wait.py`
+calls `host.state`, `host.log` and `host.stop` for a non-numeric id; U8 implements those three and `view()`. One pull request each, titled `[v8-P2.<n>]`.
 
 | Unit | Files owned | Needs | Acceptance | Evidence |
 |---|---|---|---|---|
-| U1 foundation | `lib/policy/{invocation,cost}.py`, `lib/refusals.py`, `docs/refusals.md`, `tests/refusals.sh`; `lib/broker/{server,scheduler,records,client,local}.py` moved from `eval/broker/` with `submit` removed and `run status ask holdout` routed to stubs that print `H4R-R01 not built`; `lib/broker_host.py`, `lib/enter.py` (serve `records.sock`, link `guard` to `bin/guard`, env for the walls from the card); `bin/guard` (all five dispatch lines, R09 lines); `tests/run.sh` runner, `tests/cases/00-v7.sh`; `eval/episode.sh`, `eval/env/up.sh` (the compute env and the holdout seal hook from `task.json`, as on exp/E6b and exp/E7) | none | `tests/run.sh` green with the old cases moved; the audit gate unchanged; the replay over 20 t1 episodes equals E8's counts; `python3 -c 'import lib.policy.cost'` works outside a sandbox; `tests/refusals.sh` green | E8, E2b |
-| U2 `guard run` | `lib/verbs/run.py`, `lib/policy/decide.py`, `lib/broker/run.py` (the handler: card, incident, launch), `lib/atlas.py`, `tests/cases/10-run.sh`, `eval/env/selftest.sh`, `examples/quickstart/*`; deletes `lib/guard/{preflight,ripples}.sh` | U1 | a case per R01 to R12; a case asserts the spec after each stripped launcher; the replay over t1 shows every `preflight`, `launch` and `sbatch` command refused with R09 and a line `bash -n` accepts; `honest-guard-run.sh` completes a job; a queued R08 creates an ask whose unattended default is `stop` | E2, E2b, E6b, A2, E1 |
-| U3 `guard wait` and `guard status` | `lib/wait.py`, `lib/verbs/{wait,status}.py`, `lib/broker/status.py`, `tests/cases/20-wait-status.sh`, `tests/mock-bin/{sacct,squeue}`, `eval/configs/codex-v8.json` (`tool_output_token_limit`) | U1 | a buffered `python3` child's first line appears within 5 s; a 12-minute mock job returns at 5 and 10 minutes then `COMPLETED`; `guard status` under 1200 characters on a fixture with two jobs, one ask and one refusal, and `next:` is a runnable line; W01 to W03 cases | E4, E4b (pending), E9, A7 |
+| U1 foundation | `lib/policy/{invocation,cost}.py`, `lib/refusals.py`, `docs/refusals.md`, `tests/refusals.sh`; `lib/broker/{server,scheduler,records,client,local}.py` moved from `eval/broker/` with `submit` removed and `run status ask holdout` routed to stubs that print `H4R-R01 not built`; `lib/broker_host.py`, `lib/enter.py` (serve `records.sock`, link `guard` to `bin/guard`, env for the walls from the card); `bin/guard` (all five dispatch lines, R09 lines); `tests/run.sh` runner, `tests/cases/00-v7.sh` (today's cases except launch's, which go to `tests/cases/05-launch-v7.sh` for U8); `eval/episode.sh`, `eval/env/up.sh` (the compute env and the holdout seal hook from `task.json`, as on exp/E6b and exp/E7) | none | `tests/run.sh` green with the old cases moved; the audit gate unchanged; the replay over 20 t1 episodes equals E8's counts; `python3 -c 'import lib.policy.cost'` works outside a sandbox and `cost()` returns both backends' numbers for one spec; `tests/refusals.sh` green | E8, E2b |
+| U2 `guard run` | `lib/verbs/run.py`, `lib/policy/decide.py`, `lib/broker/run.py` (the handler: card, incident, launch), `lib/atlas.py`, `tests/cases/10-run.sh`, `eval/env/selftest.sh`, `examples/quickstart/*`; deletes `lib/guard/{preflight,ripples}.sh` | U1 | a case per R01 to R14 (R13 and R14 with a stub `LedgerView.host`); `decide()` picks `host` when the mock hostname is in `launch_hosts`; a case asserts the spec after each stripped launcher; the replay over t1 shows every `preflight`, `launch` and `sbatch` command refused with R09 and a line `bash -n` accepts; `honest-guard-run.sh` completes a job; a queued R08 creates an ask whose unattended default is `stop` | E2, E2b, E6b, A2, E1 |
+| U3 `guard wait` and `guard status` | `lib/wait.py`, `lib/verbs/{wait,status}.py`, `lib/broker/status.py`, `tests/cases/20-wait-status.sh`, `tests/mock-bin/{sacct,squeue}`, `eval/configs/codex-v8.json` (`tool_output_token_limit`) | U1 | a buffered `python3` child's first line appears within 5 s; a 12-minute mock job returns at 5 and 10 minutes then `COMPLETED`; `guard status` under 1200 characters on a fixture with two jobs, one ask and one refusal, and `next:` is a runnable line; W01 to W03 cases; a non-numeric id reaches a stub `host.state` and `--stop` reaches `host.stop` | E4, E4b (pending), E9, A7 |
 | U4 `guard ask` and the approver | `lib/verbs/ask.py`, `lib/broker/asks.py`, `lib/needs_you.py` (asks render as items), `eval/broker/approver.py`, `eval/run.py` (approver config), `tests/cases/30-ask.sh` | U1 | A01 to A04 cases; `--deadline 5m` with no approver (clock mocked) records `answered_by: unattended` and the next `guard status` shows it; `after:N` answers and the agent's next verb output carries the line; a `queue` decision's ask, when answered yes, submits the job without the agent | A2, A4, A11, E11 (pending) |
 | U5 `guard holdout` | `lib/verbs/holdout.py`, `lib/broker/holdout.py`, `eval/env/forge-pre-receive.sh`, `eval/tasks/t3-entity-overlap/{build,score}.py`, `eval/tests/test_holdout.py`, `tests/cases/40-holdout.sh` | U1 | H01 to H05 cases; no digit follows a holdout code; the fourth score is H03 and the count includes pushes that change the solution; a solution timing out on both sets and one with a layout error are H02; each score writes a `HoldoutRow` and a `LedgerRow` whose id the row carries; `score.py` reads pushed main and prints the working-tree count beside it | E7, A12 |
 | U6 walls | `lib/compute-gate/*`, `lib/shim/*`, `lib/guard/fence.sh`, `eval/audit/attacks/{raw-submit-verb,rename-compute,shim-pkill,shim-force-push,holdout-oracle}.sh`, `eval/audit/baseline.json`, `tests/cases/50-walls.sh` | U1 | C01, S01 to S03, F01 to F05 cases; the undo line repairs an edit made in an earlier commit (E3); `rm -rf` inside the run dir and `git push` without `--force` pass through unchanged; audit rows HELD or reported as the table says | E6b, E3, E1, Part 5 |
-| U7 templates, migration, docs | `lib/init.sh`, `lib/version.sh`, `SCHEMA`, `templates/AGENTS.md`, `templates/guard/{run,budget.card}`, `templates/github/workflows/guard-fence.yml`, `templates/runs/_template/` (delete the card), `docs/{compatibility,guard-reference,BUDGET}.md`, `docs/v8/deletions.md`, `docs/releases/v8.0.md`, `skills/safe-autonomous-hpc-science/*`, `tests/cases/60-migrate.sh`, `tests/dry-install.sh` | U1; its gate needs U2, U3 | `guard init --update` on a schema 7 fixture changes only section 8's files, and a diff of card values, `watch.list` and the landmines section is empty; `guard init` on a scratch repo plus the dry install completes one job; `tests/budget.sh` green at 150 | E5, E1, E6b |
+| U7 templates, migration, docs | `lib/init.sh`, `lib/version.sh`, `SCHEMA`, `templates/AGENTS.md`, `templates/guard/{run,budget.card}`, `templates/github/workflows/guard-fence.yml`, `templates/runs/_template/` (delete the card), `docs/{compatibility,guard-reference,BUDGET}.md`, `docs/v8/deletions.md`, `docs/releases/v8.0.md`, `skills/safe-autonomous-hpc-science/*`, `tests/cases/60-migrate.sh`, `tests/dry-install.sh` | U1; its gate needs U2, U3, U8 | `guard init --update` on a schema 7 fixture changes only section 8's files, and a diff of card values, `watch.list` and the landmines section is empty; `guard init` on a scratch repo plus the dry install completes one job; `tests/budget.sh` green at 150 | E5, E1, E6b |
+| U8 host backend | `lib/broker/host.py`, `lib/guard/launch.sh`, `tests/cases/05-launch-v7.sh` (the moved launch cases, rewritten to call `host.py`), `tests/cases/70-host.sh`, `tests/mock-bin/{hostname,nvidia-smi}` | U1 (`cost()`, `refusals.py`); U2's `decide()` for the end-to-end case, which may land after | `host.py` launches, reports state, tails the log and stops a job on a fixture with `launch_hosts: <mock hostname>`; the five record files appear in `host_state_dir/<job_id>/`; `view()` reports `available_gb`, `gpus_free` and `bwrap`; a job over `host_max_walltime_minutes` is stopped with the card's grace and ends `TIMEOUT`; `spent_gpu_hours` sums the host records so R13 can refuse; `guard run` on the fixture prints the host success line and `guard wait <host>-<ts>` ends it `COMPLETED` | docs/guard-reference.md launch hosts; the Gulf workspace live test (docs/live-tests) |
 
-## 11. Open questions for the owner
+## 11. Open questions, with the owner's decisions of 2026-10-19
+
+Decided rows are closed; their text stays so the reasoning survives.
 
 | # | Question | Recommendation |
 |---|---|---|
-| 1 | Schema 8 removes a template path, three agent commands and the `explore_*` keys, which `docs/compatibility.md` promises never to do. Break the promise once with a "removed in schema 8" table, or keep inert stubs? | Break it once. A stub is an old path, and E2 shows agents take any path that stands. |
-| 2 | Cost: whole nodes (`minutes × nodes × cores_per_node`, E6b) or the cores asked for (`tasks × cpus_per_task`)? E2's builder flagged the whole-node charge. | Whole nodes, as E6b prices and as most sites bill; the record keeps `tasks` so a site can re-price. No new card key. |
-| 3 | `guard holdout score`: nothing numeric to the agent (E7 seed 7), or the gap once per card? | Nothing numeric. The numbers sit in the `HoldoutRow`; the paper cites the ledger id and a person reads the row. |
-| 4 | Drop the `explore-` exemption, or keep smaller caps for explore ids? | Drop it. It existed to skip the card gate, which is gone; with every job priced, small jobs need no second tier. |
-| 5 | `lib/guard/launch.sh` (929 lines, launch hosts): make it `guard run`'s host backend now, or leave launch hosts out of v8.0? | Out of v8.0. The benchmark has no launch host; the Gulf workspace live test decides v8.1, and `launch_hosts` other than `none` makes `guard run` refuse R07 with "launch hosts return in v8.1". |
-| 6 | The compute gate stays advisory (`python3 -I`, `-c "import sim"`, setting `SLURM_JOB_ID`; none tried in E6b). Ship as a guide, or wall it? | A guide in v8.0, with the `rename-compute` row reported, not gated. A wall needs the job sandbox (design-sandboxed-agents, increment 7). |
-| 7 | E3's honest-report problem: NOTES.md claiming a fix the tree lacks (1/10 to 4/10). A fence rule, or report only? | Report only. A text rule is prose checking, and finding 1 says that changes nothing at this scale. |
-| 8 | Allow `guard run` without a broker (local mode, unsigned records), or require `guard enter` everywhere? | Allow it, marked unsigned in the record and in `guard status`. The group's first use is a login node with no broker. |
-| 9 | The CardRecord is E6b's (`why`, `command`, cost); the owner's plan said the record's content is unchanged, only its author. Which keys should the broker-written card carry? | E6b's. The question, hypothesis and metric lines were the ceremony; a run's `why` plus its priced command is what the atlas and the report need. |
-| 10 | E4b and E11 have not run. Build U3 and U4 on their prototypes now, or wait? | Now. A killed E4b or E11 changes a sentence in AGENTS.md or a default, not a file boundary; the units are gated by their own cases. |
+| 1 | Schema 8 removes a template path, three agent commands and the `explore_*` keys, which `docs/compatibility.md` promises never to do. Break the promise once with a "removed in schema 8" table, or keep inert stubs? | **Decided (owner, 2026-10-19): break it once; one table in compatibility.md lists every removal; old commands gone, not stubbed.** |
+| 2 | Cost: whole nodes (`minutes × nodes × cores_per_node`, E6b) or the cores asked for (`tasks × cpus_per_task`)? E2's builder flagged the whole-node charge. | **Decided (owner, 2026-10-19, adopting the recommendation):** whole nodes, as E6b prices; the record keeps `tasks` so a site can re-price; no new card key. |
+| 3 | `guard holdout score`: nothing numeric to the agent (E7 seed 7), or the gap once per card? | **Decided (owner, 2026-10-19): verdict and ledger id only, never a number.** The numbers sit in the `HoldoutRow`; the paper cites the ledger id and a person reads the row. |
+| 4 | Drop the `explore-` exemption, or keep smaller caps for explore ids? | **Decided (owner, 2026-10-19, adopting the recommendation):** dropped. It existed to skip the card gate, which is gone. |
+| 5 | `lib/guard/launch.sh` (929 lines, launch hosts): make it `guard run`'s host backend now, or leave launch hosts out of v8.0? | **Decided (owner, 2026-10-19, against the recommendation): in v8.0.** `guard run` launches on hosts in `launch_hosts` through `launch.sh`'s backend; unit U8, codes R13 and R14, the host cost formula and the second dry install carry it. |
+| 6 | The compute gate stays advisory (`python3 -I`, `-c "import sim"`, setting `SLURM_JOB_ID`; none tried in E6b). Ship as a guide, or wall it? | **Decided (owner, 2026-10-19, adopting the recommendation):** a guide in v8.0, `rename-compute` reported, not gated. |
+| 7 | E3's honest-report problem: NOTES.md claiming a fix the tree lacks (1/10 to 4/10). A fence rule, or report only? | **Decided (owner, 2026-10-19, adopting the recommendation):** report only. |
+| 8 | Allow `guard run` without a broker (local mode, unsigned records), or require `guard enter` everywhere? | **Decided (owner, 2026-10-19): allowed**, marked unsigned in the record and in `guard status`. |
+| 9 | The CardRecord is E6b's (`why`, `command`, cost); the owner's plan said the record's content is unchanged, only its author. Which keys should the broker-written card carry? | **Decided (owner, 2026-10-19, adopting the recommendation):** E6b's keys. |
+| 10 | E4b and E11 have not run. Build U3 and U4 on their prototypes now, or wait? | **Decided (owner, 2026-10-19, adopting the recommendation):** build now. |
