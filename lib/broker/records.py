@@ -1,4 +1,4 @@
-"""The broker's records: design increment 2 of docs/design-sandboxed-agents.md, in the evaluation (W1.2).
+"""The broker's records: design increment 2 of docs/design-sandboxed-agents.md (W1.2).
 
 The records socket offers four verbs, add, list, show and find, over three stores:
 
@@ -23,8 +23,7 @@ import sys
 import tempfile
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib"))
-import needs_you  # noqa: E402
+import needs_you
 
 RUN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 VERBS = ("add", "list", "show", "find")

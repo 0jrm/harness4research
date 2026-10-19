@@ -4,7 +4,7 @@
 #   family    a directory under eval/tasks, such as t1-walltime
 #   variant   trap or control
 #   arm       A (no harness) or E (the full harness: guard, AGENTS.md, the skills, needs-you)
-#   --broker  the scheduler only through eval/broker/broker.py (up.sh --broker)
+#   --broker  the scheduler only through the broker, lib/broker/ (up.sh --broker)
 # After it, run the agent with eval/env/sandbox.sh <episode_dir> -- ..., give it <episode_dir>/prompt.md, then run
 # eval/env/down.sh <episode_dir> and eval/score.py <episode_dir>. Arms B to D come with the first result.
 set -euo pipefail

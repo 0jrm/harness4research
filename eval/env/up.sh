@@ -13,7 +13,8 @@
 #
 # The project directory becomes the first commit on main. With --harness, the sandbox gets that repository's
 # bin, lib, skills, templates and SCHEMA at /opt/harness4research, and `guard` on PATH. With --broker, the sandbox's
-# scheduler commands talk to eval/broker/broker.py, the fake Slurm's only client, whose socket the sandbox never sees;
+# scheduler commands talk to the broker (lib/broker/, served by eval/broker/broker.py), the fake Slurm's only client,
+# whose socket the sandbox never sees;
 # guard needs-you, guard ledger and guard card talk to its records socket; gh and guard pr open talk to its gh socket,
 # which keeps the pull requests (eval/broker/forge.py); and the forge refuses a run's ledger or card written by a
 # commit the broker or the owner did not sign, and a card/<run_id> tag neither of them signed. The broker holds a
@@ -47,7 +48,7 @@ printf 'agent:x:%s:\n' "$(id -g)" > "$ep/sandbox/etc/group"
 cp "$here/slurmclient.py" "$here/forge_connect.py" "$here/jobwrap.sh" "$ep/sandbox/tools/lib/"
 client=slurmclient.py
 if [ $broker = 1 ]; then
-  cp "$here/../broker/client.py" "$ep/sandbox/tools/lib/"; client=client.py
+  cp "$here/../../lib/broker/client.py" "$ep/sandbox/tools/lib/"; client=client.py
   mkdir -p "$ep/state/broker/bin" "$ep/state/broker/sock"
   for c in sbatch squeue sacct scancel; do ln -s "$here/slurmclient.py" "$ep/state/broker/bin/$c"; done
 fi
