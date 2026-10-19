@@ -4,25 +4,27 @@ How the guard's optional keys and features behave. What stays stable across rele
 
 ## Optional budget keys
 
-Optional budget keys, each with a working default the scripts share: `explore_max_nodes`, `explore_max_walltime_minutes`, `max_handled_failures`, `merge_policy`, `slurm_bin` (default `/usr/bin`, the directory preflight runs `squeue` and `sacct` from), `card_on_main` (default `no`; `yes` makes preflight refuse a run other than `explore-*` until its question card is on the protected branch, as committed on the submitting branch, which only a person merges), `checks` (unset by default; `waived <reason>` lets every run of the project submit without domain checks), and the launch and envelope keys below.
+Optional budget keys, each with a working default: `merge_policy`, `slurm_bin` (default `/usr/bin`, where the broker runs `sbatch`, `squeue` and `sacct` from), `partitions` (a list; `guard run` refuses another with H4R-R17), `extra_sbatch` (options appended to every submission), `default_run_core_hours` and `default_run_gpu_hours` (a per-run cap, `0` meaning none; a job over it is queued for a person, not refused), and the schema 8 keys:
 
-Preflight refuses a run other than `explore-*` while the protected branch has no executable file in `runs/<id>/checks/`, unless the question card or the budget card says `checks: waived <reason>`. The question card's `checks` key is optional, and its placeholder means no waiver.
+- `compute` (default `none`): entrypoints that run only inside a job. A listed program started on a login node with neither `SLURM_JOB_ID` nor `GUARD_JOB_ID` set prints H4R-C01. The gate is a guide, not a wall.
+- `holdout_max_submissions` (default `3`): how many `guard holdout score` calls a session has in a project that sealed a holdout.
+- `ask_deadline` (default `30m`): when a question the broker opens, such as an over-budget job, takes its default answer `no`.
+- `approval` (`auto` or `queue`, default `auto`): `queue` makes every job a question for a person before it runs.
+- `broker_key`: the broker's public key, one `key.pub` line. The fence trusts a cited receipt id only when its commit on `guard/receipts` is signed by this key. A `<...>` placeholder makes it refuse every id with `no broker_key on main`.
+
+Keys schema 8 no longer reads, such as `explore_max_nodes` and `checks`, may stay on a card; nothing reads them ([compatibility.md](compatibility.md#removed-in-schema-8)).
 
 ## Launch hosts
 
-Launch is off until a human sets `launch_hosts` on the protected branch, as a space-separated list of short hostnames exactly as `hostname -s` prints them on each host (an ssh alias is refused, and the refusal names the real name). `host_state_dir` must survive a reboot: keep the default under `~/.local/state` and never point it at a tmpfs such as `/tmp` on a host where `/tmp` is RAM-backed, or every record and the GPU-hour count vanish. Its keys, `launch_hosts`, `max_gpu_hours`, `host_max_walltime_minutes`, `host_max_mem_gb`, `host_min_available_gb`, `host_stop_grace_seconds`, `host_state_dir`, `explore_max_gpus`, and `stray_ignore`, have working defaults, so a card without them works and the required list does not grow. With `launch_hosts: none`, ripples prints the same lines as before and preflight is byte-identical. Once a project opts in, the five host checks, `gpu-hours`, `host-supervision`, `host-memory`, `host-strays` and `host-log-errors`, print on every host, as UNCHECKED where they cannot look, and the job checks (`job-states`, `walltime-headroom`, `retries`, `handled-failures`) cover launched jobs through the same incident rules.
+Launch hosts are off until a human sets `launch_hosts` on the protected branch, as a space-separated list of short hostnames exactly as `hostname -s` prints them on each host. On a listed host, `guard run` launches the job under the host supervisor instead of Slurm: `--time` and `--mem` pass through (a missing `--mem` becomes `host_max_mem_gb`), `--gpus` is a count the broker turns into free device indices, `--cpus-per-task` enters the price, and `--nodes`, `--partition`, `--array`, `--dependency` and `--ntasks` refuse with H4R-R13. The job runs boxed: a cleared environment, the project read-write, no home, no network, the chosen GPUs, and `GUARD_JOB_ID` set. `host_state_dir` must survive a reboot: keep the default under `~/.local/state` and never point it at a tmpfs such as `/tmp` on a host where `/tmp` is RAM-backed, or every record and the GPU-hour count vanish. The keys `launch_hosts`, `max_gpu_hours`, `host_max_walltime_minutes`, `host_max_mem_gb`, `host_min_available_gb`, `host_stop_grace_seconds`, `host_state_dir` and `stray_ignore` have working defaults. `max_gpu_hours: 0`, the template value, refuses every GPU job until a person raises it.
 
 ## The execution envelope
 
-The question card holds the design and stays frozen. Its optional keys `budget_gpu_hours`, `budget_core_hours` and `deadline` cap one run; `default_run_gpu_hours` and `default_run_core_hours` in `guard/budget.card` are the workspace defaults, `0` meaning no per-run cap. Execution facts go in `runs/<id>/execution.tsv`. A `restart` or `resume` row may cite a resource stop (OUT_OF_MEMORY, HOST_OUT_OF_MEMORY, NODE_FAIL, PREEMPTED, SUPERVISOR_FAILED, CANCELLED, LAUNCH_FAILED), never a science stop (FAILED, TIMEOUT); the lists only grow. Ripples prints `execution-within-envelope` only for a run that has a ledger at HEAD. The fence rules `execution-ledger` and `execution-history` follow the ratchet.
+The question card holds the design, and the broker writes it once. Execution facts go in `runs/<id>/execution.tsv`. A `restart` or `resume` row may cite a resource stop (OUT_OF_MEMORY, HOST_OUT_OF_MEMORY, NODE_FAIL, PREEMPTED, SUPERVISOR_FAILED, CANCELLED, LAUNCH_FAILED), never a science stop (FAILED, TIMEOUT), which needs `--cause` on the next `guard run`; the lists only grow. The fence rules `execution-ledger` and `execution-history` follow the ratchet.
 
 ## Merge policy
 
 `merge_policy` in `guard/budget.card` decides whether `guard merge` may merge a pull request without a human. `autonomous`, the template value and the default when the key is missing, lets it merge once its other gates pass. Any other value, such as `semi-manual`, makes it refuse and queue the merge for a human. `guard merge` reads the key from the pull request's base branch, so an agent cannot change it on its own branch. A repository without a guard reads `merge_policy` from the user config instead (`guard config`). No other script reads the key. `guard merge` refuses every merge without a ruleset, so when GitHub offers the repository no rulesets, as for a private repository on the free plan, `guard init` and `guard init --update` set `merge_policy: semi-manual` and say why, and `guard doctor` fails while the key stays `autonomous` there.
-
-## Card lineage
-
-The question card's optional keys `supersedes` and `spawned_from` name the run id a card replaces or grew out of. The value `none` declares that the card has no parent; a `<...>` placeholder or a missing line leaves it unset. No script requires either key, so a card without them passes preflight, ripples and the fence as before. The atlas draws the question map from them. The fence rule `card-lineage` prints WARN, which does not fail the fence, when a card the pull request adds sets neither key and its id extends another carded run id by name. It judges added cards only, so an existing card never warns.
 
 ## Where each command runs
 
@@ -30,7 +32,7 @@ Commands differ in what they need from the host. At a site with login and comput
 
 | Command | Needs | Runs on |
 |---|---|---|
-| `guard/run preflight`, `guard/run ripples` | git and the Slurm clients (`sbatch`, `squeue`, `sacct`), which reach the controller and the accounting database | a login node or a compute node |
+| `guard run`, `guard wait`, `guard status` | the broker, or in local mode git and the Slurm clients (`sbatch`, `squeue`, `sacct`), which reach the controller and the accounting database | a login node, a compute node, or a host in `launch_hosts` |
 | `guard/run fence` | git | anywhere |
 | `guard review`, `guard ship` | `gh`, the internet, and the reviewer CLI (`claude` or `cursor-agent`) logged in on this host | a host with internet access, such as a login node |
 | `guard merge`, `guard doctor` | `gh` and the internet | a host with internet access |

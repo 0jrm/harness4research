@@ -29,7 +29,7 @@ reset_main
 git init -q "$tmp/plain"
 expect path-refuses-unguarded fail 'runs inside a guarded project' -- bash -c 'cd "$1" && "$2" fence' _ "$tmp/plain" "$guard"
 git switch -q --detach "$good"
-set_script preflight $'<<<<<<< ours\nexit 0\n=======\nexit 1\n>>>>>>> theirs'; git commit -q -am "a vendored harness merged with conflicts"
+set_script fence $'<<<<<<< ours\nexit 0\n=======\nexit 1\n>>>>>>> theirs'; git commit -q -am "a vendored harness merged with conflicts"
 git push -q origin HEAD:refs/heads/conflicted; git fetch -q origin; git switch -q --detach "$good"
-expect run-refuses-conflicted fail 'unresolved conflicts or does not parse' -- env HPC_GUARD_REF=origin/conflicted guard/run preflight "$R" job.sh
+expect run-refuses-conflicted fail 'unresolved conflicts or does not parse' -- env HPC_GUARD_REF=origin/conflicted guard/run fence origin/main HEAD
 expect run-names-schema fail "guard is schema $(cat "$here/SCHEMA")" -- env HPC_GUARD_REF=origin/conflicted guard/run frobnicate

@@ -9,9 +9,6 @@ max_walltime_minutes: <minutes>
 max_concurrent_jobs: <jobs>
 quota_pct_cmd: <command that prints percent of your scratch quota used>
 slurm_bin: /usr/bin
-explore_max_nodes: 1
-explore_max_walltime_minutes: 60
-max_handled_failures: 2
 launch_hosts: none
 max_gpu_hours: 0
 host_max_walltime_minutes: 720
@@ -19,8 +16,12 @@ host_max_mem_gb: 64
 host_min_available_gb: 32
 host_stop_grace_seconds: 60
 host_state_dir: ~/.local/state/guard/launches
-explore_max_gpus: 1
 default_run_gpu_hours: 0
 default_run_core_hours: 0
 stray_ignore: none
 merge_policy: autonomous
+compute: none
+holdout_max_submissions: 3
+ask_deadline: 30m
+approval: auto
+broker_key: <the broker key.pub; guard init writes it once guard broker setup has run>

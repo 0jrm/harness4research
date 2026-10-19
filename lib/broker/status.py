@@ -4,7 +4,8 @@
                                        "blocked": [str: needs-you items, then asks.short lines],
                                        "refusal": {"ago_min", "where", "why"}|null,
                                        "budget": {"spent", "queued", "max", "reserve"}|null,
-                                       "failed": {"id", "run", "state"}|null, "unsigned": bool}
+                                       "failed": {"id", "run", "state"}|null, "unsigned": bool,
+                                       "receipts": str (receipts.status_line)}
     {"verb": "status", "job": "12"} -> {"mine": true|false|null}   (lib/wait.py's W02 check: another session's job)
 
 It runs sacct and squeue through the scheduler, fetches main, and reads the job log, the mirror's card and the
@@ -15,7 +16,7 @@ import os
 import time
 
 import needs_you
-from broker import asks
+from broker import asks, receipts
 from broker.records import Refused, read_rows
 from policy.cost import CardError, limits
 from policy.invocation import to_minutes
@@ -131,7 +132,11 @@ def facts(broker):
                   "reserve": card.verification_reserve_core_hours}
     except CardError:
         pass
-    return {"running": running, "blocked": blocked, "refusal": last_refusal(broker), "budget": budget,
+    try:
+        receipt_line = receipts.status_line(broker)
+    except Exception:  # the ref is unreachable or the mirror is mid-fetch: say so, never fail the status
+        receipt_line = "receipts: not readable now"
+    return {"receipts": receipt_line, "running": running, "blocked": blocked, "refusal": last_refusal(broker), "budget": budget,
             "failed": failed, "unsigned": broker.cfg.get("session") == "local"}
 
 

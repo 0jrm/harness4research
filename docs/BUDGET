@@ -1,6 +1,6 @@
 # Word budgets, checked by tests/budget.sh: <path or glob> <most words>. Tokens are about 1.3 x words.
 # Each line must match at least one file. Templates are named by path in these pages, not quoted.
-templates/AGENTS.md   250
+templates/AGENTS.md   150
 skills/*/SKILL.md     900
 lib/review-prompt.md  600
 docs/plan-*.md        1200

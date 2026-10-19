@@ -22,9 +22,9 @@ Make agent mistakes cheap, visible, and reversible, and put every rule where all
 
 - Tokens. `AGENTS.md` stays short and loads every session. The skill loads only for experiment work. Independent review of question cards and results adds roughly 15 to 30 percent to an experiment's model usage.
 - Compute. A verification reserve of 10 to 15 percent of the budget, and a baseline rerun plus a small run before each full run, about 5 to 10 percent more.
-- Your time. About an hour to install and configure, and five minutes per question card. Warning thresholds fire falsely until you tune them.
+- Your time. About an hour to install and configure. Warning thresholds fire falsely until you tune them.
 
-Runs named `explore-*` need no question card. Preflight caps them at one node, one hour, and one task by default, and the fence keeps their results out of reports until a carded run reproduces them.
+Nobody writes a question card by hand: `guard run` writes it from the job's `--why`, so an exploratory job costs one sentence and is priced like any other.
 
 ## What you get
 
