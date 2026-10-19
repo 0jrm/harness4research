@@ -226,7 +226,7 @@ def write_card(broker, inv, c):
     local = not broker.cfg.get("signing_key")
     cr = dataclasses.asdict(c)
     rows = [("why", inv.why), ("command", line(inv, inv.options)), ("backend", c.backend),
-            *((k, cr[k]) for k in CARD_KEYS), ("session", inv.session),
+            *((k, hours(cr[k]) if isinstance(cr[k], float) else cr[k]) for k in CARD_KEYS), ("session", inv.session),
             ("written_by", "guard run, local, unsigned" if local else "guard broker, from the guard run invocation")]
     commit(broker, inv.run_id, path, "".join(f"{k}: {'' if v is None else v}\n" for k, v in rows),
            f"run: {inv.run_id} card\n\nWritten by guard run for session {inv.session}.")
