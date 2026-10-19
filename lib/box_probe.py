@@ -86,9 +86,10 @@ def main():
     allowed = checks.get("sock", [])
     for top in ("/run", "/tmp", "/var", "/opt"):
         failed += [f"socket: {p} is reachable" for p in sockets(top, allowed)]
-    gpus = sorted(n for n in os.listdir("/dev") if n.startswith("nvidia"))
+    allowed_gpus = checks.get("gpu", [])
+    gpus = sorted(n for n in os.listdir("/dev") if n.startswith("nvidia") and f"/dev/{n}" not in allowed_gpus)
     if gpus:
-        failed.append(f"gpu: /dev/{gpus[0]} and {len(gpus) - 1} more")
+        failed.append(f"gpu: /dev/{gpus[0]} and {len(gpus) - 1} more, not given with --gpu")
     for line in failed:
         print(f"guard box: probe: {line}", file=sys.stderr)
     sys.exit(1 if failed else 0)
