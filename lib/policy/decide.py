@@ -219,9 +219,15 @@ def r13_slurm_only(inv, spec, cost, limits, view, b):
         return None
     given = [n for n, on in (("nodes", spec.nodes > 1), ("ntasks", (spec.tasks or 1) > 1),
                              ("partition", spec.partition), ("array", spec.array), ("dependency", spec.dependency)) if on]
-    if given:
-        return refuse("R13", "slurm_only", next=line(inv, without(inv.options, SLURM_ONLY)),
-                      flag="/".join(f"--{n}" for n in given), backend_=b)
+    if not given:
+        return None
+    # A flag from the script's #SBATCH lines stays unless argv overrides it: --nodes=1 and --ntasks=1 do; partition,
+    # array and dependency have no neutral value, so line 2 is guard status there.
+    scripted = [n for n in given if without(inv.options, [n]) == list(inv.options)]
+    if set(scripted) - {"nodes", "ntasks"}:
+        return refuse("R13", "slurm_only", next="guard status", flag="/".join(f"--{n}" for n in given), backend_=b)
+    return refuse("R13", "slurm_only", next=line(inv, without(inv.options, SLURM_ONLY) + [f"--{n}=1" for n in scripted]),
+                  flag="/".join(f"--{n}" for n in given), backend_=b)
 
 
 def r13_mem(inv, spec, cost, limits, view, b):

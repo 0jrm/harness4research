@@ -93,6 +93,10 @@ expect run-r13-gpu-hours ok "^refuse R13 host \| .* -- --time=120 --gpus=4 job.s
   dt "d(['--time=120', '--gpus=6'], view=dataclasses.replace(V, host=HostView('gpu1', True, 100.0, gpus_free=tuple('012345'), bwrap=True)))"
 expect run-r13-slurm-only ok "^refuse R13 host \| guard run runs/sim --why 'Run it.' -- --time=5 job.sh$" -- dt "d(['--time=5', '-N', '2', '--array=0-3'], $host)"
 expect run-r13-slurm-only-line1 ok '^refuse R13 host \| --nodes/--array is not for a launch host$' -- dt "d(['--time=5', '-N', '2', '--array=0-3'], $host, show='reason')"
+expect run-r13-sbatch-nodes ok "^refuse R13 host \| guard run runs/sim --why 'Run it.' -- --time=5 --nodes=1 job.sh$" -- \
+  dt "d(['--time=5'], $host, script=b'#!/bin/bash\n#SBATCH -N 2\n')"
+expect run-r13-sbatch-partition ok '^refuse R13 host \| guard status$' -- \
+  dt "d(['--time=5'], $host, script=b'#!/bin/bash\n#SBATCH -p short\n')"
 expect run-r14-memory ok '^refuse R14 host \| guard wait gpu1-20261019T120000Z$' -- \
   dt "d(['--time=5'], view=dataclasses.replace(V, host=HostView('gpu1', True, 20.0, bwrap=True, live_launches=('gpu1-20261019T120000Z',))))"
 expect run-r14-gpus ok '^refuse R14 host \| 2 GPUs free, 3 asked$' -- dt "d(['--time=5', '--gpus=3'], $host, show='reason')"
