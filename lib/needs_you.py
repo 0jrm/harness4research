@@ -15,8 +15,11 @@ is open or outside a git repository, so it can run on every prompt. Adding an it
 open one prints that item's id and queues nothing. With --update, an open or acked item of that kind and title takes
 the new content under the same id and opens again; when the content is the same, nothing changes. find prints the id
 of the open or acked item with that kind and title, and exits 1 when there is none.
+
+The items a<n> are the broker's guard asks, kept where the agent's sandbox cannot write (ask_queues). They list, show
+and close here with the project's own: done a<n> [--note ANSWER] answers it (no note means yes), dismiss a<n> means no.
 """
-import argparse, datetime as dt, fcntl, json, os, subprocess, sys
+import argparse, datetime as dt, fcntl, hashlib, json, os, subprocess, sys
 from collections import namedtuple
 
 COLUMNS = ("id", "ts", "state", "kind", "title", "action", "paths", "commands", "source")
@@ -39,6 +42,24 @@ def git_dir(cwd):
         return None, None
     common, top = (p.stdout.splitlines() + [""])[:2]
     return os.path.join(os.path.abspath(os.path.join(cwd, common)), "guard", "needs-you.tsv"), top or cwd
+
+def ask_queues(queue, top):
+    """The queues that hold this project's guard asks, which the broker keeps out of the agent's sight: its records in
+    <git dir>/guard/broker/ when guard ask ran with no broker, and in the broker's state, named as lib/broker_host.py
+    names a project, when one served the sandbox. Their items are the ones with ids a<n>; the project's own are n<n>."""
+    real = os.path.realpath(top)
+    state = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "guard", "projects",
+                         f"{os.path.basename(real) or 'root'}-{hashlib.sha1(real.encode()).hexdigest()[:8]}")
+    paths = [os.path.join(state, "records", "needs-you.tsv"),  # first: an ask id in a sandbox's checkout never wins
+             os.path.join(os.path.dirname(queue), "broker", "records", "needs-you.tsv")]
+    return [p for p in paths if os.path.exists(p)]
+
+def asks(queue, top):
+    return [(q, it) for q in ask_queues(queue, top) for it in read(q) if it.id.startswith("a")]
+
+def home(queue, top, ident):
+    """The queue that holds item ident: an ask's, else the project's."""
+    return next((q for q, it in asks(queue, top) if it.id == ident), queue)
 
 def from_row(line):
     cells = line.split("\t")
@@ -153,6 +174,7 @@ def remind(fmt):
     hook = hook_input() if fmt == "claude-hook" else {}
     queue, top = git_dir(hook.get("cwd") or os.getcwd())
     items = [it for it in read(queue) if it.state == "open"] if queue else []
+    items += [it for _, it in asks(queue, top) if it.state == "open"] if queue else []
     if not items:
         return
     if fmt == "text":
@@ -261,14 +283,14 @@ def main():
                 sys.exit(1)
             print(it.id)
         elif a.cmd == "show":
-            it = next((it for it in read(queue) if it.id == a.id), None)
+            it = next((it for it in read(home(queue, top, a.id)) if it.id == a.id), None)
             if not it:
                 raise Refused(f"no item {a.id} in {queue}")
             print(block(it, top))
         elif a.cmd in MOVES:
-            move(queue, a.cmd, a.id, a.note)
+            move(home(queue, top, a.id), a.cmd, a.id, a.note)
         else:
-            items = [it for it in read(queue) if it.state in ("open", "acked")]
+            items = [it for it in read(queue) + [it for _, it in asks(queue, top)] if it.state in ("open", "acked")]
             print("\n\n".join(block(it, top) for it in items) if items else "Nothing needs you.")
     except Refused as e:
         print(f"guard needs-you: {e}", file=sys.stderr)
