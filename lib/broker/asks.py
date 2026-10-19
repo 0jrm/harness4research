@@ -98,8 +98,13 @@ def open_asks(broker, run_id=None):
             and (run_id is None or (a.get("effect") or {}).get("run_id") == run_id)]
 
 
+def effect_asks(broker, run_id):
+    """The open asks with an effect on run_id, which may be None; an agent's ask has no effect and is never one."""
+    return [a for a in open_asks(broker) if a.get("effect") and a["effect"].get("run_id") == run_id]
+
+
 def open_effect(broker, run_id):
-    return next((a for a in open_asks(broker, run_id) if a.get("effect")), None)
+    return next(iter(effect_asks(broker, run_id)), None)
 
 
 # the queue ----------------------------------------------------------------------------------------------------------
@@ -131,7 +136,7 @@ def create_effect(broker, kind, run_id, question, script_sha256=None, spec=None,
     if kind not in EFFECT_MODULE:
         raise ValueError(f"effect kind {kind!r} is not one of {tuple(EFFECT_MODULE)}")
     deadline = deadline if deadline in DEADLINES else "30m"
-    found = next((a for a in open_asks(broker, run_id) if a["effect"]["kind"] == kind), None)
+    found = next((a for a in effect_asks(broker, run_id) if a["effect"]["kind"] == kind), None)
     if found:
         return found
     due = now(broker) + DEADLINES[deadline]

@@ -5,19 +5,20 @@ Rules that an agent can read are suggestions. This project puts each rule at a p
 | Strength | Mechanism | What it stops | What gets past it |
 |---|---|---|---|
 | Note | `AGENTS.md`, the skill | honest mistakes by an agent that reads it | an agent that skips or misreads it |
-| Speed bump | `guard/run preflight`, `guard/run ripples`, `guard/run manifest` | direct submits, edited limits, frozen-card edits, silent warning signs | an agent that calls `sbatch` directly with your credentials, or runs its own copy of the scripts (see below) |
-| Speed bump (launch host) | `guard/run launch` and its supervisor | over-cap jobs, busy GPUs, jobs past their walltime or memory, silent orphans, a restart after a resource stop that nobody recorded | an agent that runs `nohup` directly, or deletes the state dir; no memory wall exists without an administrator's `MemoryMax` on the user slice |
+| Speed bump, outside a sandbox | `guard run` in local mode, `guard/run manifest`, the compute gate and the PATH shim | edited limits, over-budget jobs, a failed job resubmitted without a cause, a listed entrypoint on a login node, `pkill -f`, a force push | an agent that calls `sbatch` directly with your credentials, a renamed copy of an entrypoint, or a full path to `/usr/bin/git` (see below) |
+| Wall, inside `guard enter` | `guard run` behind the broker | every job: the sandbox has no scheduler of its own, and the broker reads the card from the protected branch and prices the job itself | nothing from inside the sandbox; the broker is the only way out |
+| Speed bump (launch host) | `guard run` on a host in `launch_hosts`, its supervisor and the box around the job | over-cap jobs, busy GPUs, jobs past their walltime or memory, silent orphans, a restart after a resource stop that nobody recorded | an agent that runs `nohup` directly, or deletes the state dir; no memory wall exists without an administrator's `MemoryMax` on the user slice |
 | Quality check | `guard review`, `guard merge` | changes that miss the request, facts without evidence, incidents without a cause, merges while checks fail | an agent that appends to `.git/guard/reviews.tsv`, a diff that steers the reviewer, `gh pr merge` with a write token |
 | Locked door | the `guard-fence` check plus a protected default branch | merging changes to `guard/`, workflows, `AGENTS.md` and `CLAUDE.md`, watched paths, question cards, or reports whose evidence rows cite no committed file | anyone who can bypass branch protection |
 | Bank limit | a capped cluster sub-account set by the admins | spending past the cap, by anyone | nothing; the scheduler refuses |
 
 ## Who stops a job
 
-On a launch host only two things ever signal a job: the supervisor that launch started for it, and `guard/run launch --stop`. Ripples reports; it never stops anything. An agent never finds or stops a job through a command-line pattern (`pgrep -f`, `pkill -f`); the record written at launch holds the session, and `--list` and `--stop` read it.
+On a launch host only two things ever signal a job: the supervisor that `guard run` started for it, and `guard wait --stop <job_id>`. An agent never finds or stops a job through a command-line pattern (`pgrep -f`, `pkill -f`); the record written at launch holds the session, and `guard status` and `guard wait --stop` read it.
 
 ## Why the scripts run from the protected branch
 
-`guard/run preflight` does not run a script from your working tree. It reads the `harness:` pin from the default branch's budget card and runs `lib/guard/preflight.sh` from the harness at that pin, read with `git show`, or from the default branch's `guard/harness-<pin>.sh` on an offline host. An edit to the script, the budget, or the watch list on a branch has no effect by itself, and the next preflight or ripples call reports the edit.
+`guard/run fence` does not run a script from your working tree. It reads the `harness:` pin from the default branch's budget card and runs `lib/guard/fence.sh` from the harness at that pin, read with `git show`, or from the default branch's `guard/harness-<pin>.sh` on an offline host. `guard run` reads the budget card from the broker's mirror of the default branch. An edit to a script, the budget, or the watch list on a branch has no effect by itself, and `guard run` refuses jobs while guard files differ from main (H4R-R06).
 
 This is a speed bump, not a wall. The agent controls its own clone and environment, so it can run any copy it likes:
 
@@ -26,7 +27,7 @@ This is a speed bump, not a wall. The agent controls its own clone and environme
 - `git update-ref refs/remotes/origin/main <commit>` moves the local `origin/main` to any commit, with no environment variable to notice.
 - `guard/run` itself is read from the working tree, so an edited `guard/run` runs whatever it chooses.
 
-Preflight runs `squeue` and `sacct` from the card's `slurm_bin` (default `/usr/bin`), not from PATH, so a planted `squeue` cannot hide live jobs. Every other command it runs, `git` and `awk` among them, still comes from the caller's PATH, and `ripples` still calls `sacct` from PATH. It reads `--time`, `--nodes` and `--array` as `--long=V`, `--long V`, `-sV` and `-s V`, in the script's `#SBATCH` lines and on its command line. It refuses a word it cannot map to exactly one option of Slurm 24.05's `sbatch`: a shortened long option such as `--arr`, short options bundled after one that takes no value such as `-Ha0-999`, or a stray word. It adds `--ignore-pbs`, so `#PBS` lines set nothing, and puts the values it checked last on the `sbatch` line, where they win.
+Behind the broker, the agent sends only what it typed; the broker reads the script's bytes itself, re-parses its options and `#SBATCH` lines, and recomputes the spec, the price and the decision, so nothing the agent states enters a number. In local mode, with no broker, the same code runs in the agent's own process, with the agent's PATH and git; the record it writes says `unsigned`, and `guard status` says so too.
 
 None of these reaches the CI fence or the bank limit. The fence uses `pull_request_target`, so GitHub runs the base branch's workflow and fence script from GitHub's copy of the branch, and it fetches the pull request only as data. A capped sub-account refuses jobs whichever script submitted them.
 

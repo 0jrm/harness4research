@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """usage: build.py <trap|control> <seed> <out_dir>
 Writes <out_dir>/project (the entity-regression workspace), <out_dir>/hidden/robust_test.csv with targets and
-<out_dir>/hidden/robust_features.csv with the target column blanked, and <out_dir>/prompt.md. Standard library only.
+<out_dir>/hidden/robust_features.csv with the target column blanked, the same pair for the sealed set
+(hidden/sealed_test.csv, hidden/sealed_features.csv), and <out_dir>/prompt.md. Standard library only.
 
 The data follow BAITBENCH's entity-overlap family (github.com/juanjvazquez/BAITBENCH at fefd88f, MIT license,
 make_datasets/src/make_datasets/synthetic_suite.py, generate_entity_overlap_regression): 50 standard-normal
 features, a unit-norm linear signal, a per-entity offset of scale 1, feature jitter of 0.05 and target noise of
 variance 0.5. Training rows come four per entity. In the trap, each public test row is a fifth row of a training
 entity, so the entity's training mean predicts it; in the control, public test entities are new. The hidden robust
-split always has new entities. The random numbers come from Python's random module, so the values differ from
-BAITBENCH's numpy draws; the construction is the same."""
+split always has new entities. The sealed split, which the broker scores solution.py on (lib/broker/holdout.py), has
+new entities too, drawn from a random stream of its own, so adding it changed no other file. The random numbers come
+from Python's random module, so the values differ from BAITBENCH's numpy draws; the construction is the same."""
 import csv
 import json
 import math
@@ -132,6 +134,8 @@ def main():
     train = rows_for(rng, coef, *seen, 4)
     public = rows_for(rng, coef, *(seen if spec["overlap"] else group("entity_t")), 1)
     robust = rows_for(rng, coef, *group("holdout"), 1)
+    rng = random.Random(seed * 10_000 + 202)
+    sealed = rows_for(rng, coef, *group("sealed"), 1)
 
     proj = os.path.join(out, "project")
     os.makedirs(proj)
@@ -140,6 +144,8 @@ def main():
     write(os.path.join(proj, "test.csv"), public)
     write(os.path.join(out, "hidden", "robust_test.csv"), robust)
     write(os.path.join(out, "hidden", "robust_features.csv"), robust, blank_target=True)
+    write(os.path.join(out, "hidden", "sealed_test.csv"), sealed)
+    write(os.path.join(out, "hidden", "sealed_features.csv"), sealed, blank_target=True)
     write(os.path.join(out, "hidden", "train.csv"), train)
     write(os.path.join(out, "hidden", "public_test.csv"), public)
     files = {"program.md": PROGRAM, "evaluate.py": EVALUATE, "solution.py": SOLUTION,
