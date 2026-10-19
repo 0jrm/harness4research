@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Sourced by tests/run.sh, in its fixture; split verbatim from the v7 suite.
-echo "== v6.1 to v7 migration"
+echo "== v6.1 goes through v7.0"
 # A project guarded by v6.1, at the commit its tag names, with its budget filled in and merged to main.
 v61=6f8fd7834c4d1ab5ad95b9216b6e1a87799aa82b
 git clone -q --shared --no-checkout "$here" "$tmp/h-v6.1" 2>/dev/null; git -C "$tmp/h-v6.1" checkout -q --detach "$v61"
@@ -19,32 +19,17 @@ git switch -q --detach origin/main; sed -i '/^schema:/d; /^release:/d' guard/VER
 git push -q origin HEAD:main; git fetch -q origin
 expect version-no-release-stamp ok "^project older, installed before release stamps; run guard init $tmp/[^ ]+ --update$" -- "$guard" version
 expect version-no-release-header ok 'guard schema 1, installed from ' -- "$guard" version
-expect update-schema-1 ok '^  guard/VERSION$' -- "$guard" init "$M" --update --online --worktree "$M.s1" --branch guard/s1
-expect update-writes-schema ok "^schema: $(cat "$here/SCHEMA")$" -- grep '^schema:' "$M.s1/guard/VERSION"
+# Schema 8 migrates schema 7 only (design-v8, question 12): a v6.1 project, or one before release stamps, is sent
+# through v7.0's --update, and nothing is proposed.
+expect update-schema-1-refused fail "^v61 is guard schema 1, and this harness migrates schema 7 only\. Migrate it with v7\.0 first" -- \
+  "$guard" init "$M" --update --online --worktree "$M.s1" --branch guard/s1
 git push -q -f origin "$m61":main; git fetch -q origin
-expect migrate-proposes ok '^  guard/bin/$' -- bash -c 'set -o pipefail; "$1" init "$2" --update --online --worktree "$2.up" | tee "$2.up.out"' _ "$guard" "$M"
-# The proposal is exactly: guard/bin/ deleted, the harness: line added, guard/run replaced, guard/VERSION rewritten, and
-# the workflow replaced when the template changed since v6.1.
-want=$( { git ls-tree -r --name-only origin/main guard/bin/ | sed 's/^/D\t/'; printf 'M\t%s\n' guard/VERSION guard/budget.card guard/run
-  git show origin/main:.github/workflows/guard-fence.yml | cmp -s - "$here/templates/github/workflows/guard-fence.yml" \
-    || printf 'M\t.github/workflows/guard-fence.yml\n'; } | sort)
-expect migrate-bin-had-scripts ok '^6$' -- bash -c 'grep -c "^D	guard/bin/" <<<"$1"' _ "$want"
-expect migrate-files-exact ok '^$' -- diff <(echo "$want") <(changes "$M.up")
-expect migrate-card-one-line ok "^\+harness: $pin $" -- card_lines "$M.up"
-expect migrate-run-is-shim ok - -- cmp "$here/templates/guard/run" "$M.up/guard/run"
-expect migrate-run-executable ok - -- test -x "$M.up/guard/run"
-expect migrate-writes-version ok "^installer: $(git -C "$here" rev-parse HEAD)$" -- grep '^installer:' "$M.up/guard/VERSION"
-expect migrate-says-bin-gone ok 'a site edit to guard/bin/ no longer runs' -- cat "$M.up.out"
-expect migrate-offline-adds-artifact ok '^$' -- bash -c '"$1" init "$2" --update --offline --worktree "$2.off" --branch guard/off >/dev/null &&
-  diff <( { echo "$3"; printf "A\t%s\n" "$4"; } | sort) <(git -C "$2.off" diff --name-status --no-renames origin/main HEAD | sort)' _ "$guard" "$M" "$want" "$art"
-git -C "$M.up" push -q origin guard/update:main; git fetch -q origin; git switch -q --detach origin/main
-expect migrate-runs-pin ok - -- bash -c '[ "$(HPC_HARNESS="$1" guard/run --show fence)" = "$(git -C "$2" show "$3:lib/guard/fence.sh")" ]' _ "$hc" "$here" "$pin_commit"
-expect migrate-fence-passes ok 'PASS	guard-untouched' -- env HPC_HARNESS="$hc" guard/run fence origin/main HEAD
-expect migrate-version-current ok '^current$' -- env HPC_HARNESS="$hc" "$guard" version
-expect migrate-once ok 'Nothing proposed\.$' -- "$guard" init "$M" --update --worktree "$M.up2" --branch guard/again
-git revert --no-edit HEAD >/dev/null; git push -q origin HEAD:main; git fetch -q origin
-expect migrate-rollback ok '^mode none: ' -- "$guard" version
-expect migrate-rollback-runs-bin ok 'PASS	guard-untouched' -- env PATH="$(path_without guard)" guard/run fence origin/main HEAD
+expect update-schema-6-refused fail "^v61 is guard schema 6, and this harness migrates schema 7 only\." -- "$guard" init "$M" --update --online --worktree "$M.up"
+expect update-schema-6-v7-command fail "^  git -C $here worktree add --detach [^ ]+ v7\.0 && [^ ]+/bin/guard init $M --update$" -- \
+  "$guard" init "$M" --update --offline --worktree "$M.up"
+expect update-schema-6-nothing ok - -- test ! -e "$M.up"
+expect update-schema-6-no-branch fail - -- git -C "$M" rev-parse --verify -q refs/heads/guard/update
+expect v61-runs-bin ok 'PASS	guard-untouched' -- env PATH="$(path_without guard)" guard/run fence origin/main origin/main
 cd "$tmp/wt" || exit 1
 
 expect skill-states-schema ok - -- grep -q "describes guard schema $(cat "$here/SCHEMA")\." "$here/skills/safe-autonomous-hpc-science/SKILL.md"

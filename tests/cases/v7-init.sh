@@ -14,9 +14,15 @@ set_script() {
 expect init-proposes ok 'guard/budget.card' -- bash -c 'set -o pipefail; "$1" init "$2" --worktree "$3" --offline | tee "$4"' _ \
   "$guard" "$tmp/proj" "$tmp/wt" "$tmp/init.out"
 expect init-no-bin ok - -- test ! -e "$tmp/wt/guard/bin"
+expect init-no-card-template ok - -- test ! -e "$tmp/wt/runs/_template/question.card"
+expect init-agents-four-verbs ok - -- cmp "$here/templates/AGENTS.md" "$tmp/wt/AGENTS.md"
+bk=${XDG_STATE_HOME:-$HOME/.local/state}/guard/key.pub
+if [ -s "$bk" ]; then bk_want="^broker_key: $(head -n1 "$bk" | sed 's/[][\\.*^$+?(){}|/]/\\&/g')$"; else bk_want='^broker_key: <'; fi
+expect init-broker-key ok "$bk_want" -- grep '^broker_key:' "$tmp/wt/guard/budget.card"
+expect init-version-schema ok "^schema: $(cat "$here/SCHEMA")$" -- grep '^schema:' "$tmp/wt/guard/VERSION"
 expect init-pins-harness ok "^harness: $pin$" -- sed -n 1p "$tmp/wt/guard/budget.card"
 expect init-offline-artifact ok "^# harness: $pin, commit $(git -C "$here" rev-parse HEAD)\." -- sed -n 2p "$tmp/wt/$art"
-expect init-artifact-every-script ok '^6$' -- grep -c '^#== lib/guard/[a-z]*\.sh$' "$tmp/wt/$art"
+expect init-artifact-every-script ok "^$(git -C "$here" ls-tree --name-only HEAD lib/guard/ | grep -c '\.sh$')$" -- grep -c '^#== lib/guard/[a-z-]*\.sh$' "$tmp/wt/$art"
 expect init-artifact-inert fail 'guard/run reads its scripts from this file' -- bash "$tmp/wt/$art"
 expect init-says-offline ok "^Mode: offline\. --offline was given, so guard/run reads the scripts from $art on the protected branch\.$" -- \
   cat "$tmp/init.out"
