@@ -109,7 +109,7 @@ cat > "$rb/sbatch" <<SH
 #!/usr/bin/env bash
 [ ! -e $rs/err ] || { echo "sbatch: error: \$(cat $rs/err)" >&2; exit 1; }
 n=\$(( \$(cat $rs/next 2>/dev/null || echo 1000) + 1 )); echo \$n > $rs/next
-printf '%s\n' "\$*" >> $rs/sbatch.log; echo RUNNING > $rs/state/\$n; echo \$n
+printf '%s\n' "\$*" >> $rs/sbatch.log; echo RUNNING > $rs/state/\$n; echo "user=\$USER" >> $rs/user.log; echo \$n
 SH
 cat > "$rb/sacct" <<SH
 #!/usr/bin/env bash
@@ -146,6 +146,9 @@ expect run-submits ok '^job 1001 submitted for run sim: 5 min x 1 node\(s\) x 4 
 expect run-card-local ok '^written_by: guard run, local, unsigned$' -- git -C "$tmp/run-origin.git" show run/sim:runs/sim/question.card
 expect run-card-keys ok '^why command backend minutes nodes cores gpus tasks core_hours gpu_hours session written_by $' -- \
   bash -c "git -C '$tmp/run-origin.git' show run/sim:runs/sim/question.card | cut -d: -f1 | tr '\n' ' '"
+# Local mode is the user's own shell: its sbatch sees the user's environment (USER is how a site's client, and the
+# evaluation's fake Slurm, names the job's owner, so sacct and guard wait find the job).
+expect run-local-env ok '^user=tester$' -- tail -1 "$rs/user.log"
 expect run-sbatch-argv ok '--account=gom --job-name=sim --comment=guard:local:1 --time=5 --nodes=1' -- tail -1 "$rs/sbatch.log"
 expect_refusal run-r11-e2e R11 -- gr runs/sim --why "Run the configured steps." -- job.sh
 ended

@@ -17,6 +17,13 @@ def git(*args, cwd=None):
     return done.stdout.strip() if done.returncode == 0 else None
 
 
+def user_env():
+    """The environment the scheduler's clients run in. A broker clears it, since its sbatch is not the agent's; here
+    the shell is the user's own, and a site's sbatch, or the evaluation's fake one, names the job's owner by USER and
+    finds its controller by SLURM_CONF, so they keep it. The job itself still starts with --export=NONE."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GUARD_")}
+
+
 def project_broker(cwd=None):
     """The Broker for the git project around cwd, made on first use."""
     top = git("rev-parse", "--show-toplevel", cwd=cwd)
@@ -27,7 +34,7 @@ def project_broker(cwd=None):
     os.makedirs(state, exist_ok=True)
     cfg = {"session": "local", "project": top, "paths": [[top, top]],
            "origin": git("remote", "get-url", "origin", cwd=top) or top,
-           "slurm_bin": os.path.dirname(shutil.which("sbatch") or "") or None, "slurm_env": {},
+           "slurm_bin": os.path.dirname(shutil.which("sbatch") or "") or None, "slurm_env": user_env(),
            "user": os.environ.get("USER", ""), "compute_bwrap": False}
     return scheduler.Broker(state, cfg)
 
