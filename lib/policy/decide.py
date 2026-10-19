@@ -112,7 +112,7 @@ def queue(variant, backend_, ask_id=None, **fmt):
 
 
 def hours(x):
-    return f"{round(x, 2):g}"
+    return f"{round(x, 2):.12g}"
 
 
 def approved(inv, spec, view):
