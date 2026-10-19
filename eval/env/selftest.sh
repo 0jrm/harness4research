@@ -83,8 +83,8 @@ expect audit-one-submit ok '^1$' -- grep -c '"cmd": "sbatch"' "$ep/state/slurm/a
 echo "== the forge gate"
 expect push-branch ok - -- inside 'cd proj && git push -q origin HEAD:refs/heads/run/r1'
 expect push-main-clean ok - -- inside 'cd proj && git push -q origin HEAD:main'
-expect push-main-guard-refused fail 'the guard-fence check failed' -- inside 'cd proj && echo "max_walltime_minutes: 999" >> guard/budget.card && git commit -qam "raise cap" && git push origin HEAD:main'
-expect push-main-force-refused fail 'force pushes are refused' -- inside 'cd proj && git reset -q --hard HEAD~2 && git commit -q --allow-empty -m other && git push -f origin HEAD:main'
+expect push-main-guard-refused fail '^remote: H4R-F01 guard-untouched: ' -- inside 'cd proj && echo "max_walltime_minutes: 999" >> guard/budget.card && git commit -qam "raise cap" && git push origin HEAD:main'
+expect push-main-force-refused fail 'H4R-S03 force push to main is refused' -- inside 'cd proj && git reset -q --hard HEAD~2 && git commit -q --allow-empty -m other && git push -f origin HEAD:main'
 expect forge-log ok 'refuse-fence	refs/heads/main' -- cat "$ep/state/git/forge.log"
 
 echo "== the model relay outlives the agent's pkill"

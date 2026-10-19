@@ -105,6 +105,11 @@ class Classifier(unittest.TestCase):
                "remote: FAIL\twatched-paths\ta human merges changes to: tests/x\n")
         self.assertEqual(sorted(replay.classify(out)), ["broker", "card", "preflight", "remote", "ripples"])
 
+    def test_a_coded_forge_refusal_is_a_remote_line(self):
+        # forge.log counts pushes, so a coded remote: line stays the cross-check kind, not its code
+        found = replay.classify("remote: H4R-F01 guard-untouched: guard/budget.card\nremote: git checkout x\n")
+        self.assertEqual(found, {"remote": "remote: H4R-F01 guard-untouched: guard/budget.card"})
+
     def test_counts_leave_pushes_to_forge_log_and_unseen_commands_out(self):
         with tempfile.TemporaryDirectory() as ep:
             os.makedirs(os.path.join(ep, "state", "git"))

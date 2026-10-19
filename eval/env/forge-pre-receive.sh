@@ -42,14 +42,21 @@ card_tag_problem() {
     || echo "card/$run points at a commit without runs/$run/question.card"
 }
 
-# unsigned_record <new>: prints the first new commit that writes a run's ledger or card without a trusted signature.
+# unsigned_record <new>: the first new commit that writes a run's ledger or card without a trusted signature, as a
+# refusal's two lines: F03 for a card, F05 for a ledger (design-v8 section 6).
 unsigned_record() {
-  local c paths
+  local c paths card
   while read -r c; do
     paths=$(git diff-tree -r -c --no-commit-id --name-only --root "$c" \
       | grep -E '^runs/[^/]+/(execution\.tsv|question\.card)$' | grep -v '^runs/_template/' | tr '\n' ' ')
-    [ -z "$paths" ] || git verify-commit "$c" >/dev/null 2>&1 \
-      || { echo "commit ${c:0:12} writes ${paths% } without the broker's signature; use guard ledger add or guard card add"; return; }
+    [ -z "$paths" ] || git verify-commit "$c" >/dev/null 2>&1 && continue
+    card=$(tr ' ' '\n' <<<"$paths" | grep -m1 'question\.card$')
+    if [ -n "$card" ]; then
+      printf 'H4R-F03 %s is a card only the broker writes\ngit rm -q -- %s && git commit --amend --no-edit --allow-empty\n' "$card" "$card"
+    else
+      printf "H4R-F05 execution-ledger: commit %s writes %s without the broker's signature\nnone\n" "${c:0:12}" "${paths% }"
+    fi
+    return
   done < <(git rev-list "$1" --not --all)
 }
 
@@ -81,11 +88,13 @@ while read -r old new ref; do
       echo "main is a protected branch: it cannot be deleted."; log refuse-delete "$ref" "$old" "$new"; status=1; continue
     fi
     if [ "$old" != "$zero" ] && ! git merge-base --is-ancestor "$old" "$new"; then
-      echo "main is a protected branch: force pushes are refused."; log refuse-force "$ref" "$old" "$new"; status=1; continue
+      printf 'H4R-S03 force push to main is refused; a landed commit is redone, not rewritten\ngit pull --rebase origin main\n'
+      log refuse-force "$ref" "$old" "$new"; status=1; continue
     fi
     if [ "$old" != "$zero" ] && runner=$(git show "$old:guard/run" 2>/dev/null); then
       if ! out=$(HPC_GUARD_REF=$old HPC_GUARD_LOCAL=0 bash -c "$runner" guard/run fence "$old" "$new" 2>&1); then
-        echo "main is a protected branch: the guard-fence check failed."
+        # The fence's last two lines are its first FAIL as a refusal (H4R-<code>, then the repair); they come first.
+        grep -A1 -m1 '^H4R-' <<<"$out" || echo "main is a protected branch: the guard-fence check failed."
         grep -E '^(FAIL|WARN)' <<<"$out"
         log refuse-fence "$ref" "$old" "$new"; status=1; continue
       fi
@@ -105,10 +114,11 @@ while read -r old new ref; do
   fi
   if [ "$records" = signed ]; then
     if [[ $ref == refs/tags/card/* ]] && why=$(card_tag_problem "$old" "$new" "$ref") && [ -n "$why" ]; then
+      printf 'H4R-F03 card/%s is a card only the broker writes\ngit tag -d card/%s\n' "${ref#refs/tags/card/}" "${ref#refs/tags/card/}"
       echo "$ref refused: $why."; log refuse-tag "$ref" "$old" "$new"; status=1; continue
     fi
     if [ "$new" != "$zero" ] && why=$(unsigned_record "$new") && [ -n "$why" ]; then
-      echo "$ref refused: $why."; log refuse-unsigned "$ref" "$old" "$new"; status=1; continue
+      echo "$why"; log refuse-unsigned "$ref" "$old" "$new"; status=1; continue
     fi
   fi
   log accept "$ref" "$old" "$new"

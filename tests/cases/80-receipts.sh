@@ -179,3 +179,16 @@ RECEIPTS_EMAIL=pi@lab.example r add job r1 '{"job": "2"}' >/dev/null
 expect receipts-committer-email ok '^pi@lab.example$' -- git -C "$R/origin.git" log -1 --format=%ce refs/heads/guard/receipts
 unset FORGE_LOG
 cd "$tmp" || exit 1
+
+# The forge's own refusals carry codes (design-v8 section 6): an unsigned card is F03, a moved main S03.
+fz=$tmp/forge-codes; git init -q --bare -b main "$fz/origin.git"
+cp "$here/eval/env/forge-pre-receive.sh" "$fz/origin.git/hooks/pre-receive"; chmod +x "$fz/origin.git/hooks/pre-receive"
+git -C "$fz/origin.git" config guard.records signed
+git clone -q "$fz/origin.git" "$fz/w" 2>/dev/null
+git -C "$fz/w" commit -q --allow-empty -m one; git -C "$fz/w" commit -q --allow-empty -m two; git -C "$fz/w" push -q origin HEAD:main
+mkdir -p "$fz/w/runs/r1"; echo "why: w" > "$fz/w/runs/r1/question.card"
+git -C "$fz/w" add -A; git -C "$fz/w" commit -q -m card
+expect forge-f03-unsigned-card fail '^remote: H4R-F03 runs/r1/question.card is a card only the broker writes' -- \
+  git -C "$fz/w" push origin HEAD:refs/heads/run/r1
+expect forge-s03-force fail '^remote: H4R-S03 force push to main is refused' -- \
+  git -C "$fz/w" push -f origin HEAD~2:main

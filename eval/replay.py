@@ -204,7 +204,7 @@ KINDS = [
     ("broker", re.compile(r"^guard broker: refused|^(sbatch|squeue|sacct|scancel): refused")),
     ("gh", re.compile(r"^(gh: refused|guard (pr open|review|merge|ship): refused)")),
     ("guard", re.compile(r"^guard [\w -]{1,30}: refused")),
-    ("remote", re.compile(r"^remote: (FAIL\t|.* refused\b|main is a protected branch)")),
+    ("remote", re.compile(r"^remote: (FAIL\t|.* refused\b|main is a protected branch|H4R-[A-Z][0-9]{2} )")),
 ]
 
 
