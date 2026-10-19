@@ -196,3 +196,45 @@ r = run.redecide(b, a["effect"]); print(r.get("out", "") + r.get("err", ""))' "$
 else
   skip run-r08-e2e "lib/broker/asks.py (U4) is not in this harness"
 fi
+
+# On a host in launch_hosts (tests/mock-bin/hostname says skynet) the same guard run line launches under the supervisor,
+# boxed, with no sbatch on PATH; guard wait ends it, and a Slurm-only flag is R13 before anything starts.
+hq=$tmp/run-host; git init -q --bare -b main "$tmp/run-host-origin.git"; git clone -q "$tmp/run-host-origin.git" "$hq" 2>/dev/null
+mkdir -p "$hq/guard"
+cat > "$hq/guard/budget.card" <<CARD
+account: gom
+start_date: 2026-01-01
+stop_date: 2099-01-01
+cores_per_node: 4
+max_walltime_minutes: 10
+max_nodes_per_job: 1
+max_concurrent_jobs: 4
+max_core_hours: 100
+max_gpu_hours: 1
+launch_hosts: skynet
+host_max_walltime_minutes: 30
+host_max_mem_gb: 1
+host_min_available_gb: 0
+host_stop_grace_seconds: 1
+host_state_dir: $tmp/run-host-state
+CARD
+printf '#!/bin/bash\necho "host job $GUARD_JOB_ID"\n' > "$hq/job.sh"
+git -C "$hq" add -A; git -C "$hq" commit -q -m init; git -C "$hq" push -q -u origin main
+ghr() { (cd "$hq" && env -u GUARD_SESSION GUARD_SOCK_DIR="$tmp/run-nosock" PATH="$(path_without sbatch)" "$guard" "$@"); }
+expect_refusal run-host-r13-e2e R13 -- ghr run runs/h --why "Run it here." -- --time=5 --nodes=2 job.sh
+expect run-host-r13-e2e-line fail "^guard run runs/h --why 'Run it here.' -- --time=5 job.sh$" -- \
+  ghr run runs/h --why "Run it here." -- --time=5 --nodes=2 job.sh
+expect_refusal run-host-r13-gpu-e2e R13 -- ghr run runs/g --why "Run it here." -- --time=30 --gpus=4 job.sh
+if bwrap --unshare-user --ro-bind / / true 2>/dev/null; then
+  hl=$(ghr run runs/h --why "Run it here." -- --time=5 job.sh 2>&1)
+  expect run-host-launched ok '^job skynet-[0-9]{8}T[0-9]{6}Z launched for run h: 5 min x 1 cores x 0 GPUs = 0.08 core-h, 0 GPU-h; guard wait skynet-' -- echo "$hl"
+  hid=$(sed -n 's/^job \([^ ]*\) launched.*/\1/p' <<<"$hl")
+  for _ in $(seq 100); do [ -f "$tmp/run-host-state/$hid/end" ] && break; sleep 0.1; done
+  expect run-host-wait-ends ok "^job $hid .*(exited|COMPLETED)" -- ghr wait "$hid"
+  expect run-host-wait-log ok "^host job $hid$" -- ghr wait "$hid"
+  expect run-host-card ok '^backend: host$' -- git -C "$tmp/run-host-origin.git" show run/h:runs/h/question.card
+  expect run-host-log-row ok '"backend": "host"' -- grep -h '"state": "intent"' "$hq/.git/guard/broker/ledger.jsonl"
+else
+  skip run-host-launched "bwrap cannot make a user namespace on this host"
+fi
+rm -rf "${tmp:?}/run-host-state"

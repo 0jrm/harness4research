@@ -217,7 +217,7 @@ def r04_gpus(inv, spec, cost, limits, view, b):
 def r13_slurm_only(inv, spec, cost, limits, view, b):
     if b != "host":
         return None
-    given = [n for n, on in (("nodes", spec.nodes > 1), ("ntasks", spec.tasks is not None),
+    given = [n for n, on in (("nodes", spec.nodes > 1), ("ntasks", (spec.tasks or 1) > 1),
                              ("partition", spec.partition), ("array", spec.array), ("dependency", spec.dependency)) if on]
     if given:
         return refuse("R13", "slurm_only", next=line(inv, without(inv.options, SLURM_ONLY)),
@@ -244,18 +244,31 @@ def r13_gpu_hours(inv, spec, cost, limits, view, b):
                       remaining=hours(max(remaining, 0)), backend_=b)
 
 
+def holder(view, inv, key):
+    """guard wait on this session's live launch holding the most of what is short, else on any live launch, else
+    guard status. held rows are (job_id, session, gpus, mem_gb), as lib/broker/host.py reports them."""
+    mine = [h for h in getattr(view, "held", ()) if h[1] == inv.session]
+    if mine:
+        return f"guard wait {max(mine, key=key)[0]}"
+    return f"guard wait {view.live_launches[0]}" if view.live_launches else "guard status"
+
+
 def r14_host(inv, spec, cost, limits, view, b):
+    """This host now, in lib/broker/host.py check()'s order; the host checks again under its lock at launch."""
     if b != "host":
         return None
     h = view.host
-    holder = f"guard wait {h.live_launches[0]}" if h.live_launches else "guard status"
     if not h.bwrap:
         return refuse("R14", "bwrap", next="guard status", backend_=b)
-    if h.available_gb < limits.host_min_available_gb:
-        return refuse("R14", "memory", next=holder, host=h.name, available=f"{h.available_gb:g}",
-                      min=f"{limits.host_min_available_gb:g}", backend_=b)
+    if spec.gpus and getattr(h, "nvidia_smi", "ok") != "ok":
+        return refuse("R14", "nvidia_smi", next="guard status", backend_=b)
     if spec.gpus > len(h.gpus_free):
-        return refuse("R14", "gpus", next=holder, free=len(h.gpus_free), asked=spec.gpus, backend_=b)
+        return refuse("R14", "gpus", next=holder(h, inv, lambda x: len(x[2])), free=len(h.gpus_free),
+                      asked=spec.gpus, backend_=b)
+    mem = spec.mem_gb if spec.mem_gb is not None else limits.host_max_mem_gb
+    if h.available_gb - mem < limits.host_min_available_gb:
+        return refuse("R14", "memory", next=holder(h, inv, lambda x: x[3]), host=h.name,
+                      available=f"{h.available_gb - mem:g}", min=f"{limits.host_min_available_gb:g}", backend_=b)
 
 
 def r10_concurrent(inv, spec, cost, limits, view, b):
@@ -284,8 +297,8 @@ def r08_approval(inv, spec, cost, limits, view, b):
 
 
 RULES = (r12_outside, r07_script, r16_stop_date, r06_watched, r05_failed, r08_waiting, r11_identical, r17_partition,
-         r18_dependency, r19_output, r13_slurm_only, r13_mem, r14_host, r02_time, r03_nodes, r04_gpus, r13_time,
-         r13_gpu_hours, r10_concurrent, r08_budget, r08_approval)
+         r18_dependency, r19_output, r13_slurm_only, r13_time, r13_mem, r13_gpu_hours, r14_host, r02_time, r03_nodes,
+         r04_gpus, r10_concurrent, r08_budget, r08_approval)
 LIFTED_BY_YES = (r08_waiting, r08_budget, r08_approval)
 
 

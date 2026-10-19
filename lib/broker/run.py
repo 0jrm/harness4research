@@ -130,13 +130,18 @@ def run(broker, req, yes=None):
     c = cost(spec, lim, b)
     d = decide(inv, spec, c, lim, view)
     if d.verdict == "refuse":
-        if d.code in LIMIT_CODES and yes is None and optional("asks") and repeated(broker, d.code, inv):
+        if overage(d) and yes is None and optional("asks") and repeated(broker, d.code, inv):
             return ask(broker, inv, spec, lim, r, "limit", question=over_question(d.code, inv, spec), reason=d.reason)
         return refused(broker, refusals.Refusal(d.code, d.reason, d.next), r, inv)
     if d.verdict == "queue":
         return ask(broker, inv, spec, lim, r, None, decision=d,
                    question=f"run {inv.run_id}: submit {hours(c.core_hours)} core-h? {inv.why}")
     return submit(broker, inv, spec, c, lim, b, r, cwd, script_in, failed)
+
+
+def overage(d):
+    """A per-job overage a person may allow (question 11); a Slurm-only flag on a launch host is not one."""
+    return d.code in LIMIT_CODES and not d.reason.endswith("is not for a launch host")
 
 
 def read_script(broker, script_in):
@@ -298,16 +303,13 @@ def job_rows(broker, session):
     ids = [outcome[r["seq"]]["job"] for r in intents
            if outcome.get(r["seq"], {}).get("state") == "submitted" and r.get("backend", "slurm") == "slurm"]
     states = slurm_states(broker, ids)
-    host = optional("host")
+    hosts = host_states(broker, [outcome[r["seq"]]["job"] for r in intents
+                                 if outcome.get(r["seq"], {}).get("state") == "submitted" and r.get("backend") == "host"])
     out = []
     for r in intents:
         o = outcome.get(r["seq"], {})
         job = o.get("job")
-        if job and r.get("backend", "slurm") == "host":
-            got = host.state(job) if host and hasattr(host, "state") else ""
-            word = (got.get("state") if isinstance(got, dict) else got) or ""
-        else:
-            word = states.get(job, "") if job else ""
+        word = (hosts if r.get("backend") == "host" else states).get(job, "") if job else ""
         if o.get("state") == "submitted" and not word:
             word = "PENDING"
         log = os.path.join(r["cwd"], expand(r["output"], job, r["run"])) if job and r.get("output") else ""
@@ -317,6 +319,25 @@ def job_rows(broker, session):
                            script_sha256=r.get("script_sha256", ""), options=tuple(r.get("options") or ()),
                            args=tuple(r.get("args") or ()), log=log, sched_state=word))
     return out
+
+
+# launch.sh's end states as the Slurm words R05 and R10 read
+HOST_WORD = {"HOST_OUT_OF_MEMORY": "OUT_OF_MEMORY", "SUPERVISOR_FAILED": "FAILED", "LAUNCH_FAILED": "FAILED"}
+
+
+def host_states(broker, ids):
+    """{host job id: its state word} from launch.sh --list, read once; {} when no host backend can say."""
+    host = optional("host")
+    if not ids or host is None:
+        return {}
+    try:
+        h = host.Host.of(broker, fetch=False)
+        rc, out, _ = h.sh("--list", h.dir, h.project)
+    except Refused:
+        return {}
+    rows = [line.split("\t") for line in out.splitlines()] if rc == 0 else []
+    col = rows[0].index("state") if rows and "state" in rows[0] else None
+    return {r[0]: HOST_WORD.get(r[col], r[col]) for r in rows[1:] if col is not None and len(r) > col and r[0] in ids}
 
 
 def budget(broker, lim):
@@ -337,8 +358,12 @@ def host_view(broker, lim):
     if not lim.launch_hosts:
         return None, 0.0
     host = optional("host")
-    if host is not None and hasattr(host, "view"):
-        return host.view(broker, lim), host.spent_gpu_hours(broker, lim)
+    if host is not None:
+        try:
+            v = host.Host.of(broker, fetch=False).view()
+            return v, v.spent_gpu_hours
+        except Refused:
+            pass
     name = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip()
     return HostView(name=name, in_launch_hosts=name in lim.launch_hosts, available_gb=0.0), 0.0
 
@@ -383,13 +408,13 @@ def submit(broker, inv, spec, c, lim, b, r, cwd, script_in, failed):
         return {"rc": 1, "err": f"guard broker: refused: {e}\n"}
     seq = 1 + sum(row["state"] == "intent" for row in broker.rows)
     comment = f"guard:{inv.session}:{seq}"
-    output = spec.output or ("slurm-%A_%a.out" if spec.array else "slurm-%j.out")
+    output = spec.output or ("launch-%j.log" if b == "host" else "slurm-%A_%a.out" if spec.array else "slurm-%j.out")
     row = {"seq": seq, "state": "intent", "run": inv.run_id, "run_id": inv.run_id, "comment": comment, "backend": b,
            "why": inv.why,
            "cost": dataclasses.asdict(c), "script_sha256": inv.script_sha256, "options": list(inv.options),
            "args": list(inv.args), "cwd": cwd, "output": output}
     if b == "host":
-        return launch_host(broker, inv, spec, c, row, r, script_in)
+        return launch_host(broker, inv, spec, c, row, r)
     spool = os.path.join(broker.dir, "spool", str(seq))
     os.makedirs(spool, exist_ok=True)
     wrapper = os.path.join(spool, "job.sh")
@@ -422,18 +447,21 @@ def submit(broker, inv, spec, c, lim, b, r, cwd, script_in, failed):
                             f"{lim.cores_per_node} cores{tasks} = {hours(c.core_hours)} core-h; guard wait {job}\n"}
 
 
-def launch_host(broker, inv, spec, c, row, r, script_in):
-    """The host backend: lib/broker/host.py's launch under the supervisor (U8); R14 when it does not start."""
+def launch_host(broker, inv, spec, c, row, r):
+    """The host backend: lib/broker/host.py's launch under the supervisor, boxed (U8). It checks R13 and R14 again
+    under the host lock, so a launch that lost a race is refused there; R14 when the supervisor does not start."""
     host = optional("host")
     broker.write(row)
     try:
-        if host is None or not hasattr(host, "launch"):
+        if host is None:
             raise Refused("lib/broker/host.py is not in this harness")
-        job = host.launch(broker, spec, broker.outside(os.path.join(row["cwd"], f"runs/{inv.run_id}")),
-                          [broker.outside(script_in), *inv.args])
+        got = host.Host.of(broker, fetch=False).launch(inv, spec, r.run_dir)
     except Refused as e:
-        broker.write({"seq": row["seq"], "state": "failed", "why": str(e)})
-        return refused(broker, refusals.refuse("R14", "supervisor", next="guard status", reason=str(e)[:200]), r, inv)
+        got = refusals.refuse("R14", "supervisor", next="guard status", reason=str(e)[:200])
+    if isinstance(got, refusals.Refusal):
+        broker.write({"seq": row["seq"], "state": "failed", "why": got.reason})
+        return refused(broker, got, r, inv)
+    job = got.job_id
     broker.write({"seq": row["seq"], "state": "submitted", "job": job, "job_id": job})
     return {"rc": 0, "out": f"job {job} launched for run {inv.run_id}: {c.minutes} min x {c.cores} cores x {c.gpus} "
                             f"GPUs = {hours(c.core_hours)} core-h, {hours(c.gpu_hours)} GPU-h; guard wait {job}\n"}
