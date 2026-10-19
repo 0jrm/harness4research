@@ -32,7 +32,7 @@ from broker.records import IDENT, Refused, read_rows
 from broker.scheduler import JOB_ID
 from policy import Cost, HostView, Request
 from policy.cost import CardError, cost, limits as read_limits
-from policy.decide import (ENDED_BADLY, LIMIT_CODES, R08_MORE, RunView, ViewJob, backend, decide, hours, known_options,
+from policy.decide import (ENDED_BADLY, LIMIT_CODES, RunView, ViewJob, backend, decide, hours, known_options,
                            line)
 from policy.invocation import Unparsed, parse, run_line, to_minutes
 
@@ -198,7 +198,7 @@ def ask(broker, inv, spec, lim, r, variant, question, decision=None, reason=None
     a = asks.open_effect(broker, inv.run_id) or asks.create_effect(broker, "submit", inv.run_id, question,
                                                                     inv.script_sha256, spec_d, lim.ask_deadline)
     due = asks.clock(a["due_ts"]).removesuffix(" UTC")
-    text = decision.reason if decision else R08_MORE[variant].format(reason=reason, ask="{ask}", due="{due}")
+    text = decision.reason if decision else refusals.CODES["R08"].reasons[variant].format(reason=reason, ask="{ask}", due="{due}")
     rf = refusals.Refusal("R08", text.format(ask=a["id"], due=due), "guard status")
     log_refusal(broker, rf, r, inv, request=dataclasses.asdict(r), spec=spec_d, ask=a["id"])
     return refusals.reply(rf)

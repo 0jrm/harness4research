@@ -13,7 +13,7 @@ Every refusal is two lines: `H4R-<code> <reason>`, then a command to run as it i
 | R05 | run | `job <job> ended <state>; read its log, then rerun with --cause and what went wrong` | `cat <log>` | 2 |
 | R06 | run | `<paths> differ from main and the human owns them` | `git checkout origin/main -- <paths>` | 2 |
 | R07 | run | `<script> is not a file`; or `sbatch said: <line>` | the agent's command, corrected | 2 |
-| R08 | run | `<core_hours> core-h is over the remaining <remaining>; queued as ask <ask>, default no at <due> UTC`; or `<core_hours> core-h is over run <run>'s cap <cap>; queued as ask <ask>, default no at <due> UTC` | `guard status` | 3 |
+| R08 | run | `<core_hours> core-h is over the remaining <remaining>; queued as ask <ask>, default no at <due> UTC`; or `<core_hours> core-h is over run <run>'s cap <cap>; queued as ask <ask>, default no at <due> UTC`; or `approval is queue on guard/budget.card; queued as ask <ask>, default no at <due> UTC`; or `<reason>; asked a person as ask <ask>, default no at <due> UTC`; or `run <run> already waits on ask <ask>, default no at <due> UTC` | `guard status` | 3 |
 | R09 | old path | `<old> is gone; guard run writes the card and prices the job` | the agent's command, corrected | 2 |
 | R10 | run | `<n> jobs live is max_concurrent_jobs` | `guard wait <oldest>` | 2 |
 | R11 | run | `this exact job is already <state> as <job>` | `guard wait <job>` | 2 |

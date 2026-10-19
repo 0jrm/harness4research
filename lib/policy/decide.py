@@ -28,13 +28,6 @@ FLAG = {"time": ("--time", "-t"), "nodes": ("--nodes", "-N"), "gpus": ("--gpus",
         "partition": ("--partition", "-p"), "array": ("--array", "-a"), "dependency": ("--dependency", "-d"),
         "ntasks": ("--ntasks", "-n"), "output": ("--output", "-o")}
 SLURM_ONLY = ("nodes", "ntasks", "partition", "array", "dependency")
-# R08 lines lib/refusals.py does not have yet (a change for U1's file): the card's approval: queue, the second identical
-# per-job overage, and a run that already waits on an ask.
-R08_MORE = {"approval": "approval is queue on guard/budget.card; queued as ask {ask}, default no at {due} UTC",
-            "limit": "{reason}; asked a person as ask {ask}, default no at {due} UTC",
-            "open": "run {run} already waits on ask {ask}, default no at {due} UTC"}
-
-
 @dataclass(frozen=True)
 class ViewJob(JobRow):
     """A JobRow with what decide() also reads: the job's arguments (R11's key), its log as the agent's sandbox sees it
@@ -107,7 +100,7 @@ def status_next(code, variant, backend_, **fmt):
 
 
 def queue(variant, backend_, ask_id=None, **fmt):
-    reason = (refusals.CODES["R08"].reasons.get(variant) or R08_MORE[variant]).format(ask="{ask}", due="{due}", **fmt)
+    reason = refusals.CODES["R08"].reasons[variant].format(ask="{ask}", due="{due}", **fmt)
     return Decision("queue", backend_, code="R08", reason=reason, next="guard status", ask_id=ask_id)
 
 

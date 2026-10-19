@@ -137,3 +137,9 @@ expect foundation-r09-sbatch-bare fail "^guard run runs/job --why 'Run job.sh fo
 expect_refusal foundation-r09-sbatch-version R09 -- bash -c "cd '$sb/proj' && '$sb/bin/sbatch' --version"
 expect foundation-r09-card-line fail "^guard run runs/run-001 --why 'Run job.sh for run run-001.' -- job.sh$" -- \
   bash -c "cd '$sb/proj' && '$guard' card add run-001 runs/run-001/question.card"
+
+# Every R08 line is in the refusal table, so docs/refusals.md lists them: budget, run cap, approval: queue, a per-job
+# limit asked twice, and a run that already waits on an ask.
+expect foundation-r08-variants ok '^approval budget limit open run$' -- py '
+import refusals
+print(" ".join(sorted(refusals.CODES["R08"].reasons)))'
