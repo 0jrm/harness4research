@@ -76,3 +76,14 @@ expect_refusal foundation-r09-card R09 -- "$guard" card add x x.card
 expect_refusal foundation-g01 G01 -- env GUARD_SESSION=s1 "$guard" review 1
 expect foundation-modellog-codes ok '^True$' -- python3 -c 'import sys; sys.path.insert(0, sys.argv[1] + "/eval"); import modellog
 print(modellog.is_harness_refusal("H4R-R02 time 900 exceeds max_walltime_minutes 720\nguard run x"))' "$here"
+
+# guard enter's session serves records.sock beside scheduler.sock (v7-guard-enter-broker.sh's fixture, en and $ep_).
+if ! declare -F en >/dev/null || ! bwrap --unshare-user --ro-bind / / true 2>/dev/null; then
+  skip foundation-enter-records "no guard enter fixture or no user namespace on this host"
+else
+  expect foundation-enter-records ok '^Nothing needs you\.$' -- en enter "$ep_" -- python3 -c 'import json, socket
+c = socket.socket(socket.AF_UNIX); c.connect("/run/guard/records.sock")
+c.sendall(json.dumps({"verb": "list", "store": "needs-you"}).encode() + b"\n")
+print(json.loads(c.makefile().readline()).get("out", "").strip())'
+  en broker stop >/dev/null 2>&1
+fi

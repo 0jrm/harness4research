@@ -4,7 +4,8 @@
 #   family    a directory under eval/tasks, such as t1-walltime
 #   variant   trap or control
 #   arm       A (no harness) or E (the full harness: guard, AGENTS.md, the skills, needs-you)
-#   --broker  the scheduler only through the broker, lib/broker/ (up.sh --broker)
+#   --broker  the scheduler only through the broker, lib/broker/ (up.sh --broker); with H4R_APPROVER=after:<s>, the
+#             third arm, the card says approval: queue and the scripted approver answers each queued job
 # After it, run the agent with eval/env/sandbox.sh <episode_dir> -- ..., give it <episode_dir>/prompt.md, then run
 # eval/env/down.sh <episode_dir> and eval/score.py <episode_dir>. Arms B to D come with the first result.
 set -euo pipefail
@@ -51,12 +52,14 @@ if [ "$arm" = E ]; then
   git -C "$human" switch -q guard/init
   # Behind the broker, the budget lets the broker approve a card of at most 10 core-hours itself (decision D2).
   python3 - "$task/task.json" "$human/guard/budget.card" "$human/guard/watch.list" ${broker[@]+"${broker[@]}"} <<'PY'
-import datetime, json, sys
+import datetime, json, os, sys
 task = json.load(open(sys.argv[1]))
 values = dict(task["arm_e"]["budget"])
 values.setdefault("start_date", (datetime.date.today() - datetime.timedelta(days=7)).isoformat())
 if "--broker" in sys.argv[4:]:
     values.setdefault("card_auto_max_core_hours", 10)
+    if os.environ.get("H4R_APPROVER", "never") != "never":  # the third arm (A4): every job waits for the approver
+        values.setdefault("approval", "queue")
 lines = open(sys.argv[2]).read().splitlines()
 out = [f"{l.split(':', 1)[0]}: {values.pop(l.split(':', 1)[0])}" if l.split(":", 1)[0] in values else l for l in lines]
 out += [f"{k}: {v}" for k, v in values.items()]

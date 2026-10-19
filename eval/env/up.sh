@@ -128,7 +128,7 @@ json.dump(cfg, sys.stdout, indent=1)
 PY
 if [ $broker = 1 ]; then
   python3 - "$ep" "$name" > "$ep/state/broker/config.json" <<'PY'
-import json, sys
+import json, os, sys
 ep, name = sys.argv[1:]
 json.dump({"session": "s1", "project": f"/home/agent/{name}", "paths": [["/home/agent", ep + "/home"]],
            "origin": ep + "/state/git/protected.git", "slurm_bin": ep + "/state/broker/bin",
@@ -137,7 +137,8 @@ json.dump({"session": "s1", "project": f"/home/agent/{name}", "paths": [["/home/
            "owner_key": ep + "/state/owner/key", "allowed_signers": ep + "/state/git/allowed_signers",
            "gh_token_file": ep + "/state/broker/gh-token", "model_key_file": ep + "/state/broker/model-key",
            "reviewer": {"cmd": None, "model_socket": ep + "/state/model/proxy.sock",
-                        "passwd": ep + "/state/broker/reviewer-passwd"}},
+                        "passwd": ep + "/state/broker/reviewer-passwd"},
+           "approver": os.environ.get("H4R_APPROVER", "never")},
           sys.stdout, indent=1)
 PY
 fi
