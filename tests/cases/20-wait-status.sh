@@ -250,3 +250,11 @@ kill "$spid" 2>/dev/null; wait "$spid" 2>/dev/null
 expect_refusal status-broker-down R15 -- env GUARD_SESSION=s1 GUARD_SOCK_DIR="$sdir/sock" "$guard" status
 expect status-local-mode-says-unsigned ok 'unsigned: no broker' -- env -u GUARD_SESSION GUARD_SOCK_DIR="$sdir/none" "$guard" status
 cd "$tmp" || exit 1
+
+# A launch host has no slurm_bin: spend is zero there, not a TypeError from Broker.slurm.
+expect status-spend-no-slurm-bin ok '^\(0, 0\)$' -- wpy '
+import types
+from broker import scheduler, status
+b = types.SimpleNamespace(cfg={"user": "u", "slurm_bin": None})
+b.slurm = scheduler.Broker.slurm.__get__(b)
+print(status.spend(b, types.SimpleNamespace(account="a", start_date="2026-01-01")))'

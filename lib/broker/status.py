@@ -50,7 +50,10 @@ def host_state(job, broker):
 
 
 def spend(broker, card):
-    """(core-hours spent since start_date, core-hours queued) for the card's account, as the scheduler reports them."""
+    """(core-hours spent since start_date, core-hours queued) for the card's account, as the scheduler reports them;
+    (0, 0) on a launch host, which has no scheduler (host jobs' GPU-hours are host.py's)."""
+    if not broker.cfg.get("slurm_bin"):
+        return 0, 0
     user, acct = broker.cfg["user"], card.account
     rc, out, _ = broker.slurm("sacct", "-A", acct, "-u", user, "-S", card.start_date, "-X", "-n", "-P", "-o",
                               "CPUTimeRAW")
