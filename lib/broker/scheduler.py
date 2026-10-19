@@ -87,17 +87,34 @@ def ignored(path, patterns):
 
 
 
+def transport(url):
+    """The git transport a remote URL names: ext for ext::<cmd>, https for https://..., ssh for user@host:path, file
+    for a path."""
+    if "::" in url.split("/", 1)[0]:
+        return url.split("::", 1)[0]
+    if "://" in url:
+        return url.split("://", 1)[0]
+    head = url.split("/", 1)[0]
+    return "ssh" if ":" in head and not os.path.exists(url) else "file"
+
+
 class Mirror:
-    """The broker's bare mirror of origin; policy comes from its main only."""
+    """The broker's bare mirror of origin; policy comes from its main only.
+
+    Its git reads no user or system config, so the user's protocol.<name>.allow is gone with it: a sandbox clone's
+    ext::forge-connect origin, allowed in the agent's ~/.gitconfig, would be "transport 'ext' not allowed" here. The
+    mirror therefore allows exactly its origin's transport (and file, for its own objects), through
+    GIT_ALLOW_PROTOCOL, which git checks before any protocol.*.allow."""
 
     def __init__(self, path, origin):
         self.path, self.origin = path, origin
+        self.allow = ":".join(sorted({"file", transport(origin)}))
         if not os.path.isdir(path):
             subprocess.run(["git", "init", "-q", "--bare", path], check=True)
 
     def git(self, *args, text=True, env=None, input=None):
         env = {"PATH": os.environ["PATH"], "HOME": self.path, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
-               **(env or {})}
+               "GIT_ALLOW_PROTOCOL": self.allow, **(env or {})}
         return subprocess.run(["git", "--git-dir", self.path, *args], capture_output=True, text=text, env=env,
                               input=input)
 

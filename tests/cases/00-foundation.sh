@@ -113,3 +113,15 @@ c.sendall(json.dumps({"verb": "list", "store": "needs-you"}).encode() + b"\n")
 print(json.loads(c.makefile().readline()).get("out", "").strip())'
   en broker stop >/dev/null 2>&1
 fi
+
+# The broker's mirror reads no user git config, so a sandbox clone's ext::forge-connect origin, allowed only in the
+# agent's ~/.gitconfig, must still fetch: the mirror allows its own origin's transport.
+git init -q --bare -b main "$tmp/ext-origin.git"
+git -C "$tmp/proj" push -q "$tmp/ext-origin.git" HEAD:refs/heads/main
+expect foundation-mirror-ext ok '^README.md$' -- py '
+import os
+from broker import scheduler
+tmp = os.environ["TMPDIR_FOUNDATION"]
+m = scheduler.Mirror(tmp + "/ext-mirror.git", "ext::git %s " + tmp + "/ext-origin.git")
+m.fetch()
+print("\n".join(p for p in m.files if p == "README.md"))'
