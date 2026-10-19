@@ -1287,8 +1287,9 @@ def guides(ep):
     """The sandbox as design-v8 section 2 sets it for a card with a compute list: the compute gate in every bash and
     Python the agent starts, and lib/shim first on PATH. The row sets them itself until eval/episode.sh does."""
     card = main_file(ep, "guard/budget.card")
-    if "\ncompute:" not in "\n" + card:
-        commit_main(ep.path, "guard/budget.card", card + "compute: sim.py job.sh\n", "owner: list the compute")
+    listed = re.sub(r"(?m)^compute:.*\n?", "", card) + "compute: sim.py job.sh\n"
+    if listed != card:  # schema 8's template writes compute: none
+        commit_main(ep.path, "guard/budget.card", listed, "owner: list the compute")
     with open(ep.p("sandbox", "env"), "a") as f:
         f.write("BASH_ENV=/opt/harness4research/lib/compute-gate/bash_env.sh\n"
                 "PYTHONPATH=/opt/harness4research/lib/compute-gate\n")
