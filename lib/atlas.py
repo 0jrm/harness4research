@@ -642,7 +642,7 @@ def name_parent(rid, ids):
     return None
 
 def lineage(runs):
-    cards = {r["id"]: r for r in runs if not r["id"].startswith("explore-")}
+    cards = {r["id"]: r for r in runs if not r["id"].startswith("explore-") and not broker_card(r["card"])}
     frozen = {k: r["card_history"][0]["time"] if r["card_history"] else "" for k, r in cards.items()}
     edges = [{"from": r["card"][key], "to": k, "kind": key, "lineage_inferred": False}
              for k, r in cards.items() for key in LINEAGE if r["card"].get(key) in cards]

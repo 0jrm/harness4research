@@ -156,3 +156,9 @@ echo plain > "$tmp/atlas/not-a-socket"
 expect atlas-sock-refuses-file fail 'not a socket' -- bash -c '. "$1"; "$2" atlas --serve "$3" --no-ripples' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas/not-a-socket"
 expect atlas-serve-bad-value fail "port number or a socket path" -- "$guard" atlas --serve nope
 expect atlas-refuses-unguarded fail 'no guard/run' -- "$guard" atlas "$tmp/agents"
+# The question map's lineage holds v7 question cards only: guard run's CardRecords have no supersedes or spawned_from,
+# so no edge, inferred or named, reaches one; and the atlas docs name its own run checks, not guard/run ripples.
+expect atlas-lineage-v7-only ok '^\[\]$' -- python3 -c 'import sys; sys.path.insert(0, sys.argv[1] + "/lib"); import atlas
+rec = {"written_by": "guard run, local, unsigned", "why": "w"}
+print(atlas.lineage([{"id": "r1", "card": rec, "card_history": []}, {"id": "r1-b", "card": rec, "card_history": []}]))' "$here"
+expect atlas-docs-no-ripples-command ok - -- bash -c '! grep -n "guard/run ripples" "$1/docs/atlas.md" "$1/docs/atlas-json.md"' _ "$here"

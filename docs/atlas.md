@@ -21,5 +21,5 @@ The page re-surveys the project on reload, at most every `--every` seconds (defa
 - `--runs GLOB` shows only runs whose id matches the glob, and you can repeat it: `--runs 'emu-*' --runs 'explore-emu-*'`.
 - `--title NAME` sets the page title, which defaults to the project name.
 - `--head-only` reads runs from HEAD alone and ignores uncommitted run files in the working tree.
-- `--no-ripples` skips `guard/run ripples`, for a machine without `sacct`. The page then says that no check reached a verdict.
+- `--no-ripples` skips the atlas's own run checks, for a machine without `sacct`. The page then says that no check reached a verdict.
 - `--json FILE` also writes the data the page is drawn from. [atlas-json.md](atlas-json.md) describes every field.
