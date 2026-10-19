@@ -27,7 +27,8 @@ from broker import local, receipts, scheduler, server
 origin, state, cmd, *args = sys.argv[1:]
 key = os.environ["R"] + "/key"
 cfg = {"session": "s1", "project": state, "paths": [[state, state]], "origin": origin, "slurm_bin": None,
-       "slurm_env": {}, "user": "t", "compute_bwrap": False, "signing_key": key}
+       "slurm_env": {}, "user": "t", "compute_bwrap": False, "signing_key": key,
+       "receipts_email": os.environ.get("RECEIPTS_EMAIL")}
 if cmd.startswith("local-"):
     b = local.project_broker(origin)
     cmd = cmd[len("local-"):]
@@ -172,5 +173,9 @@ expect receipts-local-show ok "^\{\"id\": \"$lid\"" -- show_local "$lid"
 expect receipts-local-show-unsigned ok 'local and unsigned' -- show_local "$lid"
 expect receipts-local-status ok '^receipts: local, unsigned' -- env HARNESS="$here" R="$R" python3 "$R/r.py" "$R/plain" - local-status
 expect_refusal receipts-local-cited F04 -- bash -c 'cd "$1" && bash "$2" origin/main "$3"' _ "$R/ci" "$check" "$lid"
+
+# A person's verified email for GitHub's signed-commit rule replaces the broker's committer email.
+RECEIPTS_EMAIL=pi@lab.example r add job r1 '{"job": "2"}' >/dev/null
+expect receipts-committer-email ok '^pi@lab.example$' -- git -C "$R/origin.git" log -1 --format=%ce refs/heads/guard/receipts
 unset FORGE_LOG
 cd "$tmp" || exit 1

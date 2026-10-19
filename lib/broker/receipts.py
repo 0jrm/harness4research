@@ -77,6 +77,13 @@ def signers_file(broker):
     return path
 
 
+def identity(broker):
+    """The broker's git identity. GitHub's signed-commit rule verifies an SSH signature only for a committer email
+    verified on the account that holds the key, so receipts_email in the broker's config replaces the email."""
+    email = broker.cfg.get("receipts_email")
+    return {**IDENT, "GIT_AUTHOR_EMAIL": email, "GIT_COMMITTER_EMAIL": email} if email else IDENT
+
+
 def verify(git_dir, ref, signers, known=None):
     """Whether ref in git_dir is receipts the signers signed, every row by its own commit, and, given known (the last
     head the broker published), whether the ref still holds it: a rewound ref fails."""
@@ -144,7 +151,7 @@ class Origin:
             made = self.git("-c", "gpg.format=ssh", "-c", f"user.signingKey={key}", "commit-tree", "-S",
                             *(["-p", parent] if parent else []), "-m",
                             f"receipt {row.id} {row.kind}" + (f" run {row.run_id}" if row.run_id else ""), tree,
-                            env=IDENT)
+                            env=identity(self.broker))
             sha = made.stdout.strip()
             if made.returncode or not sha:
                 raise Refused(f"the broker could not sign the receipt ({made.stderr.strip()[-200:]})")
