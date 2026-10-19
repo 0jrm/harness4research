@@ -1,18 +1,21 @@
 """The broker's half of guard status: the facts the sandbox cannot read, as one JSON object in the reply's out.
 
     {"verb": "status"}             -> {"running": [{"id", "run", "state", "elapsed", "limit", "backend"}],
-                                       "blocked": [str], "refusal": {"ago_min", "where", "why"}|null,
+                                       "blocked": [str: needs-you items, then asks.short lines],
+                                       "refusal": {"ago_min", "where", "why"}|null,
                                        "budget": {"spent", "queued", "max", "reserve"}|null,
                                        "failed": {"id", "run", "state"}|null, "unsigned": bool}
     {"verb": "status", "job": "12"} -> {"mine": true|false|null}   (lib/wait.py's W02 check: another session's job)
 
-Read-only: it runs sacct and squeue through the scheduler, reads the job log, the mirror's card and the needs-you
-queue, and fetches nothing. Local mode (no broker, session "local") answers it too, and says unsigned."""
+It runs sacct and squeue through the scheduler, fetches main, and reads the job log, the mirror's card and the
+needs-you queue. asks.report adds guard ask's open asks and the outcomes the agent has not yet seen, and marks those
+seen, so a status call is not read-only. Local mode (no broker, session "local") answers it too, and says unsigned."""
 import json
 import os
 import time
 
 import needs_you
+from broker import asks
 from broker.records import Refused, read_rows
 from policy.cost import CardError, limits
 from policy.invocation import to_minutes
@@ -117,8 +120,9 @@ def facts(broker):
             failed = {"id": job, "run": name or run, "state": state}
     if failed and failed["id"] in incident_jobs(broker):
         failed = None
-    blocked = [f"ask {it.id} waits for a person: {it.title}" for it in needs_you.read(broker.records.queue)
-               if it.state in ("open", "acked")]
+    blocked = [f"needs-you {it.id} waits for a person: {it.title}" for it in needs_you.read(broker.records.queue)
+               if it.state in ("open", "acked") and not it.id.startswith("a")]
+    blocked += asks.report(broker, asks.short)  # last, so the 190-character cut of the line takes asks first
     budget = None
     try:
         card = limits((broker.mirror.show("guard/budget.card") if hasattr(broker.mirror, "files") else None) or "")
