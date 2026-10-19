@@ -57,7 +57,7 @@ expect atlas-card-on-base ok '^V ~ behind-card ~ card exists on origin/main; thi
 expect atlas-card-on-base-not-uncommitted ok - -- bash -c '! grep -q "^V ~ behind-card ~ question card is not committed" "$1"' _ "$tmp/atlas/atlas.tsv"
 expect atlas-report-not-pulled ok '^O ~ behind-card ~ report not pulled ~ report on origin/main;' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-ledger-bad-header ok '^V ~ behind-card ~ execution.tsv header is not id ts field value why evidence' -- cat "$tmp/atlas/atlas.tsv"
-expect atlas-other-column ok '<td class="c c-ripple"><svg class="i" role="img" aria-label="other: execution-within-envelope">.*<span class="detail">execution-within-envelope: x1: host skynet is not in launch_hosts' -- cat "$tmp/atlas/atlas.html"
+expect atlas-no-launch-column ok - -- bash -c '! grep -q "execution-within-envelope" "$1"' _ "$tmp/atlas/atlas.html"
 expect atlas-lineage-inferred ok '^E ~ lr-sweep ~ lr-sweep-fine ~ inferred ~ True$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-lineage-declared ok '^E ~ q-warmup-v2 ~ cosine-v2 ~ supersedes ~ False$' -- cat "$tmp/atlas/atlas.tsv"
 expect atlas-lineage-declared-not-inferred ok - -- bash -c '! grep -q "^E ~ q-warmup ~ q-warmup-v2 ~ inferred" "$1"' _ "$tmp/atlas/atlas.tsv"
@@ -73,15 +73,15 @@ expect atlas-stray-incident-keeps-ripple ok '^N ~ explore-07 ~ ripple on job-sta
 expect atlas-release-stamp ok '<dt>Guard version</dt><dd>schema [0-9]+, release ' -- cat "$tmp/atlas/atlas.html"
 expect atlas-no-release-stamp ok "<dt>Guard version</dt><dd>schema 1, installed before release stamps; run <code>guard init $fx/casts-v4-training --update</code></dd>" -- python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import atlas
 d = json.load(open(sys.argv[2])); d["version"] = {"installer": "b017edd"}; print(atlas.render(d))' "$here/lib" "$tmp/atlas/atlas.json"
-expect atlas-verdict-stop ok '<p class="verdict-line">Stop spending on 4 runs: each has a ripple.</p>' -- cat "$tmp/atlas/atlas.html"
+expect atlas-verdict-stop ok '<p class="verdict-line">Stop spending on 2 runs: each has a ripple.</p>' -- cat "$tmp/atlas/atlas.html"
 expect atlas-no-jobs-unchecked ok '^UNCHECKED$' -- python3 -c 'import json, sys
 r = next(r for r in json.load(open(sys.argv[1]))["runs"] if r["id"] == "hand-run")
-print(*{l["status"] for l in r["ripples"] if l["check"] in ("job-states", "walltime-headroom", "retries", "handled-failures")})' "$tmp/atlas/atlas.json"
+print(*{l["status"] for l in r["ripples"] if l["check"] in ("job-states", "walltime-headroom", "retries")})' "$tmp/atlas/atlas.json"
 expect atlas-no-jobs-prose ok '</svg>jobs: unchecked</span> <span class="detail">no jobs yet: sacct lists [0-9]+ job\(s\) on account gom since 2026-09-01 from this host, none named hand-run' -- cat "$tmp/atlas/atlas.html"
 # The skynet reproduction: sacct on PATH that lists nothing. No run may show a job or budget pass.
 expect atlas-off-cluster ok 'Spend source</dt><dd>none: the budget ripple could not read sacct on this host</dd>' -- bash -c '. "$1"; MOCK_SACCT_ROWS=/dev/null MOCK_SACCT_CPUSECONDS= "$2" atlas --out "$3/off.html" >/dev/null && cat "$3/off.html"' _ "$tmp/atlas/env.sh" "$guard" "$tmp/atlas"
-expect atlas-off-cluster-no-pass ok - -- bash -c '! grep -oE "aria-label=\"(job-states|walltime-headroom|retries|handled-failures|budget): pass\"" "$1"' _ "$tmp/atlas/off.html"
-expect atlas-needs-you-incident ok 'Write up job 4840 at <code class="cmd">runs/explore-07/incidents/YYYY-MM-DD-4840.md</code>, the only place the guard counts incidents' -- python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import atlas
+expect atlas-off-cluster-no-pass ok - -- bash -c '! grep -oE "aria-label=\"(job-states|walltime-headroom|retries|budget): pass\"" "$1"' _ "$tmp/atlas/off.html"
+expect atlas-needs-you-incident ok 'Write up job 4840 at <code class="cmd">runs/explore-07/incidents/YYYY-MM-DD-4840.md</code>, or submit the next job with <code>guard run --cause</code>' -- python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import atlas
 d = json.load(open(sys.argv[2]))
 for r in d["runs"]: r["stray_incidents"] = []
 print(atlas.render(d))' "$here/lib" "$tmp/atlas/atlas.json"

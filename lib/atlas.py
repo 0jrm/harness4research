@@ -9,7 +9,7 @@ the page from the data collect() returns, which --json writes out.
 
 Read-only. Guard inputs come from the protected branch through git show. Runs come from HEAD plus the
 working tree, so uncommitted run dirs and manifests show up; --head-only reads HEAD alone.
-Ripples come from guard/run on the protected branch, as guard ripples runs it, so a working-tree edit cannot forge them.
+Safety checks read guard/ inputs and incidents from the protected branch, so a working-tree edit cannot forge them.
 The needs-you queue comes from the git common directory, where guard needs-you keeps it.
 --serve takes a port, bound to 127.0.0.1, or a socket path (anything containing "/"). On a shared login
 node use a socket: it is created 0600, so only you can reach it, and ssh -L 8765:/path/to/sock host
@@ -101,19 +101,133 @@ def ledger(text):
     rows = [dict(zip(LEDGER, l + [""] * len(LEDGER))) for l in lines[1:]] if header_ok else []
     return header_ok, rows
 
-def ripples(top, base, run_dir):
-    env = {k: v for k, v in os.environ.items() if k != "HPC_GUARD_LOCAL"}
-    env.update(HPC_GUARD_REF=base, GIT_OPTIONAL_LOCKS="0")
-    runner = git(top, "show", f"{base}:guard/run") or ""
+FAILED = re.compile(r"TIMEOUT|OUT_OF_ME|NODE_FAIL|FAILED|PREEMPTED")
+
+def scheduler(*args):
+    """(rc, stdout, stderr) of a Slurm client, or None where this host has none."""
     try:
-        p = subprocess.run(["bash", "-c", runner, "guard/run", "ripples", run_dir], cwd=top, env=env,
-                           capture_output=True, text=True, timeout=180)
-    except subprocess.TimeoutExpired:
-        return [{"status": "UNCHECKED", "check": "ripples", "detail": "guard/run ripples timed out"}]
-    lines = [l.split("\t", 2) for l in p.stdout.splitlines() if l.count("\t") >= 2]
-    if not lines:
-        return [{"status": "UNCHECKED", "check": "ripples", "detail": (p.stderr.strip() or "no output")[:200]}]
-    return [{"status": s, "check": c, "detail": d.strip()} for s, c, d in lines]
+        p = subprocess.run(list(args), capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return p.returncode, p.stdout, p.stderr
+
+def sacct_failed(err):
+    line = next((l for l in err.splitlines() if l.strip()), "no message")
+    if re.search(r"connection refused|talking to the database|slurmdbd|unable to contact|connect failure|timed out", err, re.I):
+        return f"sacct cannot reach the Slurm accounting database ({line}); it is down or unreachable for the cluster, so look again later"
+    return f"sacct failed on this host ({line}); look from the cluster login node"
+
+def ripples(top, base, run_dir):
+    """The run's safety lines, PASS, RIPPLE, HANDLED or UNCHECKED, from the protected branch, sacct and the run's
+    checks: the v7 ripples' checks, read here since guard run decides the job and guard status shows the rest. Job
+    incidents come from base, so an agent cannot clear its own ripple."""
+    out = []
+    say = lambda status, check, detail="": out.append({"status": status, "check": check, "detail": detail})
+    card = kv(show(top, base, "guard/budget.card"))
+    if not card:
+        say("RIPPLE", "guard", f"no guard/budget.card on {base}; merge the guard pull request, or git fetch")
+        return out
+    run_id, user = os.path.basename(run_dir.rstrip("/")), os.environ.get("USER") or ""
+    acct, start, max_ch = card.get("account", ""), card.get("start_date", ""), card.get("max_core_hours", "")
+
+    def changed(specs):
+        return sorted(set((git(top, "diff", "--name-only", f"{base}...HEAD", "--", *specs) or "").split())
+                      | {l[3:] for l in (git(top, "status", "--porcelain", "--untracked-files=all", "--", *specs) or "").splitlines()})
+    moved = changed(["guard"])
+    say("RIPPLE", "guard-untouched", f"{' '.join(moved)}; restore it with git checkout {base} -- guard") if moved else say("PASS", "guard-untouched")
+    watch = [l.split("#")[0].strip() for l in (show(top, base, "guard/watch.list") or "").splitlines() if l.split("#")[0].strip()]
+    if watch:
+        w = changed(watch)
+        say("RIPPLE", "watched-paths", f"{' '.join(w)}; a human merges changes to watched paths") if w else say("PASS", "watched-paths")
+    else:
+        say("UNCHECKED", "watched-paths", "a human lists verifier, test and threshold paths in guard/watch.list")
+
+    incident = {}
+    for line in (git(top, "grep", "-E", r"^job: *[0-9A-Za-z][0-9A-Za-z_.-]* *$", base, "--", f"{run_dir}/incidents/") or "").splitlines():
+        _, path, job = line.split(":", 2)
+        incident[job.split(":", 1)[1].strip()] = "incidents/" + os.path.basename(path)
+    acked = set()
+
+    def sort_out(check, entries, step):
+        done = [f"{e}->{incident[e.split(':')[0]]}" for e in entries if e.split(":")[0] in incident]
+        open_ = [e for e in entries if e.split(":")[0] not in incident]
+        acked.update(e.split(":")[0] for e in entries if e.split(":")[0] in incident)
+        if done:
+            say("HANDLED", check, " ".join(done) + " ")
+        if open_:
+            say("RIPPLE", check, " ".join(open_) + (f" ({step})" if step else ""))
+        elif not done:
+            say("PASS", check)
+
+    got = scheduler("sacct", "-A", acct, "-u", user, "-S", start, "-X", "-n", "-P", "-o",
+                    "JobID,JobName,State,ElapsedRaw,TimelimitRaw")
+    blind, rows = "", []
+    if got is None:
+        blind = "sacct not found on PATH on this host; look from the cluster login node"
+    elif got[0]:
+        blind = sacct_failed(got[2])
+    elif not got[1].strip():
+        blind = f"sacct lists no job at all on account {acct} since {start} from this host, so it may not see this cluster"
+    else:
+        every = [l.split("|") for l in got[1].splitlines() if l.count("|") >= 4]
+        rows = [r for r in every if r[1] == run_id]
+        if not rows:
+            blind = f"no jobs yet: sacct lists {len(every)} job(s) on account {acct} since {start} from this host, none named {run_id}, so there is nothing to judge"
+    if not blind:
+        cause = f"read its log, then guard run {run_dir} --cause with what went wrong"
+        failed = [f"{r[0]}:{r[2]}" for r in rows if FAILED.search(r[2])]
+        split = "the work needs more than max_walltime_minutes in one job: split it into jobs that resume from a checkpoint"
+        sort_out("job-states", failed, split if any(":TIMEOUT" in f for f in failed) else cause)
+        num = lambda x: int(x) if x.isdigit() else 0
+        sort_out("walltime-headroom", [f"{r[0]}:{100 * num(r[3]) // (num(r[4]) * 60)}%" for r in rows
+                                       if num(r[4]) > 0 and num(r[3]) > 0.8 * num(r[4]) * 60], split)
+        nfail = sum(1 for r in rows if not re.search("COMPLETED|RUNNING|PENDING", r[2]) and r[0] not in incident)
+        acked.update(r[0] for r in rows if not re.search("COMPLETED|RUNNING|PENDING", r[2]) and r[0] in incident)
+        say("PASS" if nfail <= 1 else "RIPPLE", "retries", f"{nfail} not completed without an incident")
+    else:
+        for k in ("job-states", "walltime-headroom", "retries"):
+            say("UNCHECKED", k, blind)
+
+    got = scheduler("sacct", "-A", acct, "-u", user, "-S", start, "-X", "-n", "-P", "-o", "CPUTimeRAW")
+    if got is None:
+        say("UNCHECKED", "budget", "sacct not found on PATH on this host; look from the cluster login node")
+    elif got[0]:
+        say("UNCHECKED", "budget", sacct_failed(got[2]))
+    elif not got[1].strip():
+        say("UNCHECKED", "budget", f"sacct lists no job on account {acct} since {start} from this host, so spend is unknown here")
+    else:
+        spent = sum(int(x) for x in got[1].split() if x.isdigit()) // 3600
+        say("PASS", "budget", f"{spent} of {max_ch or '?'} core-h")
+
+    qcmd = card.get("quota_pct_cmd", "")
+    if qcmd and "<" not in qcmd:
+        q = subprocess.run(["bash", "-c", qcmd], capture_output=True, text=True)
+        pct = "".join(c for c in q.stdout if c.isdigit())[:3]
+        if not pct:
+            why = (q.stderr.splitlines() or [""])[0]
+            say("UNCHECKED", "quota", f"quota_pct_cmd printed no number on this host{f' ({why})' if why else ''}")
+        else:
+            say("RIPPLE" if int(pct) > 80 else "PASS", "quota", f"{pct}%" + (", over 80%" if int(pct) > 80 else ""))
+    else:
+        say("UNCHECKED", "quota", "a human sets quota_pct_cmd in guard/budget.card")
+
+    checks = sorted(c for c in glob.glob(os.path.join(top, run_dir, "checks", "*")) if os.access(c, os.X_OK) and os.path.isfile(c))
+    for c in checks:
+        try:
+            p = subprocess.run([c, run_dir], cwd=top, capture_output=True, text=True, timeout=180)
+            rc, last = p.returncode, ((p.stdout + p.stderr).strip().splitlines() or [""])[-1]
+        except subprocess.TimeoutExpired:
+            rc, last = 1, "timed out"
+        name = f"check:{os.path.basename(c)}"
+        if rc == 0:
+            say("PASS", name, last)
+        elif rc == 77:
+            say("UNCHECKED", name, f"{last}; it exits 77 until its input exists")
+        else:
+            say("RIPPLE", name, f"{last}; run {c} {run_dir} for its full output")
+    if not checks:
+        say("UNCHECKED", "domain-checks", f"no executable {run_dir}/checks/*; add scripts there that exit non-zero when a result looks wrong")
+    return out
 
 def repo_at(path):
     found = (git(path, "rev-parse", "--show-toplevel") or "").strip() if os.path.isdir(path) else ""
@@ -474,7 +588,7 @@ def waters(data):
     if slurm:
         runs = sorted({x for v in slurm.values() for x in v})
         out.append({"name": "Slurm cluster", "fence": "bank", "runs": runs, "hand": [],
-                    "desc": "Account " + data["budget"].get("account", "?") + ", preflight and a capped sub-account",
+                    "desc": "Account " + data["budget"].get("account", "?") + ", guard run and a capped sub-account",
                     "count": f"{n(len(slurm), 'node')}, {n(len(runs), 'run')}"})
     for h, rs in sorted(other.items()):
         hand = sorted(k for k, v in rs.items() if v == "ledger")
@@ -589,7 +703,7 @@ def main():
                        "at SOCKET (a value containing /), created 0600 so only you can reach it")
     ap.add_argument("--every", type=int, default=300, metavar="SECONDS", help="with --serve, re-survey at most this often (default 300)")
     ap.add_argument("--json", default=None, help="also write the collected data as JSON")
-    ap.add_argument("--no-ripples", action="store_true", help="skip running guard/run ripples")
+    ap.add_argument("--no-ripples", action="store_true", help="skip the safety checks")
     ap.add_argument("--head-only", action="store_true", help="read runs from HEAD only, ignoring the working tree")
     ap.add_argument("--runs", action="append", default=[], metavar="GLOB", help="only runs whose id matches GLOB (repeatable)")
     ap.add_argument("--title", default=None, help="page title, default the project name")

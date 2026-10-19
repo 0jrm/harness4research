@@ -111,15 +111,14 @@ def idlink(i):
 
 # ---------------------------------------------------------------- checks
 
-COLS = [("guard-untouched", "guard", "Guard files untouched"), ("question-card-frozen", "card", "Card frozen"),
+COLS = [("guard-untouched", "guard", "Guard files untouched"),
         ("watched-paths", "watched", "Watched paths untouched"), ("job-states", "jobs", "Job states"),
         ("walltime-headroom", "walltime", "Walltime headroom"), ("retries", "retries", "Retries"),
-        ("handled-failures", "failures", "Handled failures under the cap"), ("budget", "budget", "Budget under 80%"),
+        ("budget", "budget", "Budget spent"),
         ("quota", "quota", "Disk quota under 80%")]
 KNOWN = {k for k, _, _ in COLS} | {"domain-checks"}
 STW = {"pass": "pass", "ripple": "ripple", "handled": "handled", "unchecked": "unchecked", "none": "not reported"}
-WORDS = {"job-states": {"ripple": "failed, no incident", "handled": "failed, handled"}, "handled-failures": {"ripple": "over the cap"},
-         "question-card-frozen": {"ripple": "card edited"}, "guard-untouched": {"ripple": "guard touched"},
+WORDS = {"job-states": {"ripple": "failed, no incident", "handled": "failed, handled"}, "guard-untouched": {"ripple": "guard touched"},
          "watched-paths": {"ripple": "watched path touched"}, "walltime-headroom": {"ripple": "near walltime"},
          "retries": {"ripple": "retried, no incident"}, "budget": {"ripple": "over 80% of cap"}, "quota": {"ripple": "disk over 80%"}}
 RANK = {"RIPPLE": 3, "HANDLED": 2, "UNCHECKED": 1, "PASS": 0}
@@ -237,14 +236,14 @@ def render(data):
             return '<p class="note">The core-hour cap (<code>max_core_hours</code>) is not set on the protected branch.</p>'
         pct = lambda x: f"{max(0, min(100, 100 * x / cap)) if cap else 0:.2f}%"
         line = rnd(cap * 0.8)
-        label = (f"Spend unknown on this host. Cap {cap} core-hours, {res} held for verification, ripples fire at {line}." if spent is None else
-                 f"{spent} of {cap} core-hours spent; {cap - res - spent} left for agent work; {res} held for verification; ripples fire at {line}.")
+        label = (f"Spend unknown on this host. Cap {cap} core-hours, {res} held for verification, the line marks {line}." if spent is None else
+                 f"{spent} of {cap} core-hours spent; {cap - res - spent} left for agent work; {res} held for verification; the line marks {line}.")
         ticks = "".join(f'<span style="left:{p}%">{num(rnd(cap * p / 100))}</span>' for p in (0, 25, 50, 75, 100))
         track = ('<span class="bar-unknown">spend unknown: no scheduler accounting on this host</span>' if spent is None
                  else f'<span class="bar-spent" style="width:{pct(spent)}"></span>')
         unknown = lambda x: "unknown" if spent is None else num(x)
         return f'''<figure class="bar" role="img" aria-label="{E(label)}">
-<div class="bar-track">{track}<span class="bar-reserve" style="left:{pct(cap - res)};width:{pct(res)}"><em>verification reserve</em></span><span class="bar-line" style="left:80%"><em>ripples fire at {num(line)}</em></span></div>
+<div class="bar-track">{track}<span class="bar-reserve" style="left:{pct(cap - res)};width:{pct(res)}"><em>verification reserve</em></span><span class="bar-line" style="left:80%"><em>80%: {num(line)}</em></span></div>
 <div class="bar-axis" aria-hidden="true">{ticks}</div><figcaption class="bar-unit">core-hours</figcaption></figure>
 <dl class="bar-key"><div><dt>Spent</dt><dd>{unknown(spent or 0)}</dd></div><div><dt>Left for agent work</dt><dd>{unknown(cap - res - (spent or 0))}</dd></div><div><dt>Held for verification</dt><dd>{num(res)}</dd></div><div><dt>Cap</dt><dd>{num(cap)}</dd></div></dl>'''
 
@@ -253,7 +252,7 @@ def render(data):
         out = []
         for w in data["waters"]:
             kind = {"bank": "fenced", "bump": "gated", "none": "open"}[w["fence"]]
-            desc = {"fenced": f"Account {b.get('account') or '?'}: preflight checks and a capped sub-account.",
+            desc = {"fenced": f"Account {b.get('account') or '?'}: guard run prices each job, and a capped sub-account.",
                     "gated": "Listed in launch_hosts: launch gates and a GPU-hour count, no scheduler.",
                     "open": "Not in launch_hosts: compute here passed no gate."}[kind]
             if w["hand"]:
@@ -298,16 +297,13 @@ def render(data):
                     stray = r.get("stray_incidents") or []
                     if stray:
                         acts.append(f"A write-up exists at <code>{E(stray[0])}</code>, but the guard does not count it there. "
-                                    f"Move it: {cmd('git mv ' + stray[0] + ' ' + path)}, then re-check: {cmd('bash guard/run ripples runs/' + r['id'])}")
+                                    f"Move it: {cmd('git mv ' + stray[0] + ' ' + path)}, then re-check: {cmd('guard atlas')}")
                     else:
-                        acts.append(f"Write up job {E(j)} at {cmd(path)}, the only place the guard counts incidents. "
-                                    f"Then re-check: {cmd('bash guard/run ripples runs/' + r['id'])}")
+                        acts.append(f"Write up job {E(j)} at {cmd(path)}, or submit the next job with "
+                                    f"<code>guard run --cause</code>, which writes it. Then re-check: {cmd('guard atlas')}")
                 act = "<br>".join(acts)
-            elif k == "handled-failures":
-                act = ("Decide whether this run should stop. To allow more failures, change <code>max_handled_failures</code> in "
-                       "<code>guard/budget.card</code> by pull request.")
             else:
-                act = f"Read the run, then re-check: {cmd('bash guard/run ripples runs/' + r['id'])}"
+                act = f"Read the run, then re-check: {cmd('guard atlas')}"
             todo.append(("stop", f'{idlink(r["id"])} {badge("ripple", short[k] + ": " + c["word"])}<p>{E(up(c["detail"]) + "." if c["detail"] else "")} {act}</p>'))
     for r in rule_runs:
         items = "".join(f"<li>{E(up(x))}.</li>" for x in r["violations"])
@@ -414,7 +410,7 @@ def render(data):
         fold = (f'<details class="fold"><summary>{n(len(clean), "more run")} passed all {n_checks} checks</summary><p class="idlist">{"".join(idlink(r["id"]) for r in clean)}</p></details>'
                 if clean and flagged else "")
         checks = f'''<section id="checks" aria-labelledby="checks-h"><h2 id="checks-h">Safety checks</h2>
-<p class="lede">The project’s own <code>guard/run ripples</code>, once per run, from this checkout. Runs with something other than a pass come first.</p>
+<p class="lede">Each run’s safety checks, read from the protected branch, sacct and the run’s <code>checks/</code>, from this checkout. Runs with something other than a pass come first.</p>
 {notice}
 <p class="legend" aria-hidden="true">{badge("pass", "pass")}{badge("handled", "handled by an incident")}{badge("ripple", "ripple: stop spending")}{badge("unchecked", "unchecked")}{badge("none", "not reported")}</p>
 {table}
