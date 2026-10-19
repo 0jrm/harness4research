@@ -20,7 +20,7 @@ say() {  # say <STATUS> <check> [<code> <reason> [<next>]]: one line, and the re
 }
 finish() { [ -z "$first" ] || printf '%s\n' "$first"; exit $status; }
 
-# The execution ledger is append-only and its field vocabulary is fixed here, as in launch.sh.
+# The execution ledger is append-only and its field vocabulary is fixed here.
 fields=' host gpus start concurrency workers staging mem_stop_gb stage_minutes resume restart '
 # ledger_problems <question card>: reads a ledger on stdin and prints one line per problem. Lines starting with # are
 # comments. A row whose field is outside the vocabulary passes only when a later `void <id>` row retracts it, and a void
