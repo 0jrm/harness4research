@@ -69,7 +69,18 @@ To check it, open a pull request that edits `guard/budget.card`, so the fence fa
 
 ## 6. Cap the cluster account
 
-Ask your cluster admins for a Slurm sub-account with a hard core-hour cap, and put it in `guard/budget.card` as `account`. Preflight forces every job onto it, and the scheduler enforces the cap even for jobs submitted without preflight. Email template: [cluster-subaccount-request.md](cluster-subaccount-request.md). [enforcement.md](enforcement.md) explains why steps 4 to 6 matter.
+Ask your cluster admins for a Slurm sub-account with a hard core-hour cap, and put it in `guard/budget.card` as `account`. `guard run` forces every job onto it, and the scheduler enforces the cap even for jobs submitted without `guard run`. Email template: [cluster-subaccount-request.md](cluster-subaccount-request.md). [enforcement.md](enforcement.md) explains why steps 4 to 6 matter.
+
+## 7. Protect the guard/receipts ref
+
+The broker publishes every receipt as one signed commit on the branch `guard/receipts`, and the fence trusts a receipt id that a report cites only when that commit verifies against `broker_key:` in `guard/budget.card` on the base branch. Protect the ref so nobody rewrites it:
+
+1. Put the broker's public key in the card. `guard init` writes it when `guard broker setup` has run on the same host; otherwise copy the one line of `~/.local/state/guard/key.pub` into `broker_key:` in a pull request you merge.
+2. On GitHub, go to **Settings → SSH and GPG keys → New SSH key**, set **Key type** to **Signing Key**, and paste the same `key.pub`. Add it to the account whose verified email the broker signs with: set `receipts_email` in the broker's config to that email, because GitHub verifies an SSH signature only for a committer email verified on the key's account.
+3. In the repository, go to **Settings → Rules → Rulesets → New ruleset → New branch ruleset**. Set **Enforcement status** to **Active**, and under **Target branches** choose **Add target → Include by pattern** and type `guard/receipts`.
+4. Select **Restrict deletions**, **Require signed commits** and **Block force pushes**. Leave the bypass list empty. Save.
+
+An unsigned or rewound `guard/receipts` makes the fence refuse every receipt id until the broker publishes again; that is a denial you see in `guard status`, never a forged pass.
 
 ## Check again
 
