@@ -6,6 +6,7 @@ not in this harness yet answers X00. Every other verb goes to the store that ser
 queue, acct and cancel (and submit, until guard run and the rewritten audit attacks replace it), the records' add,
 list, show and find, and the forge's gh verbs where a forge is attached, which refuse a verb they do not offer as they did."""
 import importlib
+import inspect
 import json
 import os
 import signal
@@ -14,6 +15,7 @@ import socketserver
 import struct
 import threading
 import traceback
+import types
 
 import refusals
 from broker.records import Refused
@@ -40,8 +42,32 @@ def module_for(sock, verb):
     return module if hasattr(module, "handle") else "X00"
 
 
-def answer(broker, sock, req):
-    """The reply to one request on sock ("scheduler", "records" or "gh")."""
+class SessionView:
+    """A broker as one session's socket sees it. The product broker keeps one Broker per project and binds a socket
+    directory per guard enter, so cfg["session"] alone would name the project, and a per-session count (holdout
+    scores, this session's jobs) would span every session on it. Every attribute is the broker's, writes included;
+    cfg's session is the socket's; the broker's own methods run against the view, so what they stamp carries it."""
+
+    def __init__(self, broker, session):
+        object.__setattr__(self, "_broker", broker)
+        object.__setattr__(self, "cfg", {**broker.cfg, "session": session})
+
+    def __getattr__(self, name):
+        value = getattr(self._broker, name)
+        if inspect.ismethod(value) and value.__self__ is self._broker:
+            return types.MethodType(value.__func__, self)
+        return value
+
+    def __setattr__(self, name, value):
+        setattr(self._broker, name, value)
+
+
+def answer(broker, sock, req, session=None):
+    """The reply to one request on sock ("scheduler", "records" or "gh"), for the session the socket was bound for
+    (the broker's own when None). A session field in the request is the agent's and is dropped."""
+    req = {k: v for k, v in req.items() if k != "session"}
+    if session is not None and session != broker.cfg.get("session"):
+        broker = SessionView(broker, session)
     verb = req.get("verb")
     module = module_for(sock, verb) if isinstance(verb, str) else None
     if module == "X00":
@@ -81,11 +107,11 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
 
 
-def bind(path, sock, broker, wrap=None):
-    """A server on path answering sock's verbs for broker; wrap(req, reply) sees each reply, as guard broker logs
-    refusals."""
+def bind(path, sock, broker, wrap=None, session=None):
+    """A server on path answering sock's verbs for broker in session (the broker's own when None); wrap(req, reply)
+    sees each reply, as guard broker logs refusals."""
     server = Server(path, Handler)
-    server.answer = (lambda req: wrap(req, answer(broker, sock, req))) if wrap else (lambda req: answer(broker, sock, req))
+    server.answer = (lambda req: (wrap or (lambda _, reply: reply))(req, answer(broker, sock, req, session)))
     return server
 
 

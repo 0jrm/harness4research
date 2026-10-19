@@ -6,18 +6,15 @@ sbatch never reaches the scheduler: it turns its options and the script's #SBATC
 fields and refuses an option it cannot map. A request names its run with --comment=run:<id>, which guard/run
 preflight adds, so a bare sbatch call is refused. Only the broker decides what the scheduler sees.
 
-guard needs-you, guard ledger and guard card go to the records socket; every other guard subcommand runs the
-installed guard. The records socket offers add, list, show and find, so guard needs-you ack, done and dismiss are
-refused there:
+guard ledger and guard card go to the records socket, until guard run writes the card and the job log (U2); every
+other guard subcommand runs the installed guard, whose needs-you and pr open use the sockets (lib/verbs/records.py):
 
-    guard needs-you [--remind] | add --kind K --title T [...] | find --kind K --title T | show <id>
     guard ledger add <run_id> <field> <value> [--why W] [--evidence E] | list <run_id>
     guard card add <run_id> <card file> | show <run_id> | list
 
 gh sends its arguments to the gh socket, which decides what it offers (forge.py): pr create, view, list, diff, checks
 and comment, and api reads. Here it only reads --body-file into --body, names the current branch where gh would, and
-applies --jq to the reply. guard pr open writes its brief through that socket into the broker's state (decision A3),
-after pushing the branch. guard review, guard merge and guard ship run in the broker, outside the sandbox, so here
+applies --jq to the reply. guard review, guard merge and guard ship run in the broker, outside the sandbox, so here
 they are refused."""
 import argparse
 import json
@@ -111,28 +108,10 @@ def sbatch_request(args):
 
 
 def records_request(args):
-    """One records request from guard needs-you, guard ledger or guard card arguments."""
+    """One records request from guard ledger or guard card arguments."""
     store, rest = args[0], args[1:]
-    if store == "needs-you" and (not rest or rest[0].startswith("-")):
-        return {"verb": "list", "store": store, "remind": "--remind" in rest}
     verb, rest = (rest[0], rest[1:]) if rest else ("list", [])
     p = argparse.ArgumentParser(prog=f"guard {store} {verb}")
-    if store == "needs-you" and verb == "add":
-        for name in ("kind", "title"):
-            p.add_argument(f"--{name}", required=True)
-        for name in ("why", "expect", "worry", "undo", "source"):
-            p.add_argument(f"--{name}", default="")
-        p.add_argument("--path", action="append", default=[])
-        p.add_argument("--run", action="append", default=[])
-        p.add_argument("--update", action="store_true")
-        return {"verb": verb, "store": store, "item": vars(p.parse_args(rest))}
-    if store == "needs-you" and verb == "find":
-        p.add_argument("--kind", required=True)
-        p.add_argument("--title", required=True)
-        return {"verb": verb, "store": store, **vars(p.parse_args(rest))}
-    if store == "needs-you" and verb == "show":
-        p.add_argument("id")
-        return {"verb": verb, "store": store, **vars(p.parse_args(rest))}
     if store == "ledger" and verb == "add":
         for name in ("run", "field", "value"):
             p.add_argument(name)
@@ -217,48 +196,13 @@ def gh(args):
     return reply.get("rc", 1)
 
 
-def pr_open(args):
-    """guard pr open, as lib/pr-open.sh takes it: pushes the branch, then sends the brief's parts and the body to the
-    broker, which writes the brief in its state and opens the pull request."""
-    p = argparse.ArgumentParser(prog="guard pr open")
-    for name in ("title", "request", "plan", "test", "body"):
-        p.add_argument(f"--{name}", required=True)
-    for name in ("item", "scope"):
-        p.add_argument(f"--{name}", default="")
-    p.add_argument("--base", default="main")
-    a = p.parse_args(args)
-    head = branch()
-    if not head:
-        raise Refused("HEAD is detached. Check out the branch the pull request is for.")
-    if head == a.base:
-        raise Refused(f"the current branch is {a.base} itself. Commit the change on its own branch.")
-    request = {"verb": "pr-open", "item": a.item, "title": a.title, "base": a.base, "head": head, "test": a.test,
-               "request": read_text(a.request, "--request"), "plan": read_text(a.plan, "--plan"),
-               "scope": read_text(a.scope, "--scope") if a.scope else "", "body": read_text(a.body, "--body")}
-    pushed = subprocess.run(["git", "push", "-q", "-u", "origin", f"HEAD:refs/heads/{head}"], capture_output=True,
-                            text=True)
-    if pushed.returncode:
-        raise Refused(f"cannot push {head}: {(pushed.stderr.strip().splitlines() or ['git push failed'])[-1]}")
-    return request
-
-
 def guard(args):
     if args[:1] in (["review"], ["merge"], ["ship"]):
         sys.stderr.write(f"guard {args[0]}: refused: guard review, guard merge and guard ship run in the broker, "
                          "outside the sandbox; a person or the orchestrating session runs them there. Open the pull "
                          "request with guard pr open and stop.\n")
         return 2
-    if args[:2] == ["pr", "open"]:
-        try:
-            request = pr_open(args[2:])
-        except Refused as e:
-            sys.stderr.write(f"guard pr open: {e}\n")
-            return 2
-        reply = ask(request, GH)
-        sys.stdout.write(reply.get("out", ""))
-        sys.stderr.write(reply.get("err", "").replace("gh: refused by the broker", "guard pr open: refused by the broker"))
-        return 0 if reply.get("rc") == 0 else 2
-    if not args or args[0] not in ("needs-you", "ledger", "card"):
+    if not args or args[0] not in ("ledger", "card"):
         os.execv(GUARD, [GUARD, *args])
     try:
         request = records_request(args)
@@ -266,10 +210,6 @@ def guard(args):
         sys.stderr.write(f"guard {args[0]}: refused: {e}\n")
         return 2
     reply = ask(request, RECORDS)
-    if request.get("remind") and "--format" in args and "claude-hook" in args:
-        if reply.get("out"):
-            sys.stdout.write(json.dumps({"systemMessage": reply["out"].strip()}) + "\n")
-        return 0
     sys.stdout.write(reply.get("out", ""))
     sys.stderr.write(reply.get("err", ""))
     return reply.get("rc", 1)
