@@ -2,7 +2,7 @@
 # Sourced by tests/run.sh: the guides of design-v8 section 2. The compute gate (C01) and the PATH shim (S01 to S03)
 # refuse with a runnable line 2 and let the benign forms through.
 echo "== walls"
-WL=$tmp/walls; gate=$here/lib/compute-gate; shim=$here/lib/shim
+WL=${tmp:?}/walls; gate=$here/lib/compute-gate; shim=$here/lib/shim
 git init -q --bare -b main "$WL/origin.git"; git clone -q "$WL/origin.git" "$WL/ocean" 2>/dev/null
 mkdir -p "$WL/ocean/guard" "$WL/ocean/x" "$WL/ocean/runs/spinup"
 printf '#!/bin/bash\n#SBATCH --time=00:10:00\npython3 sim.py\n' > "$WL/ocean/job.sh"
@@ -59,14 +59,14 @@ expect shim-full-path-passes ok - -- shimmed "$(command -v git)" push -q --force
 mkdir -p "$WL/ocean/runs/spinup/out" "$WL/ocean/data" "$WL/scratch-$$"
 expect_refusal shim-rm-data S02 -- shimmed rm -rf data
 expect_refusal shim-rm-top S02 -- shimmed rm -rf .
-expect_refusal shim-rm-parent S02 -- shimmed rm -fr "$WL"
+expect_refusal shim-rm-parent S02 -- shimmed rm -fr "${WL:?}"
 expect_refusal shim-rm-split-flags S02 -- shimmed rm -r -f --verbose data
 expect_refusal shim-rm-dotdot S02 -- shimmed rm -rf runs/spinup/../..
 expect shim-rm-names-run-dir ok '^H4R-S02 rm -rf \.\./\.\./data is outside .*/ocean/runs/spinup$' -- bash -c 'cd "$1/ocean/runs/spinup" && PATH="$2:$PATH" rm -rf ../../data 2>&1 | head -n 1' _ "$WL" "$shim"
 expect shim-rm-data-kept ok - -- test -d "$WL/ocean/data"
 expect shim-rm-run-dir ok - -- shimmed rm -rf runs/spinup/out
 expect shim-rm-run-dir-gone fail - -- test -e "$WL/ocean/runs/spinup/out"
-expect shim-rm-tmp ok - -- shimmed rm -rf "$WL/scratch-$$" /tmp/guard-walls-absent-$$
+expect shim-rm-tmp ok - -- shimmed rm -rf "${WL:?}/scratch-$$" /tmp/guard-walls-absent-$$
 expect shim-rm-plain ok - -- bash -c 'touch "$1/ocean/x/f" && cd "$1/ocean" && PATH="$2:$PATH" rm x/f && ! test -e x/f' _ "$WL" "$shim"
 expect shim-rm-r-only ok - -- shimmed rm -r data
 expect shim-rm-full-path ok - -- bash -c 'mkdir -p "$1/ocean/data2" && cd "$1/ocean" && PATH="$2:$PATH" /bin/rm -rf data2' _ "$WL" "$shim"
