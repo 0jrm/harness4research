@@ -93,7 +93,7 @@ def ask(req, sock="scheduler"):
     return {"rc": 0, "out": "stopped\n"}
 wait.ask = ask
 wait.main(["--stop", "skynet-20261019T120000Z"]); print(sent[0], "stopped")'
-expect wait-host-verb-unbuilt-is-x00 fail 'H4R-X00 wait is not built' -- env -u GUARD_SESSION GUARD_WAIT_DIR="$wd" "$guard" wait skynet-20261019T120000Z
+expect wait-host-verb-local-mode-needs-a-project fail 'is not inside a git project' -- env -u GUARD_SESSION GUARD_WAIT_DIR="$wd" "$guard" wait skynet-20261019T120000Z
 
 # Refusals.
 expect_refusal wait-w01 W01 -- wpy '
@@ -190,6 +190,10 @@ b = scheduler.Broker("$sdir/state", {"session": "s1", "project": "$sdir/seed", "
 for seq, job, run, session in ((1, "12", "run-a", "s1"), (2, "13", "run-b", "s1"), (3, "77", "run-c", "other")):
     b.write({"seq": seq, "state": "intent", "run": run, "comment": f"guard:{session}:{seq}", "session": session})
     b.write({"seq": seq, "state": "submitted", "job": job, "session": session})
+b.write({"seq": 4, "state": "intent", "run": "run-h", "backend": "host", "comment": "guard:s1:4", "session": "s1"})
+b.write({"seq": 4, "state": "submitted", "job": "skynet-20261019T120000Z", "session": "s1"})
+from broker import host
+host.state = lambda job, broker=None: "running" if broker is b and job == "skynet-20261019T120000Z" else None
 item = needs_you.Item("n1", "2026-10-19T00:00:00Z", "open", "approve", "more holdout submissions?", "", "", "", "", "", [], [], "agent")
 with open(b.records.queue, "w") as f: f.write(needs_you.to_row(item))
 with open(b.records.log_path, "w") as f: f.write(json.dumps({"ts": time.time() - 180, "store": "scheduler", "refused": "H4R-R02 time 60 exceeds max_walltime_minutes 30"}) + "\n")
@@ -224,7 +228,9 @@ print(transport.send({"verb": "status", "job": sys.argv[2]})["out"])' "$here" "$
 expect status-job-mine ok '^\{"mine": true\}$' -- ask_mine 12
 expect status-job-of-another-session ok '^\{"mine": false\}$' -- ask_mine 77
 expect status-job-nobody-knows ok '^\{"mine": null\}$' -- ask_mine 5
-expect status-hides-another-sessions-job ok '^running: job 12 .*job 13 [^;]*$' -- st
+expect status-hides-another-sessions-job ok '^0$' -- bash -c "$(declare -f st); guard='$guard'; sdir='$sdir'; st | grep -c 'job 77' || true"
+expect status-lists-a-host-job ok '^running: .*; job skynet-20261019T120000Z \(run-h\) RUNNING' -- st
+expect status-host-job-is-the-wait-target-after-slurm ok '^next: guard wait 12$' -- st
 kill "$spid" 2>/dev/null; wait "$spid" 2>/dev/null
 expect_refusal status-broker-down R15 -- env GUARD_SESSION=s1 GUARD_SOCK_DIR="$sdir/sock" "$guard" status
 expect status-local-mode-says-unsigned ok 'unsigned: no broker' -- env -u GUARD_SESSION GUARD_SOCK_DIR="$sdir/none" "$guard" status
