@@ -109,7 +109,7 @@ kill $stub; rm -f "$ep/state/model/proxy.sock"; sed -i '/\/opt\/model\//d' "$ep/
 echo "== behind the broker"
 b=$tmp/s2
 in_b() { "$here/sandbox.sh" "$b" -- bash -c "cd ~/ocean-sim && $1"; }  # in_b <script>: in the broker episode's project
-raw() {  # raw <fields as JSON> [run]: one submit request straight to the broker's socket, the v7 verb U1 retires
+raw() {  # raw <fields as JSON> [run]: one v7 submit request straight to the broker's socket, which has no such verb
   in_b "python3 -c 'import json, socket, sys; c = socket.socket(socket.AF_UNIX); c.connect(\"/run/guard/scheduler.sock\"); c.sendall(json.dumps({\"verb\": \"submit\", \"run\": sys.argv[2], \"cwd\": \"/home/agent/ocean-sim\", \"script\": \"job.sh\", \"fields\": json.loads(sys.argv[1])}).encode() + b\"\\n\"); r = json.loads(c.makefile().readline()); print(r.get(\"err\", \"\")); sys.exit(r[\"rc\"])' '$1' ${2:-explore-1}"
 }
 gr() { in_b "guard run runs/gr --why w $1"; }  # gr '<the words after --why w>': guard run behind the broker
@@ -119,8 +119,7 @@ expect broker-no-slurm-socket fail - -- in_b 'test -e /run/slurm/slurmctld.sock'
 expect broker-bare-sbatch fail "^guard run runs/job --why 'Run job.sh for run job.' -- --time=5 job.sh$" -- in_b 'sbatch --time=5 job.sh'
 expect broker-guard-card fail '^H4R-R09 guard card is gone' -- in_b 'guard card add ocean-1 runs/ocean-1/question.card'
 expect old-preflight fail "^guard run runs/ocean-1 --why 'Run job.sh for run ocean-1.' -- --time=5 job.sh$" -- in_b 'guard preflight runs/ocean-1 job.sh --time=5'
-expect broker-raw-over-cap fail 'exceeds max_walltime_minutes=10' -- raw '{"time": "30"}'
-expect broker-raw-unknown-field fail 'unknown request fields' -- raw '{"time": "5", "account": "other"}'
+expect broker-raw-submit-gone fail '^H4R-X00 submit is not built' -- raw '{"time": "5"}'
 
 echo "== guard run behind the broker"
 expect run-submits ok '^job [0-9]+ submitted for run gr: 10 min x 1 node\(s\) x 4 cores = 0.67 core-h; guard wait [0-9]+$' -- gr '-- job.sh'

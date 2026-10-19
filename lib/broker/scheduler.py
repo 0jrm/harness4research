@@ -2,35 +2,24 @@
 every host of it runs the code that ships (design-v8 section 4). lib/broker/server.py serves it;
 lib/broker_host.py hosts it for guard enter; eval/broker/broker.py hosts it with a forge.
 
-It runs outside the agent's sandbox, which sees only its socket, and it is the only client of the scheduler. The
-sandbox's sbatch, squeue, sacct and scancel are lib/broker/client.py, which sends one request per call:
+It runs outside the agent's sandbox, which sees only its sockets, and it is the only client of the scheduler. Jobs
+enter only through guard run (lib/broker/run.py, the run verb); this module keeps what that and the sandbox's squeue,
+sacct and scancel stand-ins (lib/broker/client.py) need:
 
-    submit   {run, cwd, script, args, fields}; fields are the card-format names time nodes tasks cpus_per_task mem
-             gpus array dependency partition output (decision D9), and nothing else
-    queue    squeue's arguments, answered for this session's ledger jobs only
+    queue    squeue's arguments, answered for this session's job-log jobs only
     acct     sacct's arguments, the same
-    cancel   job ids, each one of this session's ledger jobs
+    cancel   job ids, each one of this session's job-log jobs
 
-A submission is checked against guard/budget.card, guard/watch.list and guard/ as they are on main in the broker's
-own mirror of origin, fetched before each submission, never against the agent's clone or environment. The agent's
-working tree is read as files, by blob hash, and git never runs in it. A ripple (a watched path or guard/ changed, an
-unhandled failed job, spend over 80%) stops the submission unless a person ran `approve reserve <run>` outside the
-sandbox, which also lets that one job draw on the verification reserve. The broker writes its ledger row first, then
-runs the scheduler's sbatch --export=NONE with the request's fields, then the card's extra_sbatch: words verbatim,
-then its own values last, so they win: account, job name, a guard:<session>:<seq> comment, time, nodes, the submit
-directory, and an output path in its spool, which the agent cannot write. The submitted script is a wrapper that
-opens the requested output inside the job sandbox and runs the agent's script, so no #SBATCH line in it reaches the
-scheduler. A job runs bare where the compute nodes have no bwrap or it spans nodes (decision D5); its ledger row and
-the reply say job_sandbox: bare. A run other than explore-* submits only once its card is approved: the signed tag
-card/<run_id> on origin verifies against the owner's and the broker's keys, and the card is read from that tag
-(decision D2; records.py).
+and the mirror of origin that policy is read from (guard/budget.card, guard/watch.list and guard/ as they are on main,
+fetched before each decision, never the agent's clone), the agent's working tree read as files by blob hash (git never
+runs in it), and the job log, ledger.jsonl, whose intent rows are reconciled by their guard:<session>:<seq> comment.
+Any other verb, v7's submit among them, is X00.
 
-The records socket (records.py) offers add, list, show and find for the needs-you queue, execution.tsv rows and
-question cards, and nothing that closes or approves. The gh socket (eval/broker/forge.py) is the sandbox's gh: pull
-requests kept in the broker's state, guard pr open's brief among them, and no verb that merges; review, merge and ship
-run from broker.py outside the sandbox. The broker holds the agent's GitHub token and the model key (read from
-gh_token_file and model_key_file into its environment as GH_TOKEN and ANTHROPIC_API_KEY), and no request carries
-either into the sandbox or the reviewer's.
+The records socket (records.py) offers the needs-you queue's add, list, show and find, and nothing that closes or
+approves. The gh socket (eval/broker/forge.py) is the sandbox's gh: pull requests kept in the broker's state, guard pr
+open's brief among them, and no verb that merges; review, merge and ship run from broker.py outside the sandbox. The
+broker holds the agent's GitHub token and the model key (read from gh_token_file and model_key_file into its
+environment as GH_TOKEN and ANTHROPIC_API_KEY), and no request carries either into the sandbox or the reviewer's.
 
 config.json keys: session, project (the project's path inside the sandbox), paths ([[inside, outside], ...]), origin
 (the repository main is fetched from), slurm_bin (the scheduler's clients, by absolute path), slurm_env (their
@@ -44,19 +33,14 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import subprocess
-import sys
 import threading
 import time
 
+import refusals
 from broker.records import Records, Refused, read_rows
-from policy.cost import card_values
-from policy.invocation import ARRAY, DEPENDENCY, OUTPUT, RUN, count_tasks, to_minutes
 
-FIELDS = ("time", "nodes", "tasks", "cpus_per_task", "mem", "gpus", "array", "dependency", "partition", "output")
 JOB_ID = re.compile(r"^[0-9]+(_[0-9]+)?$")
-FAILED = ("TIMEOUT", "OUT_OF_ME", "NODE_FAIL", "FAILED", "PREEMPTED")
 
 
 def blob(data):
@@ -237,11 +221,11 @@ class Broker:
     # verbs ---------------------------------------------------------------------------------------------------------
     def handle(self, req):
         verb = req.get("verb")
-        handler = {"submit": self.submit, "queue": self.queue, "acct": self.acct, "cancel": self.cancel}.get(verb)
-        if handler is None:
-            return {"rc": 1, "err": f"guard broker: no verb {verb!r}; it offers submit, queue, acct and cancel\n"}
+        handler = {"queue": self.queue, "acct": self.acct, "cancel": self.cancel}.get(verb)
+        if handler is None:  # v7's submit among them: guard run is the only way in (E2b)
+            return refusals.reply(refusals.refuse("X00", verb=verb))
         if not self.cfg.get("slurm_bin"):
-            return {"rc": 1, "err": "guard broker: refused: this host has no scheduler; nothing was submitted\n"}
+            return {"rc": 1, "err": "guard broker: refused: this host has no scheduler\n"}
         return self.locked(handler, req)
 
     def locked(self, handler, req):
@@ -300,217 +284,6 @@ class Broker:
         rc, out, err = self.slurm("scancel", *ids)
         return {"rc": rc, "out": out, "err": err}
 
-    def submit(self, req):
-        run, fields = req.get("run"), req.get("fields")
-        if not isinstance(run, str) or not RUN.match(run):
-            raise Refused(f"run id {run!r} is not a run id")
-        if not isinstance(fields, dict) or set(fields) - set(FIELDS):
-            raise Refused(f"unknown request fields {sorted(set(fields or {}) - set(FIELDS))}; the fields are "
-                          + " ".join(FIELDS))
-        fields = {k: str(v) for k, v in fields.items()}
-        args = req.get("args") or []
-        if not all(isinstance(a, str) for a in args):
-            raise Refused("job arguments are strings")
-        cwd_in = os.path.normpath(str(req.get("cwd")))
-        tree = self.tree()
-        tree.inside(self.outside(cwd_in))
-        script_in = os.path.normpath(os.path.join(cwd_in, str(req.get("script"))))
-        if not os.path.isfile(tree.inside(self.outside(script_in))):
-            raise Refused(f"no job script {req.get('script')}")
-
-        self.mirror.fetch()
-        text = self.mirror.show("guard/budget.card")
-        if text is None:
-            raise Refused("no guard/budget.card on main")
-        card = card_values(text)
-
-        def need(key):
-            v = card.get(key, "")
-            if not v or "<" in v:
-                raise Refused(f"budget card '{key}' is unset on main; a person sets it")
-            return v
-
-        def whole(key):
-            v = need(key)
-            if not v.isdigit():
-                raise Refused(f"budget card '{key}' must be a whole number on main: {v}")
-            return int(v)
-
-        ignore = [l.strip() for l in (self.mirror.show(".gitignore") or "").splitlines()
-                  if l.strip() and not l.startswith(("#", "!"))]
-        moved = tree.changed(self.mirror, ["guard"], ignore)
-        if moved:
-            raise Refused(f"guard/ differs from main: {' '.join(moved)}; restore it from main")
-
-        explore = run.startswith("explore-")
-        acct, start, user = need("account"), need("start_date"), self.cfg["user"]
-        if dt.date.today().isoformat() > need("stop_date"):
-            raise Refused(f"past stop_date {card['stop_date']}; a person extends it on main")
-        max_ch, cpn = whole("max_core_hours"), whole("cores_per_node")
-        reserve = whole("verification_reserve_core_hours") if card.get("verification_reserve_core_hours") else 0
-        max_nodes, max_wall, max_conc = whole("max_nodes_per_job"), whole("max_walltime_minutes"), whole("max_concurrent_jobs")
-
-        if "time" not in fields:
-            raise Refused("state the walltime: the time field")
-        wmin = to_minutes(fields["time"])
-        if wmin is None:
-            raise Refused(f"time {fields['time']} is not a Slurm time")
-        nodes = fields.get("nodes", "1")
-        if not nodes.isdigit() or int(nodes) < 1:
-            raise Refused(f"nodes {nodes} is not one positive integer")
-        nodes = int(nodes)
-        for key in ("tasks", "cpus_per_task"):
-            if key in fields and not (fields[key].isdigit() and int(fields[key]) > 0):
-                raise Refused(f"{key} {fields[key]} is not a positive integer")
-        if "mem" in fields and not re.fullmatch(r"[0-9]+[KMGT]?", fields["mem"]):
-            raise Refused(f"mem {fields['mem']} is not a size such as 4G")
-        array = fields.get("array", "")
-        if array and not ARRAY.match(array):
-            raise Refused(f"array {array} is not an index list")
-        n = count_tasks(array) if array else 1
-        gpus = fields.get("gpus", "0")
-        if not gpus.isdigit():
-            raise Refused(f"gpus {gpus} is not a count")
-        if "partition" in fields:
-            allowed = card.get("partitions", "").replace(",", " ").split()
-            if not re.fullmatch(r"[A-Za-z0-9_.-]+", fields["partition"]) or (allowed and fields["partition"] not in allowed):
-                raise Refused(f"partition {fields['partition']} is not one the budget card allows")
-        if "dependency" in fields:
-            for item in fields["dependency"].split(","):
-                if item != "singleton" and not DEPENDENCY.match(item):
-                    raise Refused(f"dependency {item} is not after*:<job ids> or singleton")
-                foreign = [j for j in item.split(":")[1:] if j.split("_")[0] not in self.jobs()]
-                if foreign:
-                    raise Refused(f"dependency names job {foreign[0]}, which this session did not submit")
-        output = fields.get("output", "slurm-%A_%a.out" if array else "slurm-%j.out")
-        out_in = os.path.normpath(os.path.join(cwd_in, output))
-        if not OUTPUT.match(output) or not out_in.startswith(self.cfg["project"] + "/"):
-            raise Refused(f"output {output} is not a path inside the project")
-
-        if explore:
-            max_nodes = min(int(card.get("explore_max_nodes") or 1), max_nodes)
-            max_wall = min(int(card.get("explore_max_walltime_minutes") or 60), max_wall)
-            if n != 1:
-                raise Refused("explore- runs submit one task at a time")
-        if nodes > max_nodes:
-            raise Refused(f"nodes {nodes} exceeds max_nodes_per_job={max_nodes}")
-        if wmin > max_wall:
-            raise Refused(f"time {fields['time']} ({wmin} min) exceeds max_walltime_minutes={max_wall}")
-        if int(gpus) and (int(card.get("explore_max_gpus") or 0) < int(gpus) if explore
-                          else card.get("max_gpu_hours", "0") in ("", "0")):
-            raise Refused(f"gpus {gpus}: the budget card allows this run none, or fewer")
-
-        card_sha, qcard = None, {}
-        if not explore:
-            q = f"runs/{run}/question.card"
-            qtext = self.records.approved(run)[0].encode()
-            card_sha = hashlib.sha256(qtext).hexdigest()
-            first = next((r["card_sha"] for r in self.rows if r["state"] == "intent" and r["run"] == run), None)
-            if first and first != card_sha:
-                raise Refused(f"{q} changed since this run's first job; start a new run id for a new design")
-            if card.get("card_on_main") == "yes" and self.mirror.show(q) != qtext.decode(errors="replace"):
-                raise Refused(f"card_on_main is yes and {q} is not on main as it is here; a person merges it first")
-            qcard = {k: v for k, v in card_values(qtext.decode(errors="replace")).items() if v and "<" not in v}
-            waiver = qcard.get("checks") or card.get("checks", "")
-            checks = [p for p, (mode, _) in self.mirror.files.items()
-                      if p.startswith(f"runs/{run}/checks/") and mode == "100755"]
-            if not re.match(r"^waived\s+[^\s<]", waiver) and not checks:
-                raise Refused(f"no executable domain check in runs/{run}/checks/ on main, and no checks: waived")
-            if qcard.get("deadline") and dt.date.today().isoformat() > qcard["deadline"]:
-                raise Refused(f"past deadline {qcard['deadline']} in {q}")
-
-        approval = self.approval(run)
-        ripples = self.ripples(tree, run, acct, user, start, max_ch, ignore)
-        if ripples and approval is None:
-            raise Refused("ripples: " + " | ".join(ripples) + f"; a person approves one diagnostic job outside the "
-                          f"sandbox with: guard approve reserve {run}")
-
-        spent = sum(int(x or 0) for x in self.must("sacct", "-A", acct, "-u", user, "-S", start, "-X", "-n", "-P",
-                                                     "-o", "CPUTimeRAW").split()) // 3600
-        queued = 0
-        for line in self.must("squeue", "-A", acct, "-u", user, "-h", "-t", "PENDING", "-o", "%C %l").splitlines():
-            c, _, limit = line.partition(" ")
-            queued += int(c) * (to_minutes(limit.strip()) or 0)
-        queued //= 60
-        proj = nodes * cpn * wmin * n // 60
-        held = 0 if approval is not None else reserve
-        if spent + queued + proj > max_ch - held:
-            raise Refused(f"spent {spent} + queued {queued} + this job {proj} core-h exceeds {max_ch - held} available "
-                          f"(max {max_ch}, reserve held {held})")
-        run_max = qcard.get("budget_core_hours") or card.get("default_run_core_hours", "0")
-        if run_max.isdigit() and int(run_max) > 0:
-            run_spent = sum(int(line.split("|")[1] or 0) for line in self.must(
-                "sacct", "-A", acct, "-u", user, "-S", start, "-X", "-n", "-P", "-o", "JobName,CPUTimeRAW").splitlines()
-                if line.split("|")[0] == run) // 3600
-            if run_spent + proj > int(run_max):
-                raise Refused(f"this run spent {run_spent} + this job {proj} core-h exceeds budget_core_hours={run_max}")
-        live = len([l for l in self.must("squeue", "-A", acct, "-u", user, "-h").splitlines() if l.strip()])
-        if live + n > max_conc:
-            raise Refused(f"{live} live + {n} new jobs exceeds max_concurrent_jobs={max_conc}")
-
-        bare = None if self.cfg.get("compute_bwrap", True) else "the compute nodes have no bwrap"
-        bare = "a multi-node job" if nodes > 1 else bare
-        seq = 1 + sum(r["state"] == "intent" for r in self.rows)
-        comment = f"guard:{self.cfg['session']}:{seq}"
-        spool = os.path.join(self.dir, "spool", str(seq))
-        os.makedirs(spool)
-        wrapper = os.path.join(spool, "job.sh")
-        expand = {"%%": "%", "%j": "${SLURM_JOB_ID}", "%A": "${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}",
-                  "%a": "${SLURM_ARRAY_TASK_ID:-4294967294}", "%x": run}
-        shown = re.sub(r"%[%jAax]", lambda m: expand[m.group()], output)
-        with open(wrapper, "w") as f:
-            f.write(f"#!/bin/bash\n# guard broker job {comment}, run {run}: {script_in}, output {output}\n"
-                    f'exec >"{shown}" 2>&1 || exit 1\nexec bash {shlex.quote(script_in)} "$@"\n')
-        extra = shlex.split(card.get("extra_sbatch", "")) if "<" not in card.get("extra_sbatch", "") else []
-        named = {"tasks": "ntasks", "cpus_per_task": "cpus-per-task", "mem": "mem", "gpus": "gpus", "array": "array",
-                 "dependency": "dependency", "partition": "partition"}
-        argv = (["--export=NONE", "--ignore-pbs", "--parsable"]
-                + [f"--{named[k]}={v}" for k, v in fields.items() if k in named] + extra
-                + [f"--account={acct}", f"--job-name={run}", f"--comment={comment}", f"--time={wmin}",
-                   f"--nodes={nodes}", f"--chdir={cwd_in}", f"--output={spool}/slurm-%j.out", wrapper, *args])
-        self.write({"seq": seq, "state": "intent", "run": run, "comment": comment, "fields": fields, "argv": argv,
-                    "card_sha": card_sha, "reserve": approval, "job_sandbox": "bare" if bare else "bwrap",
-                    "why_bare": bare})
-        rc, out, err = self.slurm("sbatch", *argv)
-        job = out.strip().split(";")[0]
-        if rc or not JOB_ID.match(job):
-            self.write({"seq": seq, "state": "failed", "why": err.strip() or out.strip()})
-            return {"rc": 1, "err": f"guard broker: the scheduler refused: {err.strip() or out.strip()}\n"}
-        self.write({"seq": seq, "state": "submitted", "job": job})
-        note = (f"guard: job {job}, run {run}: {n} task(s) x {nodes} node(s) x {wmin} min, projected {proj} core-h, "
-                f"job_sandbox: {'bare (' + bare + ')' if bare else 'bwrap'}\n")
-        return {"rc": 0, "out": job + "\n" if req.get("parsable") else f"Submitted batch job {job}\n", "err": note}
-
-    def approval(self, run):
-        used = {r["reserve"] for r in self.rows if r["state"] == "intent" and r.get("reserve")}
-        for a in read_rows(os.path.join(self.dir, "approvals.jsonl")):
-            if a["run"] == run and a["id"] not in used:
-                return a["id"]
-        return None
-
-    def ripples(self, tree, run, acct, user, start, max_ch, ignore):
-        found = []
-        watch = [l.split("#")[0].strip() for l in (self.mirror.show("guard/watch.list") or "").splitlines()]
-        moved = tree.changed(self.mirror, [w for w in watch if w], ignore)
-        if moved:
-            found.append(f"watched paths differ from main: {' '.join(moved)}")
-        mine = self.jobs(run)
-        if mine:
-            handled = set()
-            for p in self.mirror.files:
-                if p.startswith(f"runs/{run}/incidents/") and p.endswith(".md"):
-                    handled |= {m.group(1) for m in re.finditer(r"(?m)^job: *([0-9A-Za-z_.-]+) *$", self.mirror.show(p))}
-            out = self.must("sacct", "-X", "-n", "-P", "-o", "JobID,State", "--jobs=" + ",".join(mine))
-            bad = [l.split("|")[0] for l in out.splitlines()
-                   if "|" in l and any(s in l.split("|")[1] for s in FAILED) and l.split("|")[0] not in handled]
-            if bad:
-                found.append(f"jobs ended badly with no incident on main: {' '.join(bad)}")
-        cpu = self.must("sacct", "-A", acct, "-u", user, "-S", start, "-X", "-n", "-P", "-o", "CPUTimeRAW").split()
-        spent = sum(int(x or 0) for x in cpu) // 3600
-        if spent * 100 > max_ch * 80:
-            found.append(f"budget {spent} of {max_ch} core-h, over 80%")
-        return found
-
 
 def expand_flags(args):
     """-XnP as -X -n -P, the way getopt reads clustered flags."""
@@ -537,13 +310,3 @@ def outside_records(state_dir):
     with open(os.path.join(state_dir, "config.json")) as f:
         cfg = json.load(f)
     return Records(state_dir, cfg, Mirror(os.path.join(state_dir, "mirror.git"), cfg["origin"]))
-
-
-def approve(state_dir, what, run):
-    if what != "reserve" or not RUN.match(run):
-        sys.exit("usage: broker.py approve reserve <state_dir> <run_id>")
-    path = os.path.join(state_dir, "approvals.jsonl")
-    row = {"id": f"a{len(read_rows(path)) + 1}", "run": run, "ts": time.time(), "what": "reserve"}
-    with open(path, "a") as f:
-        f.write(json.dumps(row) + "\n")
-    print(f"approved one diagnostic job for {run} past the ripples gate and the reserve ({row['id']})")

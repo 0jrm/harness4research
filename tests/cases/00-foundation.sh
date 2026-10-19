@@ -143,3 +143,13 @@ expect foundation-r09-card-line fail "^guard run runs/run-001 --why 'Run job.sh 
 expect foundation-r08-variants ok '^approval budget limit open run$' -- py '
 import refusals
 print(" ".join(sorted(refusals.CODES["R08"].reasons)))'
+
+# The scheduler socket has no submit verb (E2b): guard run is the only way in, and a v7 submit request is X00.
+expect_refusal foundation-no-submit-verb X00 -- py '
+import os, sys
+from broker import scheduler, server
+tmp = os.environ["TMPDIR_FOUNDATION"]
+b = scheduler.Broker(tmp + "/nosubmit-state", {"session": "s1", "origin": tmp + "/ext-origin.git", "project": tmp,
+                     "paths": [[tmp, tmp]], "slurm_bin": "/nonexistent", "user": "u"})
+r = server.answer(b, "scheduler", {"verb": "submit", "run": "r1", "cwd": tmp, "script": "job.sh", "fields": {"time": "5"}})
+sys.stderr.write(r.get("err", "")); sys.exit(r["rc"])'

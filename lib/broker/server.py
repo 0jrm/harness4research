@@ -3,8 +3,9 @@ own uid (SO_PEERCRED). The session is the socket directory the request came in o
 
 A verb is answered by the module MODULES names, whose handle(request, broker) returns the reply; one whose module is
 not in this harness yet answers X00. Every other verb goes to the store that served it before v8: the scheduler's
-queue, acct and cancel (and submit, until guard run and the rewritten audit attacks replace it), the records' add,
-list, show and find, and the forge's gh verbs where a forge is attached, which refuse a verb they do not offer as they did."""
+queue, acct and cancel (v7's submit is gone: guard run is the only way in, and the scheduler answers it X00), the
+records' add, list, show and find, and the forge's gh verbs where a forge is attached, which refuse a verb they do not
+offer as they did."""
 import importlib
 import inspect
 import json

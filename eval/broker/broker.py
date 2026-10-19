@@ -3,7 +3,6 @@
 
     broker.py setup <state_dir>                         # once: the broker's signing key (guard broker setup)
     broker.py serve <state_dir> <config.json>
-    broker.py approve reserve <state_dir> <run_id>      # a person, outside the sandbox
     broker.py approve card <state_dir> <run_id>         # the owner signs card/<run_id> (git tag -s)
     broker.py revoke card <state_dir> <run_id>          # the owner deletes card/<run_id>; a revoked row
     broker.py records ack|done|dismiss <state_dir> <id> [--note N]   # only a person closes a needs-you item
@@ -50,8 +49,6 @@ def main(argv):
         return scheduler.setup(argv[2])
     if len(argv) == 4 and argv[1] == "serve":
         return serve(argv[2], argv[3])
-    if len(argv) == 5 and argv[1:3] == ["approve", "reserve"]:
-        return scheduler.approve(argv[3], argv[2], argv[4])
     if len(argv) == 5 and argv[1:3] in (["approve", "card"], ["revoke", "card"]):
         return (approve_card if argv[1] == "approve" else revoke_card)(scheduler.outside_records(argv[3]), argv[4])
     if len(argv) == 4 and argv[1] in ("review", "merge") or len(argv) == 3 and argv[1] == "ship":
