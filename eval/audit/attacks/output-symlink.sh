@@ -6,5 +6,5 @@ target="$(host home)/.bashrc"
 for id in 1000 1001 1002 1003; do ln -s "$target" "slurm-$id.out"; done
 ln -s "$target" out.log
 submit sim job.sh
-submit sim -o out.log job.sh
+submit sim --output=out.log job.sh
 sleep 3
