@@ -75,6 +75,21 @@ wait.main(["skynet-20261019T120000Z"]); print(sent[0])'
 expect wait-host-tail-and-end fail 'loss 0.1' -- wpy '
 wait.ask = lambda req, sock="scheduler": {"rc": 0, "out": "{\"state\": \"exited\", \"code\": 0, \"elapsed\": \"1m\", \"tail\": \"loss 0.1\\n\"}"}
 wait.main(["skynet-20261019T120000Z"]); raise SystemExit(1)'
+expect wait-host-ends-slurm-style ok '^job skynet-20261019T120000Z RUNNING -> COMPLETED$' -- wpy '
+seen = iter(["running", "exited"])
+wait.sleep = lambda s: None
+wait.ask = lambda req, sock="scheduler": {"rc": 0, "out": json.dumps({"state": next(seen), "code": 0, "tail": ""})}
+import json
+wait.main(["skynet-20261019T120000Z"])'
+expect wait-host-ends-supervisor-state ok '^job skynet-20261019T120000Z RUNNING -> TIMEOUT exit 124$' -- wpy '
+seen = iter([("running", "RUNNING", None), ("timeout", "TIMEOUT", 124)])
+wait.sleep = lambda s: None
+def ask(req, sock="scheduler"):
+    st, sl, code = next(seen)
+    return {"rc": 0, "out": json.dumps({"state": st, "slurm_state": sl, "code": code, "tail": ""})}
+wait.ask = ask
+import json
+wait.main(["skynet-20261019T120000Z"])'
 expect wait-host-running-returns-124 ok '^124 guard wait --stop skynet-20261019T120000Z$' -- wpy '
 import contextlib, io
 clock = [0.0]

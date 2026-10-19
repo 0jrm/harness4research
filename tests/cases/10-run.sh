@@ -237,7 +237,7 @@ if bwrap --unshare-user --ro-bind / / true 2>/dev/null; then
   expect run-host-launched ok '^job skynet-[0-9]{8}T[0-9]{6}Z launched for run h: 5 min x 1 cores x 0 GPUs = 0.08 core-h, 0 GPU-h; guard wait skynet-' -- echo "$hl"
   hid=$(sed -n 's/^job \([^ ]*\) launched.*/\1/p' <<<"$hl")
   for _ in $(seq 100); do [ -f "$tmp/run-host-state/$hid/end" ] && break; sleep 0.1; done
-  expect run-host-wait-ends ok "^job $hid .*(exited|COMPLETED)" -- ghr wait "$hid"
+  expect run-host-wait-ends ok "^job $hid (RUNNING -> )?COMPLETED" -- ghr wait "$hid"
   expect run-host-wait-log ok "^host job $hid$" -- ghr wait "$hid"
   expect run-host-card ok '^backend: host$' -- git -C "$tmp/run-host-origin.git" show run/h:runs/h/question.card
   expect run-host-log-row ok '"backend": "host"' -- grep -h '"state": "intent"' "$hq/.git/guard/broker/ledger.jsonl"

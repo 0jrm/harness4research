@@ -204,7 +204,7 @@ s.serve_forever()' "$here" "$hb" "$tmp/host-sock" & host_srv=$!
   for _ in $(seq 50); do [ -e "$tmp/host-sock/ready" ] && break; sleep 0.1; done
   gw() { env GUARD_SESSION=s-host GUARD_SOCK_DIR="$tmp/host-sock" "$guard" wait "$@"; }
   short=$(hg launch runs/2026-10-19-short 'Sleep a little.' -- --time=5 runs/short.sh)
-  expect host-guard-wait-ends ok "^job ${short%% *} running -> exited|^job ${short%% *} exited" -- gw "${short%% *}"
+  expect host-guard-wait-ends ok "^job ${short%% *} (RUNNING -> )?COMPLETED" -- gw "${short%% *}"
   expect host-guard-wait-tail ok '^short done$' -- gw "${short%% *}"
   stop_me=$(hg launch runs/2026-10-19-stopme 'Train until stopped.' -- --time=5 runs/long.sh)
   expect host-guard-wait-stop ok "^job ${stop_me%% *} RUNNING -> CANCELLED$" -- gw --stop "${stop_me%% *}"

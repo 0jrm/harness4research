@@ -38,6 +38,7 @@ MAX_WAIT = 5 * 60
 UNITS = {"s": 1, "m": 60, "h": 3600}
 ENDED = ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "PREEMPTED", "BOOT_FAIL",
          "DEADLINE")
+HOST_SLURM = {"running": "RUNNING", "timeout": "TIMEOUT", "stopped": "CANCELLED"}
 HOST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]*-\d{8}T\d{6}Z$")
 JOB_ID = re.compile(r"^[0-9]+(_[0-9]+)?$")
 USAGE = ("usage: guard wait <job id|pid|host job id> [--timeout 5m]\n"
@@ -249,9 +250,20 @@ def wait_host(ident, deadline):
     if state["state"] == "running" and state["state"] == first["state"]:
         return 124, state.get("tail", ""), keep_going(f"job {ident}", state.get("elapsed", "an unknown time"), ident,
                                                       f"guard wait --stop {ident}")
-    moved = f"{first['state']} -> {state['state']}" if state["state"] != first["state"] else state["state"]
+    a, b = slurm_state(first), slurm_state(state)
+    moved = f"{a} -> {b}" if b != a else b
     code = state.get("code")
     return 0, state.get("tail", ""), f"job {ident} {moved}" + (f" exit {code}" if code else "")
+
+
+def slurm_state(reply):
+    """A host job's state as Slurm names it, as a job's line says it: the supervisor's own (slurm_state), else from
+    the wait verb's state and code."""
+    if reply.get("slurm_state"):
+        return reply["slurm_state"]
+    if reply.get("state") == "exited":
+        return "COMPLETED" if not reply.get("code") else "FAILED"
+    return HOST_SLURM.get(reply.get("state"), str(reply.get("state", "")).upper())
 
 
 # the verb ------------------------------------------------------------------------------------------------------------
