@@ -27,7 +27,7 @@ set_main guard/VERSION "s/^installer: .*/installer: $zeros/"
 expect version-pin-not-installer ok '^current$' -- "$guard" version
 reset_main
 git init -q "$tmp/plain"
-expect path-refuses-unguarded fail 'runs inside a guarded project' -- bash -c 'cd "$1" && "$2" ripples runs/x' _ "$tmp/plain" "$guard"
+expect path-refuses-unguarded fail 'runs inside a guarded project' -- bash -c 'cd "$1" && "$2" fence' _ "$tmp/plain" "$guard"
 git switch -q --detach "$good"
 set_script preflight $'<<<<<<< ours\nexit 0\n=======\nexit 1\n>>>>>>> theirs'; git commit -q -am "a vendored harness merged with conflicts"
 git push -q origin HEAD:refs/heads/conflicted; git fetch -q origin; git switch -q --detach "$good"
