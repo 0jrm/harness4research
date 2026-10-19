@@ -21,7 +21,7 @@ card() {  # card <run> <question> <hypothesis> <metric> <partner> [extra key: va
       -e "s|^baseline: .*|baseline: lr-sweep|" -e "s|^baseline_tolerance: .*|baseline_tolerance: 0.01|" \
       -e "s|^kill_criteria: .*|kill_criteria: stop if validation error is not 2% below baseline by epoch 20|" \
       -e "s|^negative_result_means: .*|negative_result_means: the schedule is not worth its extra tuning|" \
-      -e "s|^out_of_scope: .*|out_of_scope: architecture changes|" "$here/templates/runs/_template/question.card" > "$f"
+      -e "s|^out_of_scope: .*|out_of_scope: architecture changes|" "$here/tests/golden/v7-question.card" > "$f"  # a v7 card, as history on main
   local l; for l in "${@:6}"; do  # an extra line replaces the template's line for its key, or is appended
     awk -v l="$l" -v k="${l%%:*}:" 'index($0, k) == 1 && !d { print l; d = 1; next } { print } END { if (!d) print l }' "$f" > "$f.new"
     mv "$f.new" "$f"

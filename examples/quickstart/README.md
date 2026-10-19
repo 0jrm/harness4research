@@ -11,18 +11,18 @@ The directory argument is optional and defaults to `~/guard-quickstart`. A rerun
 ## What it shows
 
 1. `guard init` proposes the guard, and a human fills in the budget card and merges it.
-2. A human commits the domain checks. An agent commits the question card before any compute.
-3. The agent raises its own walltime cap on its branch, and preflight refuses the submission.
-4. Preflight accepts the real submission, and the job records a manifest.
+2. A human commits the domain checks. The agent copies the experiment into `runs/cheap-evo/`.
+3. The agent raises its own walltime cap on its branch, and `guard run` refuses with `H4R-R06` and the command that restores the card.
+4. `guard run` prices the job, writes the run's card on `run/cheap-evo`, and submits it; the job records a manifest.
 5. The agent writes the report, and the fence passes it because every number names its artifact.
-6. Ripples reads the job state, the budget and each domain check after the job.
+6. The summary prints the card `guard run` wrote, marked `local, unsigned`, since no broker runs here.
 
-The summary prints absolute paths to the question card, the report, the manifest and the budget card, and the command that draws the atlas page for the project.
+The summary prints absolute paths to the card, the report, the manifest and the budget card, and the command that draws the atlas page for the project.
 
 ## The experiment
 
-The payload, `campaign.py`, searches for a small team of decision stumps that classifies the UCI breast-cancer data set ([data/README.md](data/README.md)). It uses no language model. The question card pairs its main metric with a partner metric that punishes predicting the majority class. Selection favors faster teams, so the selected team, and its accuracy, can change between runs on a busy machine.
+The payload, `campaign.py`, searches for a small team of decision stumps that classifies the UCI breast-cancer data set ([data/README.md](data/README.md)). It uses no language model. The experiment pairs its main metric with a partner metric that punishes predicting the majority class. Selection favors faster teams, so the selected team, and its accuracy, can change between runs on a busy machine.
 
 ## Before a real job
 
-Each check in `checks/` exits 77 while `campaign.json` does not exist yet. Ripples reports that as UNCHECKED, so the first preflight can pass. A check that fails for any other reason is a RIPPLE and stops new submissions.
+Each check in `checks/` exits 77 while `campaign.json` does not exist yet. Run them by hand after the job; none of them gates `guard run`.
