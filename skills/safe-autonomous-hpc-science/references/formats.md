@@ -1,6 +1,6 @@
 # Formats
 
-Read this before you write a question card or a report. The templates are `runs/_template/question.card`, `runs/_template/report.md`, and `runs/_template/execution.tsv`; set lineage keys per `lineage.md`.
+Read this before you write a report. The templates are `runs/_template/report.md` and `runs/_template/execution.tsv`. The question card is the broker's, written by `guard run` from `--why`.
 
 ## Question card
 
