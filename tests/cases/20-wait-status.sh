@@ -162,6 +162,12 @@ f['refusal']['why'] = 'w' * 900
 text = status.render(f)
 assert len(text) <= 1200 and len(text.splitlines()) == 6
 print('ok')"
+expect status-receipts-on-the-git-line ok '^git: feat-a, 2 changed files, 1 commit ahead of origin/main, 0 behind; receipts: guard/receipts at 1a2b3c4d5e6f, signed by the broker$' -- sy "
+f = json.loads('''$facts''')
+f['receipts'] = 'receipts: guard/receipts at 1a2b3c4d5e6f, signed by the broker'
+text = status.render(f)
+assert len(text) <= 1200 and len(text.splitlines()) == 6
+print(text.splitlines()[4])"
 expect status-unsigned-in-local-mode ok 'unsigned: no broker' -- sy "
 f = json.loads('''$facts''')
 f['unsigned'] = True
@@ -208,7 +214,8 @@ expect status-e2e-asks-answer-shown-once ok '^blocked: needs-you n1 waits for a 
 expect status-e2e-needs-you-hides-ask-ids ok '^0$' -- bash -c "$(declare -f st); guard='$guard'; sdir='$sdir'; st | grep -c 'needs-you a[0-9]' || true"
 expect status-e2e-refusal ok '^last refusal: 3 min ago, scheduler: H4R-R02 time 60' -- st
 expect status-e2e-budget ok '^budget: 12 of 100 core-h spent, 0 queued, 78 left above the 10 reserve$' -- st
-expect status-e2e-git ok '^git: main, [0-9]+ changed files?, [0-9]+ commits? ahead of origin/main, [0-9]+ behind$' -- st
+expect status-e2e-git ok '^git: main, [0-9]+ changed files?, [0-9]+ commits? ahead of origin/main, [0-9]+ behind; receipts: ' -- st
+expect status-e2e-receipts ok '^git: main, .* behind; receipts: (local, unsigned|none published yet|guard/receipts at )' -- st
 expect status-e2e-next ok '^next: guard wait 12$' -- st
 expect status-e2e-under-1200 ok '^ok$' -- bash -c "$(declare -f st); guard='$guard'; sdir='$sdir'; n=\$(st | wc -c); [ \$n -le 1200 ] && echo ok"
 ask_mine() { env GUARD_SESSION=s1 GUARD_SOCK_DIR="$sdir/sock" python3 -c 'import sys; sys.path.insert(0, sys.argv[1] + "/lib"); import _path
