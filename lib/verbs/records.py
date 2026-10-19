@@ -96,7 +96,7 @@ def human(argv):
     lib = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     if argv[0] == "needs-you":
         os.execv(sys.executable, [sys.executable, os.path.join(lib, "needs_you.py"), *argv[1:]])
-    os.execvp("bash", ["bash", os.path.join(lib, "pr-open.sh"), *argv[2:]])
+    os.execvp("bash", ["bash", os.path.join(lib, "pr-open.sh"), *argv[1:]])
 
 
 def main(argv):

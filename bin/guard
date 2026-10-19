@@ -13,8 +13,6 @@ case $cmd in
   review|merge|ship) [ -z "${GUARD_SESSION:-}" ] || { b=$(git branch --show-current 2>/dev/null || :); refusal print G01 branch="${b:-HEAD}"; } ;;&
   survey|init|archive|doctor|config|review|merge) exec bash "$here/lib/$cmd.sh" "$@" ;;
   ship) exec bash "$here/lib/batch.sh" ship "$@" ;;
-  # Off the broker, pr open is lib/pr-open.sh as it was; lib/verbs/records.py takes it only where gh.sock exists.
-  pr) [ -S "${GUARD_SOCK_DIR:-/run/guard}/gh.sock" ] || exec bash "$here/lib/pr-open.sh" "$@" ;;&
   needs-you|pr) exec python3 "$here/lib/verbs/records.py" "$cmd" "$@" ;;
   enter) exec python3 "$here/lib/enter.py" "$@" ;;
   broker) exec python3 "$here/lib/broker_host.py" "$@" ;;
