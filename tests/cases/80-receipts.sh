@@ -143,7 +143,7 @@ steps = [s for s in wf["jobs"]["fence"]["steps"] if "guard/receipts" in s.get("n
 yaml.safe_dump({"jobs": {"fence": {"steps": steps}}}, open(sys.argv[2], "w"))' \
   "$here/templates/github/workflows/guard-fence.yml" "$R/fetch.yml"
 wfrun() {  # wfrun <origin> <workspace>: the workflow's guard/receipts step in a clone of <origin> without the ref
-  rm -rf "$2"; git clone -q "$1" "$2" 2>/dev/null; git -C "$2" update-ref -d refs/remotes/origin/guard/receipts 2>/dev/null
+  rm -rf "${2:?}"; git clone -q "$1" "$2" 2>/dev/null; git -C "$2" update-ref -d refs/remotes/origin/guard/receipts 2>/dev/null
   env GITHUB_REPOSITORY=lab/fixture GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="url.$1.insteadOf" \
     GIT_CONFIG_VALUE_0=https://x-access-token:tok@github.com/lab/fixture.git \
     python3 "$here/tests/workflow.py" "$R/fetch.yml" fence "$2" --ctx github.token=tok \

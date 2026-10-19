@@ -22,7 +22,7 @@ for id in "$@"; do
   [[ $id =~ ^L[0-9a-f]{10}$ ]] || refuse "$id" "not a receipt id"
 done
 
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+tmp=$(mktemp -d); trap 'rm -rf "${tmp:?}"' EXIT
 if [ -n "${GUARD_RECEIPTS_SIGNERS:-}" ]; then
   signers=$GUARD_RECEIPTS_SIGNERS
 else
