@@ -291,7 +291,8 @@ class T3(unittest.TestCase):
         self.assertIsNone(t3.holdout(ep))
         hold = ep.p("state", "broker", "holdout")
         os.makedirs(hold)
-        open(os.path.join(hold, "seal.json"), "w").write("{}")
+        with open(os.path.join(hold, "seal.json"), "w") as f:
+            f.write("{}")
         rows = [{"ledger_id": "la", "n": 1, "via": "score", "verdict": "fail", "gap": 0.5},
                 {"ledger_id": "lb", "via": "push", "verdict": "unscorable"},
                 {"ledger_id": "lc", "via": "score", "verdict": "limit"},
