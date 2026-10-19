@@ -205,13 +205,24 @@ def line(a, at):
             f"{a['default']}. Proceed with it.")
 
 
-def report(broker):
-    """The lines guard status shows: every open ask, and every outcome the agent has not seen, which this marks seen."""
+def short(a, at):
+    """line() for guard status: one line of at most 190 characters, the question trimmed."""
+    if pending(a):
+        left = max(1, round((a["due_ts"] - at) / 60))
+        return f"ask {a['id']} waits for a person, {left} min left, then {a['default']}: {a['question']}"[:190]
+    if a["answered_by"] == "human":
+        return f"ask {a['id']} answered by a person: {a['answer'].splitlines()[0]}"[:190]
+    return f"ask {a['id']}: nobody answered, the default was taken unattended: {a['default']}"[:190]
+
+
+def report(broker, render=line):
+    """The lines guard status shows: every open ask, and every outcome the agent has not seen, which this marks seen.
+    The caller holds broker.lock; render is line or short."""
     asks = settle(broker)
     told = fold(rows(broker))[1]
     fresh = [a["id"] for a in asks.values() if not pending(a) and a["id"] not in told]
     write(broker, [{"event": "told", "id": ident} for ident in fresh])
-    return [line(a, now(broker)) for a in asks.values() if pending(a) or a["id"] in fresh]
+    return [render(a, now(broker)) for a in asks.values() if pending(a) or a["id"] in fresh]
 
 
 # the verb -----------------------------------------------------------------------------------------------------------

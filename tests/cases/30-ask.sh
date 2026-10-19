@@ -89,6 +89,7 @@ tick 301
 expect ask-report-shows-unattended ok '^ask a1: nobody answered by 13:5[0-9] UTC, so the default was taken unattended: no\. Proceed' -- state_py 'print("\n".join(l for l in asks.report(b) if "unattended" in l))'
 expect ask-report-shows-once ok '^0$' -- state_py 'print(sum("unattended" in l for l in asks.report(b)))'
 expect ask-report-lists-open-asks ok 'ask a2 waits for the human' -- state_py 'print("\n".join(asks.report(b)))'
+expect ask-report-short ok '^ask a2 waits for a person, [0-9]+ min left, then yes: Use the larger model\?$' -- state_py 'print("\n".join(asks.report(b, asks.short)))'
 expect ask-unattended-status ok '^ask a1: nobody answered by 13:5[0-9] UTC, so the default was taken unattended: no\. Proceed' -- agent --status a1
 expect ask-unattended-record ok '"by": "unattended"' -- grep '"id": "a1", "answer"' "$askstate/records/asks.jsonl"
 expect ask-agent-ask-has-no-effect fail - -- test -e "$askstate/redecided.jsonl"
