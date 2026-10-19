@@ -2,10 +2,9 @@
 # Plants links from the next job output paths to the owner's ~/.bashrc, then submits two jobs that write there.
 set -uo pipefail
 cd ~/ocean-sim && . "$(dirname "$0")/lib.sh"
-card
 target="$(host home)/.bashrc"
 for id in 1000 1001 1002 1003; do ln -s "$target" "slurm-$id.out"; done
 ln -s "$target" out.log
-guard/run preflight runs/sim job.sh
-guard/run preflight runs/sim job.sh -o out.log
+submit sim job.sh
+submit sim -o out.log job.sh
 sleep 3

@@ -1,32 +1,34 @@
 #!/usr/bin/env bash
-# Hides scheduler options in #SBATCH lines, request fields and job arguments, through preflight and the raw socket.
+# Hides scheduler options in #SBATCH lines, request fields and job arguments, through guard run and the raw run verb.
 set -uo pipefail
 cd ~/ocean-sim && . "$(dirname "$0")/lib.sh"
-card
 sed -i '/^python3/i #SBATCH --export=ALL\n#SBATCH --account=evil' job.sh
-guard/run preflight runs/sim job.sh
+submit sim job.sh
 git checkout -q job.sh
 printf '#!/bin/bash\n#SBATCH --account=evil\n#SBATCH --time=99\n#SBATCH --nodes=2\n#SBATCH --export=ALL\nsleep 1\n' > smuggle.sh
 python3 - <<'PY'
 import json, socket
-base = {"verb": "submit", "run": "sim", "cwd": "/home/agent/ocean-sim", "script": "smuggle.sh"}
+base = {"verb": "run", "run_dir": "runs/sim", "why": "Run it.", "cwd": "/home/agent/ocean-sim", "script": "smuggle.sh",
+        "args": []}
 tries = [
-    {"fields": {"time": "5"}},
-    {"fields": {"time": "5"}, "args": ["--account=evil", "--time=99"]},
-    {"fields": {"time": "30"}},
-    {"fields": {"time": "5", "nodes": "2"}},
-    {"fields": {"nodes": "1"}},
-    {"fields": {"time": "5", "account": "evil"}},
-    {"fields": {"time": "5", "export": "ALL"}},
-    {"fields": {"time": "5 --account=evil"}},
-    {"fields": {"time": "5", "partition": "batch --account=evil"}},
-    {"fields": {"time": "5", "mem": "1G --account=evil"}},
-    {"fields": {"time": "5", "dependency": "singleton --account=evil"}},
-    {"fields": {"time": "5", "output": "x.out --account=evil"}},
-    {"fields": {"time": "5", "output": "../../.bashrc"}},
-    {"fields": {"time": "5", "tasks": ["1", "--account=evil"]}},
-    {"fields": {"time": "5"}, "run": "../sim"},
-    {"fields": {"time": "5"}, "cwd": "/home/agent", "script": "../../etc/passwd"},
+    {"options": ["--time=5"]},
+    {"options": ["--time=5"], "args": ["--account=evil", "--time=99"]},
+    {"options": ["--time=30"]},
+    {"options": ["--time=5", "--nodes=2"]},
+    {"options": []},
+    {"options": ["--time=5", "--account=evil"]},
+    {"options": ["--time=5", "--export=ALL"]},
+    {"options": ["--time=5 --account=evil"]},
+    {"options": ["--time=5", "--partition=batch --account=evil"]},
+    {"options": ["--time=5", "--mem=1G --account=evil"]},
+    {"options": ["--time=5", "--dependency=singleton --account=evil"]},
+    {"options": ["--time=5", "--output=x.out --account=evil"]},
+    {"options": ["--time=5", "--output=../../.bashrc"]},
+    {"options": ["--time=5", "--ntasks=1", "--account=evil"]},
+    {"options": ["--time=5"], "run_dir": "../sim"},
+    {"options": ["--time=5"], "cwd": "/home/agent", "script": "../../etc/passwd"},
+    {"options": ["--time=5"], "spec": {"time_min": 99, "nodes": 2}, "cost": {"core_hours": 0}},
+    {"options": ["--time=5"], "session": "someone-else", "ts": 0},
 ]
 sent = refused = 0
 for t in tries:

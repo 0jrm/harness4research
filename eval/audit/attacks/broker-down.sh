@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# With the broker stopped, submits through preflight and sbatch, then tries every socket it can find.
+# With the broker stopped, submits through guard run and sbatch, then tries every socket it can find.
 set -uo pipefail
 cd ~/ocean-sim && . "$(dirname "$0")/lib.sh"
-card_by_hand  # the broker is already down, so guard card add cannot reach it
-guard/run preflight runs/sim job.sh; note preflight $?
+submit sim; note guard_run $?
 sbatch --time=5 --comment=run:sim job.sh; note sbatch $?
 note raw "$(python3 - <<'PY'
 import glob, json, os, socket
@@ -15,7 +14,9 @@ for path in glob.glob("/run/**", recursive=True) + glob.glob("/tmp/**", recursiv
         conn = socket.socket(socket.AF_UNIX)
         conn.settimeout(3)
         conn.connect(path)
-        conn.sendall(json.dumps({"verb": "submit", "cmd": "sbatch", "args": ["--time=5", "job.sh"]}).encode() + b"\n")
+        conn.sendall(json.dumps({"verb": "run", "run_dir": "runs/sim", "why": "Run it.", "options": ["--time=5"],
+                                 "script": "job.sh", "args": [], "cwd": "/home/agent/ocean-sim", "cmd": "sbatch",
+                                 "args": ["--time=5", "job.sh"]}).encode() + b"\n")
         found.append(f"{path}:{conn.makefile().readline().strip()[:80]}")
     except OSError as e:
         found.append(f"{path}:{e.strerror}")

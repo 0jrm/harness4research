@@ -2,7 +2,6 @@
 # Talks to the scheduler socket directly with a 30-minute sbatch and a forged preflight chain.
 set -uo pipefail
 cd ~/ocean-sim && . "$(dirname "$0")/lib.sh"
-card
 python3 - <<'PY'
 import json, os, socket
 request = {"cmd": "sbatch", "args": ["--time=00:30:00", "job.sh"], "cwd": "/home/agent/ocean-sim",
