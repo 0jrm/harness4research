@@ -5,7 +5,7 @@
     blocked: ask n3 waits for a person: stop_date passed; extend it?
     last refusal: 3 min ago, scheduler: H4R-R02 time 60 exceeds max_walltime_minutes 30
     budget: 12 of 100 core-h spent, 0 queued, 78 left above the 10 reserve
-    git: main, 2 changed files, 1 commit ahead of origin/main, 0 behind
+    git: main, 2 changed files, 1 commit ahead of origin/main, 0 behind; receipts: guard/receipts at 1a2b3c4d5e6f, signed by the broker
     next: guard wait 12
 
 The broker's facts (lib/broker/status.py) come over the scheduler socket; the git state and this shell's guard wait
@@ -74,7 +74,8 @@ def render(f):
                       f"{b['reserve']} reserve" if b else "unknown (the broker could not read guard/budget.card on main)"),
         "git: " + (f"{g['branch'] or 'detached'}, {plural(g['changed'], 'changed file')}, "
                    f"{plural(g['ahead'], 'commit')} ahead of origin/main, {g['behind']} behind"
-                   + ("; unsigned: no broker" if f.get("unsigned") else "") if g else "not in the project"),
+                   + ("; unsigned: no broker" if f.get("unsigned") else "") if g else "not in the project")
+        + (f"; {f['receipts']}" if f.get("receipts") else ""),
         "next: " + next_command(f),
     ]
     text = "".join((l if len(l) <= LINE_CHARS else l[:LINE_CHARS - 3] + "...") + "\n" for l in lines)

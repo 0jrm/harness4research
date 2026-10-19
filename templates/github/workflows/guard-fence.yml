@@ -25,6 +25,18 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_TOKEN: ${{ github.token }}
         run: git fetch "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
+      - name: Fetch guard/receipts as data
+        # The broker's signed receipts. The fence's F04 runs lib/guard/receipts-check.sh, which verifies the ref's
+        # commits against broker_key: on the base branch's guard/budget.card. Without the ref, F04 refuses every id.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code "$url" refs/heads/guard/receipts >/dev/null; then
+            git fetch "$url" "+refs/heads/guard/receipts:refs/remotes/origin/guard/receipts"
+          else
+            echo "no guard/receipts on origin; F04 refuses every receipt id"
+          fi
       - name: Read the harness pin from the base branch
         id: pin
         # guard/budget.card's harness: line pins the harness4research release the fence comes from. An offline project

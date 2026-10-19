@@ -144,6 +144,11 @@ expect effect-kind-checked fail 'effect kind .bogus.' -- effect 'asks.create_eff
 expect effect-module-missing-is-x00 ok 'H4R-X00 an answer of yes to a submit ask is not built' -- effect '
 asks.EFFECT_MODULE["submit"] = "absent"; print(asks.redecide(b, {"kind": "submit", "run_id": "r1"})["err"])'
 
+expect effect-beside-agent-ask ok '^a[0-9]+ a[0-9]+ True None$' -- effect '
+g = asks.open_asks(b)[0]
+e = asks.create_effect(b, "holdout_more", None, "More holdout submissions?", None, {}, "30m")
+again = asks.create_effect(b, "holdout_more", None, "More holdout submissions?", None, {}, "30m")
+print(g["id"], e["id"], e["id"] == again["id"] and "effect" not in g, asks.open_effect(b, "nope"))'
 kill "$askpid"; wait "$askpid" 2>/dev/null
 
 # The scripted approver, in a second broker on the real clock: after:1 closes a queued ask once a second has passed.
