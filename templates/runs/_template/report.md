@@ -1,7 +1,6 @@
 # <run_id>
 
-Question: <from question.card>
-hypothesis: n/a
+Question: <the why: line of question.card, which guard run wrote on run/<run_id>>
 Verdict against kill criteria: <continue | kill | escalate>
 
 ## Evidence
