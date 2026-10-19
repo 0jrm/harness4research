@@ -19,9 +19,6 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "lib"))
 import _path  # noqa: E402,F401
-import broker.records  # noqa: E402
-
-sys.modules["records"] = broker.records  # forge.py imports the records module by its v7 name
 from broker import scheduler, server  # noqa: E402
 from broker.records import Refused, approve_card, needs_you, revoke_card  # noqa: E402
 from forge import Forge  # noqa: E402

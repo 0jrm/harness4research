@@ -94,8 +94,7 @@ TABLE = [
           "guard holdout score"),
     _code("H02", "holdout", "{ledger_id} unscorable: did not finish on both sets in {s} s, or the layout is wrong; "
                             "{k} left", "guard holdout score"),
-    _code("H03", "holdout", "{n} of {n} submissions used this session",
-          "guard ask 'more holdout submissions?' --default no --deadline 2h"),
+    _code("H03", "holdout", "{n} of {n} submissions used this session", "guard status"),
     _code("H04", "holdout", "no holdout sealed for this project", "none"),
     _code("H05", "holdout", "no broker in this session", "none"),
 ]

@@ -14,10 +14,10 @@ git -C "$M.wt" commit -q -am "chore(guard): set budget"; git -C "$M.wt" push -q 
 cd "$M.wt" || exit 1
 m61=$(git rev-parse origin/main)
 expect migrate-v61-bin ok '^mode none: no harness: pin on origin/main, so the scripts are guard/bin/ there$' -- "$guard" version
-expect version-project-older ok "^project older: guard init $M\.wt --update$" -- "$guard" version
+expect version-project-older ok "^project older, schema [0-6]: migrate it with v7\.0 first, .* && .*/bin/guard init $M\.wt --update$" -- "$guard" version
 git switch -q --detach origin/main; sed -i '/^schema:/d; /^release:/d' guard/VERSION; git commit -q -am "an install before release stamps"
 git push -q origin HEAD:main; git fetch -q origin
-expect version-no-release-stamp ok "^project older, installed before release stamps; run guard init $tmp/[^ ]+ --update$" -- "$guard" version
+expect version-no-release-stamp ok "^project older, schema 1: migrate it with v7\.0 first, .*/bin/guard init $tmp/[^ ]+ --update$" -- "$guard" version
 expect version-no-release-header ok 'guard schema 1, installed from ' -- "$guard" version
 # Schema 8 migrates schema 7 only (design-v8, question 12): a v6.1 project, or one before release stamps, is sent
 # through v7.0's --update, and nothing is proposed.
