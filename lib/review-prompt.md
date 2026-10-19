@@ -11,7 +11,7 @@ Your working directory is the pull request's head.
 1. Read the request: what does a user who typed it expect to change?
 2. Read the diff: does it do all of that, and nothing unasked?
    If it adds or changes a line in `FACTS.md`, open the evidence that line cites (a path, a commit, a job id, or a command you can rerun) and confirm it says what the line claims; evidence you cannot confirm means `changes`.
-   If it adds or changes an incident note under `runs/<id>/incidents/`, check that it names each job, a root cause, and evidence such as a log path and line or a manifest. A merged note turns that job's ripples into HANDLED lines, so a note with only `job:` lines means `changes`.
+   If it adds or changes an incident note under `runs/<id>/incidents/`, check that it names each job, a root cause, and evidence such as a log path and line or a manifest. The note is the cause the broker recorded from `guard run --cause`, so a note with only `job:` lines means `changes`.
 3. Do not run the whole suite: CI runs it, and `guard merge` waits for it. Run one targeted test only when it settles a doubt the diff raises, and name the doubt.
 4. Fix a small defect, and rerun the test that covers it.
 5. Give your verdict.
