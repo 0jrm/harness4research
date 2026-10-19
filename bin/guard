@@ -13,11 +13,10 @@ case $cmd in
   review|merge|ship) [ -z "${GUARD_SESSION:-}" ] || { b=$(git branch --show-current 2>/dev/null || :); refusal print G01 branch="${b:-HEAD}"; } ;;&
   survey|init|archive|doctor|config|review|merge) exec bash "$here/lib/$cmd.sh" "$@" ;;
   ship) exec bash "$here/lib/batch.sh" ship "$@" ;;
-  pr) exec bash "$here/lib/pr-open.sh" "$@" ;;
+  needs-you|pr) exec python3 "$here/lib/verbs/records.py" "$cmd" "$@" ;;
   enter) exec python3 "$here/lib/enter.py" "$@" ;;
   broker) exec python3 "$here/lib/broker_host.py" "$@" ;;
   atlas) exec python3 "$here/lib/atlas.py" "$@" ;;
-  needs-you) exec python3 "$here/lib/needs_you.py" "$@" ;;
   hooks) exec python3 "$here/lib/hooks.py" "$@" ;;
   manifest|fence|code)
     # Run the enclosing project's protected guard/run, never this harness's copy. Online, it reads this clone at the pin.
@@ -46,7 +45,10 @@ case $cmd in
     esac
     case $(skew) in
       current) echo "current" ;;
-      project-older) if [ -n "$p_release" ]; then echo "project older: guard init $top --update"
+      project-older)
+        if [ "$p_schema" -lt 7 ] || [ -z "$p_pin" ]; then v7dir=$(dirname "$here")/harness4research-v7.0
+          echo "project older, schema $p_schema: migrate it with v7.0 first, merge that pull request, then guard init $top --update: git -C $here worktree add --detach $v7dir v7.0 && $v7dir/bin/guard init $top --update"
+        elif [ -n "$p_release" ]; then echo "project older: guard init $top --update"
         else echo "project older, installed before release stamps; run guard init $top --update"; fi ;;
       harness-older) echo "harness older or on another branch: git -C $here pull" ;;
       unknown-install) echo "install commit unknown: guard init $top --update --force" ;;
