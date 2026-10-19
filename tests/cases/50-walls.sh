@@ -32,6 +32,13 @@ expect compute-inline ok '^1$' -- gated python3 -c 'print(1)'
 # A guide, not a wall: python3 -I skips sitecustomize, and a renamed copy is not on the list.
 expect compute-isolated-passes ok '^ran$' -- gated python3 -I sim.py
 expect compute-renamed-passes ok '^ran$' -- gated bash -c 'cp sim.py sim2.py && python3 sim2.py'
+both() {  # both <command>: the gate and the shim together, as the sandbox sets them; the gate's own git is the shim
+  (cd "$WL/ocean" && env -u SLURM_JOB_ID -u GUARD_JOB_ID BASH_ENV="$gate/bash_env.sh" PYTHONPATH="$gate" \
+    PATH="$shim:$PATH" timeout 20 "$@")
+}
+expect walls-together-git ok '^git version' -- both git --version
+expect_refusal walls-together-c01 C01 -- both python3 sim.py
+expect_refusal walls-together-c01-bash C01 -- both bash job.sh
 printf 'account: gom\ncompute: none\n' > "$WL/ocean/guard/budget.card"
 expect_refusal compute-card-from-main C01 -- gated python3 sim.py
 git -C "$WL/ocean" commit -q -am "compute: none"; git -C "$WL/ocean" push -q origin HEAD:main 2>/dev/null

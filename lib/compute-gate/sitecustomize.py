@@ -25,11 +25,14 @@ def repo_top(path):
 
 
 def card(top):
+    """guard/budget.card on the protected branch. git runs without BASH_ENV and PYTHONPATH, so a git that is the PATH
+    shim, a bash script, never re-enters the gate."""
     git = ["git", "-C", top]
+    env = {k: v for k, v in os.environ.items() if k not in ("BASH_ENV", "PYTHONPATH")}
     base = os.environ.get("HPC_GUARD_REF") or subprocess.run(
         git + ["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"],
-        capture_output=True, text=True).stdout.strip() or "origin/main"
-    text = subprocess.run(git + ["show", f"{base}:guard/budget.card"], capture_output=True, text=True).stdout
+        capture_output=True, text=True, env=env).stdout.strip() or "origin/main"
+    text = subprocess.run(git + ["show", f"{base}:guard/budget.card"], capture_output=True, text=True, env=env).stdout
     keys = {}
     for line in text.splitlines():
         key, _, value = line.partition(":")
