@@ -180,11 +180,10 @@ expect fence-legacy-ledger ok 'PASS.execution-ledger' -- guard/run fence origin/
 git switch -q -c pr/receipts-base origin/main
 cat > guard/run <<'RUN'
 #!/usr/bin/env bash
-# A stand-in for the pinned harness's receipts-check (U9): the ids in guard/receipts.ok on the base are receipts.
-if [ "${1:-}" = receipts-check ]; then
-  [ -n "${2:-}" ] && git rev-parse -q --verify "$2" >/dev/null || exit 64
-  base=$2; shift 2
-  for id in "$@"; do git show "$base:guard/receipts.ok" | grep -qx "$id" || exit 1; done
+# A stand-in for the pinned harness's receipts-check.sh (U9) as guard/run --show prints it: the ids in
+# guard/receipts.ok on the base are receipts, any other id is F04 (exit 2).
+if [ "${1:-} ${2:-}" = "--show receipts-check" ]; then
+  echo 'base=$1; shift; for id in "$@"; do git show "$base:guard/receipts.ok" | grep -qx "$id" || exit 2; done'
   exit 0
 fi
 exec bash -c "$(git show origin/main:guard/run)" guard/run "$@"

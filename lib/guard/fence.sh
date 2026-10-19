@@ -115,16 +115,21 @@ done < <(git diff --no-renames --name-status "$base...$head" -- 'runs/*/question
 if [ ${#cards[@]} -eq 0 ]; then say PASS broker-cards
 else say FAIL broker-cards F03 "${cards[*]} is a card only the broker writes; guard run writes it" "$(undo "${cards[@]}")"; fi
 
-# receipt_ok <id>: the broker published receipt <id> on guard/receipts, which lib/guard/receipts-check.sh of the base's
-# pinned harness verifies against broker_key: on the base's card. A base whose guard/run has no receipts-check
-# proves no receipt.
+# receipt_ok <id>: the broker published receipt <id> on guard/receipts, as lib/guard/receipts-check.sh verifies against
+# broker_key: on the base's card (exit 2 is F04). The checker is this file's sibling when the fence runs from a file,
+# else the base's guard/run shows the pinned harness's copy; a base that has none proves no receipt.
 declare -A receipts=()
+checker=""
+if [ -f "${BASH_SOURCE[0]:-}" ] && [ -f "$(dirname "${BASH_SOURCE[0]}")/receipts-check.sh" ]; then
+  checker=$(cat "$(dirname "${BASH_SOURCE[0]}")/receipts-check.sh")
+fi
 receipt_ok() {
-  [ -n "${receipts[$1]+x}" ] || {
+  if [ -z "${receipts[$1]+x}" ]; then
     receipts[$1]=1
-    HPC_GUARD_REF=$base bash -c "$(git show "$base:guard/run" 2>/dev/null)" guard/run receipts-check "$base" "$1" \
-      >/dev/null 2>&1 </dev/null && receipts[$1]=0
-  }
+    [ -n "$checker" ] || checker=$(HPC_GUARD_REF=$base bash -c "$(git show "$base:guard/run" 2>/dev/null)" guard/run \
+      --show receipts-check 2>/dev/null </dev/null) || checker=""
+    [ -z "$checker" ] || ! bash -c "$checker" receipts-check.sh "$base" "$1" >/dev/null 2>&1 </dev/null || receipts[$1]=0
+  fi
   return "${receipts[$1]}"
 }
 # unproven_rows <ref> <report> [shape]: line numbers of ## Evidence rows with no backticked path that exists at <ref>,
