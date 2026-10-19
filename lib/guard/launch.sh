@@ -66,11 +66,13 @@ put_replace() { timeout 20 bash -c 'printf "%s\n" "$2" > "$1.tmp.$$" && mv -f "$
 # index_records: one awk pass over every request, start, end and beat into rec[], and RECORDS, newest first.
 declare -A rec=() state_cache=() members_cache=()
 RECORDS=()
+# mawk stops at the first input file it cannot open, so only files that exist are passed.
 index_records() {
-  local f k v d
-  while IFS=$'\t' read -r f k v; do rec["$f:$k"]=$v; done < <(
+  local f k v d files=()
+  for f in "$sd"/*/request "$sd"/*/start "$sd"/*/end "$sd"/*/beat; do [ ! -f "$f" ] || files+=("$f"); done
+  [ ${#files[@]} -eq 0 ] || while IFS=$'\t' read -r f k v; do rec["$f:$k"]=$v; done < <(
     awk -F': *' 'FNR==1 { delete seen } !($1 in seen) { seen[$1]=1; v=$0; sub(/^[^:]*: */, "", v); printf "%s\t%s\t%s\n", FILENAME, $1, v }' \
-      "$sd"/*/request "$sd"/*/start "$sd"/*/end "$sd"/*/beat 2>/dev/null)
+      "${files[@]}" 2>/dev/null)
   for d in "$sd"/*/; do d=${d%/}; [ -f "$d/request" ] && RECORDS+=("$d"); done
   [ ${#RECORDS[@]} -eq 0 ] || mapfile -t RECORDS < <(printf '%s\n' "${RECORDS[@]}" | sort -r)
 }

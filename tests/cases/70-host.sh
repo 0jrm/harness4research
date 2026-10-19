@@ -102,12 +102,12 @@ for flag in --nodes=2 --partition=gpu --array=0-3 --dependency=afterok:1 --ntask
 done
 expect host-r13-line2-drops-flag ok "^guard run runs/r1 --why 'Run job.sh.' -- --time=5 runs/job.sh$" -- bash -c 'hd() { (cd "$1" && "$2" "${@:3}"); }; hd "$1" "$2" launch runs/r1 "Run job.sh." -- --time=5 -p gpu runs/job.sh 2>&1 | tail -1' _ "$hp" "$drive"
 expect_refusal host-r13-time R13 -- hd launch runs/r1 'Run job.sh.' -- --time=11:00:00 runs/job.sh
-expect host-r13-time-line2 ok -- '--time=600 runs/job.sh$' -- bash -c '(cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=11:00:00 runs/job.sh 2>&1 | tail -1)' _ "$hp" "$drive"
+expect host-r13-time-line2 ok '--time=600 runs/job.sh$' -- bash -c '(cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=11:00:00 runs/job.sh 2>&1 | tail -1)' _ "$hp" "$drive"
 expect_refusal host-r13-mem R13 -- hd launch runs/r1 'Run job.sh.' -- --time=5 --mem=8G runs/job.sh
 expect host-r13-mem-line2 ok '^H4R-R13 mem 8 GB exceeds host_max_mem_gb$' -- bash -c '(cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=5 --mem=8G runs/job.sh 2>&1 | head -1)' _ "$hp" "$drive"
 expect_refusal host-r13-gpu-hours R13 -- hd launch runs/r1 'Run job.sh.' -- --time=360 --gpus=2 runs/job.sh
-expect host-r13-gpu-hours-line2 ok -- '12.0 GPU-h over the remaining 10.0 of max_gpu_hours' -- bash -c '(cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=360 --gpus=2 runs/job.sh 2>&1)' _ "$hp" "$drive"
-expect host-r13-gpu-hours-fits ok -- '--gpus=2 --time=300 runs/job.sh$' -- bash -c '(cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=360 --gpus=2 runs/job.sh 2>&1 | tail -1)' _ "$hp" "$drive"
+expect host-r13-gpu-hours-line2 fail '12.0 GPU-h over the remaining 10.0 of max_gpu_hours' -- bash -c '(cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=360 --gpus=2 runs/job.sh 2>&1)' _ "$hp" "$drive"
+expect host-r13-gpu-hours-fits ok '--gpus=2 --time=300 runs/job.sh$' -- bash -c '(cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=360 --gpus=2 runs/job.sh 2>&1 | tail -1)' _ "$hp" "$drive"
 printf 'GPU-aaaa, 1\nGPU-bbbb, 1\nGPU-cccc, 1\n' > "$tmp/host-apps"
 expect_refusal host-r14-gpus R14 -- env MOCK_NVSMI_APPS="$tmp/host-apps" bash -c 'cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=5 --gpus=2 runs/job.sh' _ "$hp" "$drive"
 expect host-r14-gpus-reason ok '^H4R-R14 1 GPUs free, 2 asked$' -- env MOCK_NVSMI_APPS="$tmp/host-apps" bash -c 'cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=5 --gpus=2 runs/job.sh 2>&1 | head -1' _ "$hp" "$drive"
@@ -157,7 +157,7 @@ else
   expect host-launch-id ok '^skynet-[0-9]{8}T[0-9]{6}Z none '"$hp"'/launch-skynet-' -- echo "$long"
   wall=$(hg launch runs/2026-10-19-wall 'Run past the walltime.' -- --time=1 runs/stubborn.sh)
   wall_id=${wall%% *}
-  job=$(hg launch runs/2026-10-19-job 'Show the box.' -- --time=5 sbatch runs/job.sh one two)
+  job=$(hg launch runs/2026-10-19-job 'Show the box.' -- sbatch --time=5 runs/job.sh one two)
   job_id=${job%% *}
   for _ in $(seq 100); do [ -f "$hs/$job_id/end" ] && break; sleep 0.1; done
   expect host-job-completed ok '^state: exited code: 0 slurm: COMPLETED log: '"$hp"'/launch-' -- hg wait "$job_id"
