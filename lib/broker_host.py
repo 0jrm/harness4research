@@ -59,6 +59,20 @@ import gateway  # noqa: E402  lib/gateway.py, the model gateway and the allowlis
 SOCKET_MAX = 104  # sun_path is 108 bytes on Linux; leave room for the terminating NUL and a margin
 
 
+def person_config(key):
+    """A key's value in the person's guard config (lib/config.sh's file), or None."""
+    path = os.environ.get("GUARD_CONFIG") or os.path.join(config_dir(), "config")
+    try:
+        with open(path) as f:
+            for line in f:
+                k, sep, v = line.partition(":")
+                if sep and k == key:
+                    return v.strip() or None
+    except OSError:
+        pass
+    return None
+
+
 def project_name(path):
     """The name of a project's directory under the broker's state, projects/<name>/: lib/needs_you.py finds a
     project's asks there by it."""
@@ -209,7 +223,11 @@ class Host:
                 pinned = ""  # a repository inside the project is the agent's own
             cfg = {"session": name, "project": path, "paths": [[path, path]], "origin": pinned,
                    "slurm_bin": self.slurm_bin, "slurm_env": {}, "user": os.environ.get("USER", ""),
-                   "compute_bwrap": False, "signing_key": os.path.join(self.state, "key")}
+                   "compute_bwrap": False}
+            if os.path.exists(os.path.join(self.state, "key")):  # guard broker setup ran; else receipts stay local
+                cfg["signing_key"] = os.path.join(self.state, "key")
+            if person_config("receipts_email"):
+                cfg["receipts_email"] = person_config("receipts_email")
             with open(os.path.join(pdir, "config.json"), "w") as f:
                 json.dump(cfg, f, indent=1)
             self.projects[path] = scheduler.Broker(pdir, cfg)

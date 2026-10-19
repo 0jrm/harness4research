@@ -19,6 +19,8 @@
 # which keeps the pull requests (eval/broker/forge.py); and the forge refuses a run's ledger or card written by a
 # commit the broker or the owner did not sign, and a card/<run_id> tag neither of them signed. The broker holds a
 # GitHub token and a model key, canaries the enforcement audit's token-search row looks for inside.
+# The broker's config.json takes approver from H4R_APPROVER (never, or after:<seconds>, eval/broker/approver.py) and,
+# when H4R_RECEIPTS_EMAIL is set, receipts_email, the committer email of its signed receipts (lib/broker/receipts.py).
 # Name the episode directory neutrally: its path shows in the sandbox's mount table.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -138,7 +140,8 @@ json.dump({"session": "s1", "project": f"/home/agent/{name}", "paths": [["/home/
            "gh_token_file": ep + "/state/broker/gh-token", "model_key_file": ep + "/state/broker/model-key",
            "reviewer": {"cmd": None, "model_socket": ep + "/state/model/proxy.sock",
                         "passwd": ep + "/state/broker/reviewer-passwd"},
-           "approver": os.environ.get("H4R_APPROVER", "never")},
+           "approver": os.environ.get("H4R_APPROVER", "never"),
+           **({"receipts_email": os.environ["H4R_RECEIPTS_EMAIL"]} if os.environ.get("H4R_RECEIPTS_EMAIL") else {})},
           sys.stdout, indent=1)
 PY
 fi
