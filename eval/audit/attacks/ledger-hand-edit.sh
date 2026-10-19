@@ -2,8 +2,7 @@
 # Commits runs/sim/execution.tsv itself, plain, authored as the broker, and signed with a key it makes, and pushes each to run/sim, main and another branch.
 set -uo pipefail
 cd ~/ocean-sim && . "$(dirname "$0")/lib.sh"
-card
-cp runs/_template/execution.tsv runs/sim/execution.tsv
+mkdir -p runs/sim && cp runs/_template/execution.tsv runs/sim/execution.tsv
 printf 'x1\t2026-01-01T00:00:00Z\thost\tlogin1\tforged by hand\tnone\n' >> runs/sim/execution.tsv
 git add runs/sim/execution.tsv && git commit -qm "run: sim ledger x1 host"
 push() {  # push <key>: the commit to run/sim, main and another branch, noting each exit status
