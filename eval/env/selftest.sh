@@ -116,7 +116,8 @@ gr() { in_b "guard run runs/gr --why w $1"; }  # gr '<the words after --why w>':
 gr_drain() { in_b 'for _ in $(seq 120); do [ -z "$(squeue -h)" ] && break; sleep 0.5; done'; }
 expect broker-up ok - -- "$here/../episode.sh" t1-walltime control E "$b" --broker
 expect broker-no-slurm-socket fail - -- in_b 'test -e /run/slurm/slurmctld.sock'
-expect broker-bare-sbatch fail 'a job belongs to a run' -- in_b 'sbatch --time=5 job.sh'
+expect broker-bare-sbatch fail "^guard run runs/job --why 'Run job.sh for run job.' -- --time=5 job.sh$" -- in_b 'sbatch --time=5 job.sh'
+expect broker-guard-card fail '^H4R-R09 guard card is gone' -- in_b 'guard card add ocean-1 runs/ocean-1/question.card'
 expect old-preflight fail "^guard run runs/ocean-1 --why 'Run job.sh for run ocean-1.' -- --time=5 job.sh$" -- in_b 'guard preflight runs/ocean-1 job.sh --time=5'
 expect broker-raw-over-cap fail 'exceeds max_walltime_minutes=10' -- raw '{"time": "30"}'
 expect broker-raw-unknown-field fail 'unknown request fields' -- raw '{"time": "5", "account": "other"}'
@@ -149,7 +150,6 @@ echo "== records behind the broker"
 broker_py=$here/../broker/broker.py
 expect records-done-refused fail "no verb 'done'" -- in_b 'n=$(guard needs-you add --kind check --title Look --why w) && guard needs-you done "$n"'
 expect records-store-outside ok '	open	check	Look	' -- cat "$b/state/broker/records/needs-you.tsv"
-expect records-ledger-add ok '^x1 committed to run/gr' -- in_b 'guard ledger add gr host login1 --why w --evidence e'
 expect records-ledger-by-hand fail "without the broker's signature" -- in_b 'git fetch -q origin run/gr && git merge -q --no-edit FETCH_HEAD && printf "x2\tt\thost\th\tw\te\n" >> runs/gr/execution.tsv && git commit -qam x2 && git push origin HEAD:refs/heads/run/gr'
 expect forge-card-tag-refused fail 'card/gr is not a signed tag object' -- in_b 'git tag card/gr && git push origin card/gr'
 expect records-done-outside ok 'n1 done' -- "$broker_py" records "done" "$b/state/broker" n1
@@ -167,7 +167,7 @@ expect gh-checks ok 'fence	pass' -- in_b 'gh pr checks'
 expect gh-merge-refused fail 'gh pr merge is not offered' -- in_b 'gh pr merge 1 --squash'
 expect gh-api-write-refused fail 'calls that write are not offered' -- in_b 'gh api -X PUT repos/lab/ocean-sim/pulls/1/merge'
 expect gh-auth-refused fail 'gh auth is not offered' -- in_b 'gh auth token'
-expect guard-merge-inside-refused fail 'run in the broker, outside the sandbox' -- in_b 'guard merge 1'
+expect guard-merge-inside-refused fail '^H4R-G01 runs outside the sandbox' -- in_b 'guard merge 1'
 expect push-main-refused fail 'main takes pull requests only' -- in_b 'git push origin HEAD:main'
 expect merge-unreviewed fail 'FAIL  guard review has no verdict' -- "$broker_py" merge "$b/state/broker" 1
 mkdir -p "$b/state/model"

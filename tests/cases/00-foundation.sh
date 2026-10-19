@@ -125,3 +125,15 @@ tmp = os.environ["TMPDIR_FOUNDATION"]
 m = scheduler.Mirror(tmp + "/ext-mirror.git", "ext::git %s " + tmp + "/ext-origin.git")
 m.fetch()
 print("\n".join(p for p in m.files if p == "README.md"))'
+
+# The sandbox's sbatch stand-in and guard card: R09, line 2 the guard run line for the same job (E2b, U2's bench).
+sb=$tmp/stand-ins; mkdir -p "$sb/bin" "$sb/proj"; ln -sf "$here/lib/broker/client.py" "$sb/bin/sbatch"
+printf '#!/bin/bash\n#SBATCH --time=5\npython3 sim.py\n' > "$sb/proj/job.sh"
+expect_refusal foundation-r09-sbatch R09 -- bash -c "cd '$sb/proj' && '$sb/bin/sbatch' --time=8 --comment=run:r1 job.sh"
+expect foundation-r09-sbatch-line fail "^guard run runs/r1 --why 'Run job.sh for run r1.' -- --time=8 job.sh$" -- \
+  bash -c "cd '$sb/proj' && '$sb/bin/sbatch' --time=8 --comment=run:r1 job.sh"
+expect foundation-r09-sbatch-bare fail "^guard run runs/job --why 'Run job.sh for run job.' -- job.sh$" -- \
+  bash -c "cd '$sb/proj' && '$sb/bin/sbatch' job.sh"
+expect_refusal foundation-r09-sbatch-version R09 -- bash -c "cd '$sb/proj' && '$sb/bin/sbatch' --version"
+expect foundation-r09-card-line fail "^guard run runs/run-001 --why 'Run job.sh for run run-001.' -- job.sh$" -- \
+  bash -c "cd '$sb/proj' && '$guard' card add run-001 runs/run-001/question.card"

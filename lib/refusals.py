@@ -188,21 +188,37 @@ def markdown():
     return "\n".join(out) + "\n"
 
 
-def old(cmd, args):
-    """R09 for guard preflight, ripples, launch or card, line 2 the guard run line for the same job, else guard
-    status."""
+def batch_scripts(cwd="."):
+    """The batch scripts in cwd, by name: files whose comment block holds an #SBATCH line."""
+    found = []
+    for name in sorted(os.listdir(cwd)):
+        path = os.path.join(cwd, name)
+        try:
+            with open(path, errors="replace") as f:
+                head = f.read(4096)
+        except OSError:
+            continue
+        if os.path.isfile(path) and re.search(r"^#SBATCH\s", head, re.M):
+            found.append(name)
+    return tuple(found)
+
+
+def old(cmd, args, scripts=()):
+    """R09 for guard preflight, ripples, launch or card, or sbatch where no broker takes it, line 2 the guard run line
+    for the same job, else guard status."""
     from policy.invocation import old_command
-    line = old_command(cmd, args)
+    said = cmd if cmd == "sbatch" else f"guard {cmd}"
+    line = old_command(cmd, args, scripts)
     try:
-        return refuse("R09", old=f"guard {cmd}", next=line or "guard status")
+        return refuse("R09", old=said, next=line or "guard status")
     except ValueError:
-        return refuse("R09", old=f"guard {cmd}", next="guard status")
+        return refuse("R09", old=said, next="guard status")
 
 
 def main(argv):
     if len(argv) >= 3 and argv[1] in ("print", "old"):
         if argv[1] == "old":
-            r = old(argv[2], argv[3:])
+            r = old(argv[2], argv[3:], batch_scripts())
         else:
             r = refuse(argv[2], **dict(a.split("=", 1) for a in argv[3:]))
         sys.stderr.write(render(r))

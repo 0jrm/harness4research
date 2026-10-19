@@ -48,14 +48,17 @@ name=$(basename "$project")
 printf 'agent:x:%s:%s:agent:/home/agent:/bin/bash\n' "$(id -u)" "$(id -g)" > "$ep/sandbox/etc/passwd"
 printf 'agent:x:%s:\n' "$(id -g)" > "$ep/sandbox/etc/group"
 cp "$here/slurmclient.py" "$here/forge_connect.py" "$here/jobwrap.sh" "$ep/sandbox/tools/lib/"
-client=slurmclient.py
+client=/opt/site/lib/slurmclient.py
 if [ $broker = 1 ]; then
-  cp "$here/../../lib/broker/client.py" "$ep/sandbox/tools/lib/"; client=client.py
+  # Behind the broker the stand-ins are the harness's lib/broker/client.py (a copy where the arm has no harness), so
+  # its sbatch prints R09 from the harness's own refusal table.
+  cp "$here/../../lib/broker/client.py" "$ep/sandbox/tools/lib/"; client=/opt/site/lib/client.py
+  [ -z "$harness" ] || client=/opt/harness4research/lib/broker/client.py
   mkdir -p "$ep/state/broker/bin" "$ep/state/broker/sock"
   for c in sbatch squeue sacct scancel; do ln -s "$here/slurmclient.py" "$ep/state/broker/bin/$c"; done
 fi
-for c in sbatch squeue sacct scancel sacctmgr; do ln -s "/opt/site/lib/$client" "$ep/sandbox/tools/bin/$c"; done
-[ $broker = 0 ] || ln -s /opt/site/lib/client.py "$ep/sandbox/tools/bin/gh"
+for c in sbatch squeue sacct scancel sacctmgr; do ln -s "$client" "$ep/sandbox/tools/bin/$c"; done
+[ $broker = 0 ] || ln -s "$client" "$ep/sandbox/tools/bin/gh"
 ln -s /opt/site/lib/forge_connect.py "$ep/sandbox/tools/bin/forge-connect"
 if [ -n "$harness" ]; then
   mkdir "$ep/sandbox/harness"
@@ -68,9 +71,7 @@ if [ -n "$harness" ]; then
   git -C "$ep/sandbox/harness" add -A
   git -C "$ep/sandbox/harness" -c user.name=harness -c user.email=harness@localhost \
     commit -q -m "harness4research $(git -C "$harness" rev-parse --short HEAD)"
-  # Behind the broker, guard is client.py, which sends the record subcommands to the broker and runs the rest.
-  if [ $broker = 1 ]; then ln -s "/opt/site/lib/$client" "$ep/sandbox/tools/bin/guard"
-  else ln -s /opt/harness4research/bin/guard "$ep/sandbox/tools/bin/guard"; fi
+  ln -s /opt/harness4research/bin/guard "$ep/sandbox/tools/bin/guard"
 fi
 
 # The protected repository, behind the forge hook, with the project as its first commit on main.
@@ -144,6 +145,9 @@ json.dump({"session": "s1", "project": f"/home/agent/{name}", "paths": [["/home/
            **({"receipts_email": os.environ["H4R_RECEIPTS_EMAIL"]} if os.environ.get("H4R_RECEIPTS_EMAIL") else {})},
           sys.stdout, indent=1)
 PY
+  # The session's name inside, as guard enter sets it: guard review, merge and ship print G01, and a verb whose socket
+  # is gone refuses with R15 instead of falling back to local mode.
+  echo GUARD_SESSION=s1 >> "$ep/sandbox/env"
 fi
 nohup setsid python3 "$here/fakeslurm.py" serve "$ep/state/slurm" "$ep/state/slurm/cluster.json" \
   > "$ep/state/slurm/daemon.log" 2>&1 &

@@ -188,11 +188,16 @@ def run_line(run_dir, options, script, args=(), why=None):
     return " ".join(shlex.quote(w) for w in words)
 
 
-def old_command(cmd, args):
-    """The guard run line for a v7 command (guard/run preflight or launch), or None when it names no job."""
+def old_command(cmd, args, scripts=()):
+    """The guard run line for a v7 command, or None when it names no job: guard/run preflight or launch, sbatch, or
+    guard card add <run_id>. scripts are the batch scripts the caller found beside the command; where the command
+    names a run and no script, the one script there is used, and with none or several there is no line."""
     args = list(args)
-    if cmd == "preflight" and len(args) >= 2 and not args[0].startswith("-"):
-        return run_line(args[0], args[2:], args[1])
+    only = scripts[0] if len(scripts) == 1 else None
+    if cmd == "preflight" and args and not args[0].startswith("-"):
+        if len(args) >= 2:
+            return run_line(args[0], args[2:], args[1])
+        return run_line(args[0], [], only) if only else None
     if cmd == "launch" and args and not args[0].startswith("-") and "--" in args:
         cut = args.index("--")
         command, options = args[cut + 1:], []
@@ -205,4 +210,19 @@ def old_command(cmd, args):
                 options.append(a)
         if command:
             return run_line(args[0], options, command[0], command[1:])
+    if cmd == "sbatch":
+        try:
+            opts, rest = read_options(args)
+        except Unparsed:
+            return None
+        if not rest:
+            return None
+        script = rest[0]
+        named = [str(opts.get("comment", "")).partition("run:")[2], opts.get("job-name", ""),
+                 os.path.splitext(os.path.basename(script))[0]]
+        rid = next((n for n in named if RUN.match(n)), "job")
+        return run_line(f"runs/{rid}", [f"--{k}={v}" for k, v in opts.items() if k in FIELDS], script, rest[1:])
+    if cmd == "card" and args[:1] == ["add"] and len(args) >= 2 and only:
+        rid = os.path.basename(os.path.normpath(args[1]))
+        return run_line(f"runs/{rid}", [], only) if RUN.match(rid) else None
     return None
