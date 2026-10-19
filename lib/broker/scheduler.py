@@ -1,6 +1,6 @@
 """The broker's scheduler: design increments 1 to 3 of docs/design-sandboxed-agents.md, moved from eval/broker/ so
-the product and the evaluation run the code that ships (design-v8 section 4). lib/broker/server.py serves it;
-lib/broker_host.py hosts it for guard enter, and eval/broker/broker.py for an episode, which adds the forge.
+every host of it runs the code that ships (design-v8 section 4). lib/broker/server.py serves it;
+lib/broker_host.py hosts it for guard enter; eval/broker/broker.py hosts it with a forge.
 
 It runs outside the agent's sandbox, which sees only its socket, and it is the only client of the scheduler. The
 sandbox's sbatch, squeue, sacct and scancel are lib/broker/client.py, which sends one request per call:
@@ -26,16 +26,16 @@ card/<run_id> on origin verifies against the owner's and the broker's keys, and 
 (decision D2; records.py).
 
 The records socket (records.py) offers add, list, show and find for the needs-you queue, execution.tsv rows and
-question cards, and nothing that closes or approves. The gh socket (forge.py) is the sandbox's gh: pull requests
-kept in the broker's state, guard pr open's brief among them, and no verb that merges; review, merge and ship run
-from broker.py outside the sandbox. The broker holds the agent's GitHub token and the model key (in the evaluation,
-canaries from gh_token_file and model_key_file, in its environment as GH_TOKEN and ANTHROPIC_API_KEY), and no request
-carries either into the sandbox or the reviewer's.
+question cards, and nothing that closes or approves. The gh socket (eval/broker/forge.py) is the sandbox's gh: pull
+requests kept in the broker's state, guard pr open's brief among them, and no verb that merges; review, merge and ship
+run from broker.py outside the sandbox. The broker holds the agent's GitHub token and the model key (read from
+gh_token_file and model_key_file into its environment as GH_TOKEN and ANTHROPIC_API_KEY), and no request carries
+either into the sandbox or the reviewer's.
 
 config.json keys: session, project (the project's path inside the sandbox), paths ([[inside, outside], ...]), origin
 (the repository main is fetched from), slurm_bin (the scheduler's clients, by absolute path), slurm_env (their
 environment), user, compute_bwrap (true when every compute node has bwrap), signing_key (the broker's private key),
-owner_key (the owner's, for approve card in the evaluation), allowed_signers (the two public keys), gh_token_file and
+owner_key (the owner's, for approve card where no person signs), allowed_signers (the two public keys), gh_token_file and
 model_key_file (the credentials the broker holds), reviewer ({cmd, model_socket, passwd, binds, path, env, timeout}:
 the reviewer's command and what its sandbox binds; review refuses without cmd)."""
 import datetime as dt
