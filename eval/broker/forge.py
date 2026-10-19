@@ -30,7 +30,7 @@ import subprocess
 import tempfile
 import time
 
-from records import Refused, card_values
+from broker.records import Refused, card_values
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
