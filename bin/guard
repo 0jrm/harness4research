@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# usage: guard <survey|init|archive|doctor|config|review|merge|ship|enter|broker|preflight|ripples|manifest|fence|code|launch|atlas|needs-you|hooks|version> [args...]
+# usage: guard <run|wait|ask|status|holdout|survey|init|archive|doctor|config|review|merge|ship|enter|broker|manifest|fence|code|atlas|needs-you|hooks|version> [args...]
 set -euo pipefail
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 cmd=${1:-help}; shift || true
+refusal() { exec python3 "$here/lib/refusals.py" "$@"; }
 case $cmd in
+  run|wait|ask|status|holdout)
+    # A verb a later unit builds answers X00 until its file is in this harness.
+    [ -e "$here/lib/verbs/$cmd.py" ] || refusal print X00 verb="guard $cmd"
+    exec python3 "$here/lib/verbs/$cmd.py" "$@" ;;
+  preflight|ripples|launch|card) refusal old "$cmd" "$@" ;;
+  review|merge|ship) [ -z "${GUARD_SESSION:-}" ] || { b=$(git branch --show-current 2>/dev/null || :); refusal print G01 branch="${b:-HEAD}"; } ;;&
   survey|init|archive|doctor|config|review|merge) exec bash "$here/lib/$cmd.sh" "$@" ;;
   ship) exec bash "$here/lib/batch.sh" ship "$@" ;;
   pr) exec bash "$here/lib/pr-open.sh" "$@" ;;
@@ -12,7 +19,7 @@ case $cmd in
   atlas) exec python3 "$here/lib/atlas.py" "$@" ;;
   needs-you) exec python3 "$here/lib/needs_you.py" "$@" ;;
   hooks) exec python3 "$here/lib/hooks.py" "$@" ;;
-  preflight|ripples|manifest|fence|code|launch)
+  manifest|fence|code)
     # Run the enclosing project's protected guard/run, never this harness's copy. Online, it reads this clone at the pin.
     base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
     runner=$(git show "$base:guard/run" 2>/dev/null) || {
@@ -57,6 +64,13 @@ Project setup, run from your machine:
                       reviewer, merge policy, needs-you hook and open items
   atlas [repo]        read-only HTML chart of runs, ripples, cards, receipts and the drawer; --serve PORT|SOCKET serves it live
 
+In an agent's session, the four verbs (AGENTS.md says how):
+  run <run_dir> --why SENTENCE -- <sbatch options> <script> [args]
+                      prices and submits a job, or refuses with the command to run instead
+  wait <job_id> | -- <command...>   waits, and comes back with the last lines every 5 minutes
+  ask QUESTION --default OPTION --deadline 5m|30m|2h   a question for a person, answered by the default if nobody does
+  status              what runs, what is blocked, the budget, the branch and the next command
+
 Agent sessions, on your machine or a login node:
   enter <dir> [--agent NAME] [--no-tty] -- <cmd...>
                       runs any agent in a sandbox holding <dir> and a home of its own, with no network, credential or
@@ -83,8 +97,7 @@ In any git repository, guarded or not:
                       refreshes the question card digest
 
 Inside a guarded project, guard <command> runs the project's guard/run from the protected branch:
-  preflight, ripples, manifest, fence, code
-  launch, on a host the budget card's launch_hosts names
+  manifest, fence, code
 USAGE
      [ "$cmd" = help ] || exit 64 ;;
 esac

@@ -6,6 +6,7 @@ set and are dropped; anything else is Unparsed, which the caller turns into R01 
 import hashlib
 import os
 import re
+import shlex
 
 from policy import Invocation, SbatchSpec
 
@@ -178,3 +179,30 @@ def parse(request, script, session, ts):
                      script_sha256=hashlib.sha256(script).hexdigest(), args=tuple(request.args), cwd=request.cwd,
                      session=session, ts=ts)
     return inv, spec_of({**file_opts, **cli_opts})
+
+
+def run_line(run_dir, options, script, args=(), why=None):
+    """The guard run command for a job, as an agent can paste it: E2b's corrected_run, and R09's line 2."""
+    why = why or f"Run {os.path.basename(script)} for run {os.path.basename(os.path.normpath(run_dir))}."
+    words = ["guard", "run", run_dir, "--why", why, "--", *options, script, *args]
+    return " ".join(shlex.quote(w) for w in words)
+
+
+def old_command(cmd, args):
+    """The guard run line for a v7 command (guard/run preflight or launch), or None when it names no job."""
+    args = list(args)
+    if cmd == "preflight" and len(args) >= 2 and not args[0].startswith("-"):
+        return run_line(args[0], args[2:], args[1])
+    if cmd == "launch" and args and not args[0].startswith("-") and "--" in args:
+        cut = args.index("--")
+        command, options = args[cut + 1:], []
+        for a in args[1:cut]:
+            name, _, value = a.partition("=")
+            if name == "--gpus":
+                n = 0 if value in ("", "none") else len(value.split(","))
+                options += [f"--gpus={n}"] if n else []
+            elif name in ("--time", "--mem"):
+                options.append(a)
+        if command:
+            return run_line(args[0], options, command[0], command[1:])
+    return None

@@ -34,6 +34,12 @@ expect() {  # expect <name> <want: ok|fail> <grep pattern or -> -- command...
   if [ "$got" = "$want" ] && { [ "$pat" = - ] || grep -q -E -- "$pat" <<<"$out"; }; then pass=$((pass+1)); echo "ok   $name"
   else fail=$((fail+1)); echo "FAIL $name (exit $rc, wanted $want, pattern '$pat')"; sed 's/^/     /' <<<"$out" | tail -8; fi
 }
+expect_refusal() {  # expect_refusal <name> <code> -- command...: it prints exactly refusal <code>'s two lines and exits
+  local name=$1 code=$2; shift 3   # with its status, and line 2 obeys the line 2 rule (lib/refusals.py check)
+  local out rc why; out=$("$@" 2>&1); rc=$?
+  if why=$(python3 "$here/lib/refusals.py" check "$code" "$rc" <<<"$out" 2>&1); then pass=$((pass+1)); echo "ok   $name"
+  else fail=$((fail+1)); echo "FAIL $name ($why)"; sed 's/^/     /' <<<"$out" | tail -8; fi
+}
 skip() { skipped=$((skipped+1)); echo "skip $1 ($2)"; }  # skip <name> <reason>: a case this host cannot run
 merged() {  # merged <command...>: runs it with the protected branch at HEAD, as if HEAD's pull request had merged
   git push -q -f origin HEAD:refs/heads/merged && env HPC_GUARD_REF=origin/merged "$@"

@@ -9,7 +9,9 @@ is a command the caller builds (the agent's own command with one flag fixed). Li
 which refuse() enforces, so a refusal that breaks it fails where it is made.
 
     python3 lib/refusals.py markdown              # docs/refusals.md, which tests/refusals.sh compares
-    python3 lib/refusals.py check <code> <exit>   # stdin is a command's whole output; exit 0 when it is that refusal"""
+    python3 lib/refusals.py check <code> <exit>   # stdin is a command's whole output; exit 0 when it is that refusal
+    python3 lib/refusals.py print <code> [name=value...]   # prints the refusal on stderr and exits with its status
+    python3 lib/refusals.py old <command> [args...]        # R09 for a v7 command, line 2 the guard run line"""
 import os
 import re
 import sys
@@ -187,7 +189,25 @@ def markdown():
     return "\n".join(out) + "\n"
 
 
+def old(cmd, args):
+    """R09 for guard preflight, ripples, launch or card, line 2 the guard run line for the same job, else guard
+    status."""
+    from policy.invocation import old_command
+    line = old_command(cmd, args)
+    try:
+        return refuse("R09", old=f"guard {cmd}", next=line or "guard status")
+    except ValueError:
+        return refuse("R09", old=f"guard {cmd}", next="guard status")
+
+
 def main(argv):
+    if len(argv) >= 3 and argv[1] in ("print", "old"):
+        if argv[1] == "old":
+            r = old(argv[2], argv[3:])
+        else:
+            r = refuse(argv[2], **dict(a.split("=", 1) for a in argv[3:]))
+        sys.stderr.write(render(r))
+        return r.exit
     if argv[1:] == ["markdown"]:
         sys.stdout.write(markdown())
         return 0

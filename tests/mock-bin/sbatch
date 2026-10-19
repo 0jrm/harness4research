@@ -1,2 +1,11 @@
 #!/usr/bin/env bash
-echo "SBATCH $*"
+# Mock: prints SBATCH and its arguments, which the preflight cases read. With --parsable, as the broker submits, it
+# prints a job id instead, one more than the last line of MOCK_SBATCH_IDS (a file; 1000 when absent or unset), and
+# appends the arguments to MOCK_SBATCH_LOG. MOCK_SBATCH_ERR makes it fail with that message.
+[ -z "${MOCK_SBATCH_ERR:-}" ] || { echo "sbatch: error: $MOCK_SBATCH_ERR" >&2; exit 1; }
+[[ " $* " == *" --parsable "* ]] || { echo "SBATCH $*"; exit 0; }
+ids=${MOCK_SBATCH_IDS:-/dev/null}
+id=$(( $(tail -n1 "$ids" 2>/dev/null || :) + 0 )); [ "$id" -ge 1000 ] || id=999
+id=$((id + 1)); [ "$ids" = /dev/null ] || echo "$id" >> "$ids"
+printf '%s\n' "$*" >> "${MOCK_SBATCH_LOG:-/dev/null}"
+echo "$id"

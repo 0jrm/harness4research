@@ -13,7 +13,7 @@ from typing import NamedTuple, Optional
 HARNESS = re.compile(r"guard|AGENTS\.md|\.agents/skills|SKILL\.md|FACTS\.md|question\.card|budget\.card|watch\.list|"
                      r"needs-you|ripples|preflight|incidents|\bgpg\b|card/|/run/guard|git tag")
 REFUSAL = re.compile(r"^[\w ./-]{1,40}: refused\b|^remote: (FAIL\b|.*\brefused\b|.*check failed)|"
-                     r"question\.card is not approved", re.M)
+                     r"question\.card is not approved|^H4R-[A-Z][0-9]{2} ", re.M)
 
 
 class Call(NamedTuple):
