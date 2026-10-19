@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: guard/run <fence|code|manifest|receipts-check> [args...]
+# usage: guard/run <fence|code|manifest|receipts-check> [args...] | guard/run --show receipts-check
 # Runs the guard script of the harness release that the harness: line of guard/budget.card pins, reading the card from
 # the protected branch, so an edit on a working branch, in the harness clone's working tree or in a vendored file has
 # no effect. The pin is a release tag such as v8.0, or a full commit.
@@ -10,7 +10,9 @@
 # branch. HPC_GUARD_REF names the protected branch. HPC_GUARD_LOCAL=1 runs the working-tree copy instead (this working
 # tree's card and vendored file, or the clone's lib/guard/), for the bootstrap before guard/ is merged.
 # preflight, ripples and launch are gone in schema 8: each prints refusal R09 with the guard run line to use instead.
+# --show receipts-check prints that script instead of running it, for the fence, which runs it under its own name.
 set -euo pipefail
+show=0; if [ "${1:-}" = --show ] && [ "${2:-}" = receipts-check ]; then show=1; shift; fi
 cmd=${1:-}; shift || true
 base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
 case $cmd in
@@ -68,6 +70,7 @@ fi
 if grep -qE '^(<{7}|>{7}|\|{7})( |$)' <<<"$script" || ! bash -n <<<"$script" 2>/dev/null; then
   refuse "$name on $where has unresolved conflicts or does not parse. A human fixes guard/ in a pull request."
 fi
+if [ $show = 1 ]; then printf '%s\n' "$script"; exit 0; fi
 export HPC_CALLER_DIR=$PWD
 cd "$top"
 exec bash -c "$script" "guard/bin/$cmd.sh" "$@"

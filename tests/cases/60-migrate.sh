@@ -71,6 +71,7 @@ cd "$P.up" || exit 1; git fetch -q origin; git switch -q --detach origin/main
 expect_refusal migrate7-preflight-r09 R09 -- guard/run preflight runs/x job.sh
 expect_refusal migrate7-ripples-r09-without-guard R09 -- env PATH="$(path_without guard)" guard/run ripples runs/x
 expect migrate7-show-gone fail '^usage: guard/run <fence\|code\|manifest\|receipts-check>' -- guard/run --show fence
+expect migrate7-show-receipts-check ok - -- bash -c '[ "$(guard/run --show receipts-check)" = "$(git -C "$1" show HEAD:lib/guard/receipts-check.sh)" ]' _ "$here"
 expect migrate7-fence-runs ok 'PASS	guard-untouched' -- guard/run fence origin/main HEAD
 expect migrate7-version-current ok '^current$' -- "$guard" version
 expect migrate7-once ok 'Nothing proposed\.$' -- "$guard" init "$P" --update --worktree "$P.up2" --branch guard/again
