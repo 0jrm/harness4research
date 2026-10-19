@@ -23,11 +23,25 @@ from broker import transport  # noqa: E402
 MAX_CHARS = 1200
 LINE_CHARS = 190  # six lines of at most 190 characters and a newline stay under MAX_CHARS
 MOST = 3
+BLOCKED = "blocked: "
 WAIT_MARK = 'echo $? > "$0/$$.rc"'  # what lib/wait.py's sh runs: its processes are the commands guard wait started
 
 
 def listed(items, most=MOST):
     return "; ".join(items[:most]) + (f"; and {len(items) - most} more" if len(items) > most else "") or "nothing"
+
+
+def shown(label, items):
+    """How many of items the line label + listed(items) shows whole, after the cut to LINE_CHARS."""
+    line = label + listed(items)
+    if len(line) > LINE_CHARS:
+        line = line[:LINE_CHARS - 3]
+    n, at = 0, len(label)
+    for item in items[:MOST]:
+        if line[at:at + len(item)] != item:
+            break
+        n, at = n + 1, at + len(item) + 2
+    return n
 
 
 def plural(n, word):
@@ -68,7 +82,7 @@ def render(f):
     left = b and b["max"] - b["reserve"] - b["spent"] - b["queued"]
     lines = [
         "running: " + listed(jobs),
-        "blocked: " + listed(f.get("blocked") or []),
+        BLOCKED + listed(f.get("blocked") or []),
         "last refusal: " + (f"{r['ago_min']} min ago, {r['where']}: {r['why']}" if r else "none"),
         "budget: " + (f"{b['spent']} of {b['max']} core-h spent, {b['queued']} queued, {left} left above the "
                       f"{b['reserve']} reserve" if b else "unknown (the broker could not read guard/budget.card on main)"),

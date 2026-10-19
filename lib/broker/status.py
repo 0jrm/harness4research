@@ -20,6 +20,7 @@ from broker import asks, receipts
 from broker.records import Refused, read_rows
 from policy.cost import CardError, limits
 from policy.invocation import to_minutes
+from verbs.status import BLOCKED, shown
 
 LIVE = ("PENDING", "CONFIGURING", "RUNNING", "COMPLETING", "SUSPENDED", "REQUEUED")
 FAILED = ("TIMEOUT", "OUT_OF_ME", "NODE_FAIL", "FAILED", "PREEMPTED")
@@ -126,7 +127,9 @@ def facts(broker):
         failed = None
     blocked = [f"needs-you {it.id} waits for a person: {it.title}" for it in needs_you.read(broker.records.queue)
                if it.state in ("open", "acked") and not it.id.startswith("a")]
-    blocked += asks.report(broker, asks.short)  # last, so the 190-character cut of the line takes asks first
+    # Asks last, so the 190-character cut of the line takes them first; an answer the line cannot show stays unseen.
+    blocked += asks.report(broker, asks.short,
+                           shown=lambda lines: max(0, shown(BLOCKED, blocked + lines) - len(blocked)))
     budget = None
     try:
         card = limits((broker.mirror.show("guard/budget.card") if hasattr(broker.mirror, "files") else None) or "")

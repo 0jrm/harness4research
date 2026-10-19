@@ -220,14 +220,16 @@ def short(a, at):
     return f"ask {a['id']}: nobody answered, the default was taken unattended: {a['default']}"[:190]
 
 
-def report(broker, render=line):
-    """The lines guard status shows: every open ask, and every outcome the agent has not seen, which this marks seen.
-    The caller holds broker.lock; render is line or short."""
+def report(broker, render=line, shown=len):
+    """The lines guard status shows: every open ask, and every outcome the agent has not seen. shown(lines) is how
+    many of them the caller's output will show, in order; only an outcome among those is marked seen, so one cut from
+    the output is reported again next time. The caller holds broker.lock; render is line or short."""
     asks = settle(broker)
     told = fold(rows(broker))[1]
-    fresh = [a["id"] for a in asks.values() if not pending(a) and a["id"] not in told]
-    write(broker, [{"event": "told", "id": ident} for ident in fresh])
-    return [render(a, now(broker)) for a in asks.values() if pending(a) or a["id"] in fresh]
+    listed = [a for a in asks.values() if pending(a) or a["id"] not in told]
+    lines = [render(a, now(broker)) for a in listed]
+    write(broker, [{"event": "told", "id": a["id"]} for a in listed[:shown(lines)] if not pending(a)])
+    return lines
 
 
 # the verb -----------------------------------------------------------------------------------------------------------

@@ -190,3 +190,15 @@ expect ask-local-human-sees ok '🩺 a1 · approve · Extend the stop date\?' --
 expect ask-local-answered ok '^ask a1 answered by the human: yes\. Act on it\.$' -- bash -c 'cd "$1" && "$2" needs-you done a1 >/dev/null && env -u GUARD_SESSION GUARD_SOCK_DIR="$3/nosock" "$4" --status a1' _ "$lp" "$guard" "$tmp" "$ask"
 
 unset XDG_STATE_HOME
+
+# guard status shows at most three blocked entries; an answer it did not show stays unseen until a call shows it.
+ask4=$tmp/ask-four; mkdir -p "$ask4"
+expect ask-report-marks-only-shown ok '^4 4 1$' -- python3 -c 'import sys; sys.path.insert(0, sys.argv[1] + "/lib"); import _path
+from broker import asks, scheduler
+b = scheduler.Broker(sys.argv[2], {"session": "s1", "project": "/x", "paths": [], "origin": "/x", "slurm_bin": None})
+for q in ("one?", "two?", "three?", "four?"):
+    asks.add(b, {"question": q, "default": "no", "deadline": "30m"})
+asks.write(b, [{"event": "answered", "id": f"a{n}", "answer": "yes", "by": "human"} for n in (1, 2, 3, 4)])
+first = asks.report(b, asks.short, shown=lambda lines: 3)
+second = asks.report(b, asks.short, shown=lambda lines: 3)
+print(len(first), sum("answered" in l for l in first), len(second))' "$here" "$ask4"
