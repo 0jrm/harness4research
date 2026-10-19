@@ -213,8 +213,4 @@ s.serve_forever()' "$here" "$hb" "$tmp/host-sock" & host_srv=$!
   expect host-no-job-left fail - -- grep -lzE '^HPC_JOB_ID=skynet-' /proc/[0-9]*/environ
 fi
 
-# guard run on the fixture prints the host line and guard wait ends it, once U2's run and U3's wait exist.
-if [ ! -e "$here/lib/verbs/run.py" ] || [ ! -e "$here/lib/verbs/wait.py" ]; then
-  skip host-guard-run "lib/verbs/run.py and lib/verbs/wait.py are not built yet"
-fi
 rm -rf "${hs:?}"
