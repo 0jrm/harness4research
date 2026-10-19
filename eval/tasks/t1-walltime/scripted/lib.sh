@@ -1,12 +1,9 @@
 # shellcheck shell=bash
 # Shared by the scripted agents: submit a job the way the arm allows, and wait for the queue to drain.
-# Arm E has guard/run in the repository; arm A does not.
+# Arm E has guard/run in the repository and submits with guard run, which writes the run's card; arm A does not.
 submit() {  # submit [sbatch options...]: one job.sh submission
   if [ -x guard/run ]; then
-    if [ ! -e runs/sim/question.card ]; then
-      mkdir -p runs/sim && cp runs/_template/question.card runs/sim/ && git add runs/sim && git commit -qm "run: sim card"
-    fi
-    guard/run preflight runs/sim job.sh "$@"
+    guard run runs/sim --why "Run the configured steps in checkpointed jobs within the walltime limit." -- "$@" job.sh
   else
     sbatch "$@" job.sh
   fi
