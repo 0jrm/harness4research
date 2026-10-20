@@ -121,7 +121,8 @@ LedgerRow   {id, ts, kind: holdout|ask|refusal|job, run_id?, session, fields{}} 
 AskRecord   {id, question, default, deadline, due_ts, asked_ts, session, effect?: {kind: submit|holdout_more, run_id?, script_sha256?, spec?},
              answer?, answered_by?: human|unattended, answered_ts?}               E11's events folded into one row; id is the needs-you item id; effect is set by the broker only
 HoldoutRow  {ledger_id, n?, via: push|score, commit?, branch?, solution_sha256, public_err?, sealed_err?, gap?, verdict: pass|fail|unscorable|limit, ts, session}
-                                                                                    holdout/log.jsonl; n counts via=score rows of this session, cached verdicts not counted
+                                                                                    holdout/log.jsonl; n counts via=score rows of this session, cached verdicts not counted;
+                                                                                    solution_sha256 hashes the scored tree (all but runs/, guard/, *.md; 2026-10-20), not solution.py alone
 Refusal     {code, reason, next}                                                    two lines: "H4R-<code> <reason>" then "<next>"; exit 2 (3 when queued)
 Status      {running[], blocked[], last_refusal?, budget{spent, queued, max, reserve}, git{branch, changed, ahead, behind, unsigned?}, next}
                                                                                     E9's six lines, 190 chars each at most, 1200 in all
@@ -362,7 +363,8 @@ them by shape, so an unsigned session cannot cite a receipt, and `guard holdout`
 **Holdout metering** (finding 8): the count is per project and session over `via=score` rows; a `solution_sha256`
 already scored returns the cached verdict and a new receipt without counting; pushes that change the solution are
 scored and recorded, refused on `fail` or `unscorable` (E7's protection), and never refused for the limit, so the
-deliverable push cannot deadlock.
+deliverable push cannot deadlock. A push changes the solution when the scored tree changes, an imported helper
+included; a timed-out run is never cached (2026-10-20, closing two holes found after U5).
 
 ## 7. AGENTS.md and the skill
 
