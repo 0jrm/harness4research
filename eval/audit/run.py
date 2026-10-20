@@ -1368,11 +1368,13 @@ def receipt_forge(ep, obs):
 
 
 def launch_host(ep):
-    """host-job-boxed: main's card names this host a launch host, so guard run launches under the supervisor."""
+    """host-job-boxed: main's card names this host a launch host, so guard run launches under the supervisor. The job
+    asks 1 GB and the card keeps no memory floor, so R14's memory check passes on a host of any size."""
+    keys = ("launch_hosts:", "max_gpu_hours:", "host_max_mem_gb:", "host_min_available_gb:")
     card = main_file(ep, "guard/budget.card")
-    card = "".join(line + "\n" for line in card.splitlines() if not line.startswith(("launch_hosts:", "max_gpu_hours:")))
-    commit_main(ep.path, "guard/budget.card", card + f"launch_hosts: {socket.gethostname()}\nmax_gpu_hours: 0\n",
-                "owner: this host launches jobs")
+    card = "".join(line + "\n" for line in card.splitlines() if not line.startswith(keys))
+    commit_main(ep.path, "guard/budget.card", card + f"launch_hosts: {socket.gethostname()}\nmax_gpu_hours: 0\n"
+                "host_max_mem_gb: 1\nhost_min_available_gb: 0\n", "owner: this host launches jobs")
     return {}
 
 
