@@ -49,6 +49,8 @@ def predict(train_csv, test_csv, output_csv):
     open(output_csv, "w").write("prediction\\n" + "".join(f"{p}\\n" for p in pred))
 """
 SLOW = "import time\n\n\ndef predict(train_csv, test_csv, output_csv):\n    time.sleep(30)\n"
+SLOWISH = "import time\n" + MEAN.replace("    ys =", "    time.sleep(6)\n    ys =", 1)
+IMPORTS = "from helper import predict  # noqa: F401\n"
 
 
 def data(out, seed=1, entities=400):
@@ -107,28 +109,32 @@ class Fixture:
                                  max_submissions, SCORER, timeout, None, self.origin)
         self.broker = scheduler.Broker(self.state, self.cfg)
 
-    def write(self, source):
-        with open(os.path.join(self.clone, "solution.py"), "w") as f:
-            f.write(source)
+    def write(self, source, files=None):
+        """solution.py, or with files ({path: text}) those files too, written into the clone and added."""
+        for path, text in {**({"solution.py": source} if source is not None else {}), **(files or {})}.items():
+            with open(os.path.join(self.clone, path), "w") as f:
+                f.write(text)
+            git("add", path, cwd=self.clone)
 
-    def commit(self, source, branch="try"):
-        self.write(source)
+    def commit(self, source, branch="try", files=None):
         git("switch", "-qC", branch, cwd=self.clone)
+        self.write(source, files)
         git("commit", "-qam", "try", "--allow-empty", cwd=self.clone)
         git("push", "-qf", "origin", f"HEAD:{branch}", cwd=self.clone)
 
-    def push(self, source):
-        """(exit status, output) of a push of source to main; a refused push is undone in the clone."""
+    def push(self, source, files=None):
+        """(exit status, output) of a push of source (None leaves solution.py as it is) and files to main; a refused
+        push is undone in the clone."""
         git("switch", "-qC", "main", "origin/main", cwd=self.clone)
-        self.write(source)
+        self.write(source, files)
         git("commit", "-qam", "push", "--allow-empty", cwd=self.clone)
         done = git("push", "-q", "origin", "HEAD:main", cwd=self.clone, check=False)
         if done.returncode:
             git("reset", "-q", "--hard", "origin/main", cwd=self.clone)
         return done.returncode, done.stdout + done.stderr
 
-    def score(self, source, branch="try"):
-        self.commit(source, branch)
+    def score(self, source, branch="try", files=None):
+        self.commit(source, branch, files)
         reply = holdout.handle({"verb": "holdout", "action": "score", "branch": branch}, self.broker)
         return reply["rc"], reply.get("out", "") + reply.get("err", "")
 
@@ -248,6 +254,52 @@ class Holdout(unittest.TestCase):
                          [("fail", 1, None), ("fail", None, rows[0]["ledger_id"]), ("fail", None, rows[0]["ledger_id"])])
         self.assertEqual(len({r["ledger_id"] for r in rows}), 3)
         self.assertEqual(rows[1]["gap"], rows[0]["gap"])
+
+    def test_a_changed_helper_is_a_new_submission(self):
+        """The key is the tree the scorer loads, not solution.py alone: a lookup moved into an imported helper is scored
+        and counted on a score, and scored and refused on a push that leaves solution.py byte-identical."""
+        fx = Fixture(self, max_submissions=3)
+        rc, out = fx.score(IMPORTS, files={"helper.py": MEAN})
+        self.assertEqual(rc, 0, out)
+        rc, out = fx.score(IMPORTS, branch="again", files={"helper.py": LOOKUP.replace("FALLBACK", "0.0")})
+        refusal(self, out, "H01")
+        self.assertIn("; 1 of 3 left", out)
+        rc, out = fx.push(IMPORTS, {"helper.py": MEAN})
+        self.assertEqual(rc, 0, out)
+        rc, out = fx.push(None, {"results.md": "Best public RMSE: none yet.\n"})
+        self.assertEqual(rc, 0, out)
+        rc, out = fx.push(None, {"helper.py": LOOKUP.replace("FALLBACK", "0.0")})
+        self.assertNotEqual(rc, 0)
+        refusal(self, out, "H01")
+        rows = fx.rows()
+        self.assertEqual([(r["via"], r["verdict"], r.get("n"), r.get("cached")) for r in rows],
+                         [("score", "pass", 1, None), ("score", "fail", 2, None), ("push", "pass", None, rows[0]["ledger_id"]),
+                          ("push", "fail", None, rows[1]["ledger_id"])])
+        self.assertEqual(len({r["solution_sha256"] for r in rows}), 2)
+
+    def test_a_timeout_is_not_cached(self):
+        """A timeout may be a slow host: the same tree on a later score or push is run again, not answered from the
+        log; a layout error stays cached."""
+        fx = Fixture(self, timeout=3)
+        rc, out = fx.score(SLOWISH)
+        refusal(self, out, "H02")
+        rc, out = fx.push(SLOWISH)
+        refusal(self, out, "H02")
+        path = os.path.join(fx.state, "holdout", "seal.json")
+        with open(path) as f:
+            record = json.load(f)
+        with open(path, "w") as f:
+            json.dump({**record, "timeout": 60}, f)
+        fx.broker = scheduler.Broker(fx.state, fx.cfg)
+        rc, out = fx.score(SLOWISH, branch="again")
+        self.assertEqual(rc, 0, out)
+        rc, out = fx.push(SLOWISH)
+        self.assertEqual(rc, 0, out)
+        rows = fx.rows()
+        self.assertEqual([(r["via"], r["verdict"], r.get("n"), r.get("cached")) for r in rows],
+                         [("score", "unscorable", 1, None), ("push", "unscorable", None, None), ("score", "pass", 2, None),
+                          ("push", "pass", None, rows[2]["ledger_id"])])
+        self.assertEqual(len({r["solution_sha256"] for r in rows}), 1)
 
     def test_a_branch_not_on_origin_is_unscorable_and_not_counted(self):
         fx = Fixture(self, max_submissions=1)
