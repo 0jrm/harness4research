@@ -1,0 +1,113 @@
+{
+ "run_id": "exp-E1h",
+ "question_card": "eval/cards/E1r.card",
+ "card_sha256": "8546b684a1cabb5f9bf90ac5c7397b7dd8e27cc0df6150685b6456d1f08b94b9",
+ "card_commit": "7cfdea06e087fe84694ae704e7a9425f29ba668f",
+ "unfrozen": false,
+ "harness_commit": "67080bafc083bcf8521c34d9342a3d63865e2a58",
+ "started": "2026-10-20T21:02:09Z",
+ "served": "Qwen/Qwen3.6-35B-A3B-FP8",
+ "served_root": "/conda/jmiranda/h4r/models/qwen36-35b-fp8",
+ "served_max_model_len": 131072,
+ "python": {
+  "source": "site",
+  "path": "/conda/jmiranda/h4r/exp/E1h/eval/env/.site-venv",
+  "sandbox_path": "/opt/site/python",
+  "python": "3.13.13",
+  "numpy": "2.5.3",
+  "pandas": "3.0.6",
+  "scikit-learn": "1.9.1",
+  "scipy": "1.18.1"
+ },
+ "arms": {
+  "E": {
+   "harness": "E",
+   "broker": true
+  }
+ },
+ "config": {
+  "run_id": "exp-E1h",
+  "question_card": "eval/cards/E1r.card",
+  "episodes_dir": "/conda/jmiranda/h4r/sessions",
+  "results_dir": "eval/results/exp-E1h",
+  "model": {
+   "upstream": "http://127.0.0.1:9185",
+   "alias": "Qwen/Qwen3.6-35B-A3B-FP8",
+   "expect_upstream_model": "Qwen/Qwen3.6-35B-A3B-FP8",
+   "expect_root": "/conda/jmiranda/h4r/models/qwen36-35b-fp8",
+   "expect_max_model_len": 131072,
+   "seed_base": 1000,
+   "sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20
+   },
+   "fold_developer": true,
+   "text_into_reasoning": true
+  },
+  "scaffold": {
+   "name": "codex",
+   "release_dir": "~/.codex/packages/standalone/releases/0.162.0-x86_64-unknown-linux-musl",
+   "context_window": 65536,
+   "timeout_minutes": 30,
+   "timeout_minutes_by_family": {
+    "t3-entity-overlap": 180
+   },
+   "parallel": 8,
+   "disable_features": [
+    "apps",
+    "browser_use",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "computer_use",
+    "image_generation",
+    "in_app_updates",
+    "plugins",
+    "remote_plugin",
+    "realtime_conversation",
+    "tool_suggest",
+    "skill_mcp_dependency_install",
+    "enable_request_compression",
+    "fast_mode",
+    "ultrafast_mode",
+    "multi_agent",
+    "goals",
+    "in_app_browser",
+    "in_app_chat",
+    "in_app_voice",
+    "in_app_dictation",
+    "in_app_local_automation",
+    "code_mode_host",
+    "daemon_auto_start",
+    "plugin_sharing",
+    "worktrees",
+    "view_image"
+   ]
+  },
+  "matrix": {
+   "families": [
+    "t1-walltime"
+   ],
+   "variants": [
+    "control"
+   ],
+   "arms": [
+    "E"
+   ],
+   "seeds": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+   ],
+   "order_seed": 20261010
+  },
+  "agents_md": "eval/agents/E5.md"
+ }
+}
