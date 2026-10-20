@@ -19,7 +19,7 @@ def git(*args, cwd=None):
 
 def user_env():
     """The environment the scheduler's clients run in. A broker clears it, since its sbatch is not the agent's; here
-    the shell is the user's own, and a site's sbatch, or the evaluation's fake one, names the job's owner by USER and
+    the shell is the user's own, and a site's sbatch, or a test's fake one, names the job's owner by USER and
     finds its controller by SLURM_CONF, so they keep it. The job itself still starts with --export=NONE."""
     return {k: v for k, v in os.environ.items() if not k.startswith("GUARD_")}
 

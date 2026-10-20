@@ -81,7 +81,7 @@ expect run-local-card ok '^written_by: guard run, local, unsigned$' -- git -C "$
 expect audit-one-submit ok '^1$' -- grep -c '"cmd": "sbatch"' "$ep/state/slurm/audit.jsonl"
 
 echo "== the forge gate"
-expect push-branch ok - -- inside 'cd proj && git push -q origin HEAD:refs/heads/run/r1'
+expect push-branch ok - -- inside 'cd proj && git push -q origin HEAD:refs/heads/self-test'
 expect push-main-clean ok - -- inside 'cd proj && git push -q origin HEAD:main'
 expect push-main-guard-refused fail '^remote: H4R-F01 guard-untouched: ' -- inside 'cd proj && echo "max_walltime_minutes: 999" >> guard/budget.card && git commit -qam "raise cap" && git push origin HEAD:main'
 expect push-main-force-refused fail 'H4R-S03 force push to main is refused' -- inside 'cd proj && git reset -q --hard HEAD~2 && git commit -q --allow-empty -m other && git push -f origin HEAD:main'
@@ -149,7 +149,7 @@ echo "== records behind the broker"
 broker_py=$here/../broker/broker.py
 expect records-done-refused fail "no verb 'done'" -- in_b 'n=$(guard needs-you add --kind check --title Look --why w) && guard needs-you done "$n"'
 expect records-store-outside ok '	open	check	Look	' -- cat "$b/state/broker/records/needs-you.tsv"
-expect records-ledger-by-hand fail "without the broker's signature" -- in_b 'git fetch -q origin run/gr && git merge -q --no-edit FETCH_HEAD && printf "x2\tt\thost\th\tw\te\n" >> runs/gr/execution.tsv && git commit -qam x2 && git push origin HEAD:refs/heads/run/gr'
+expect records-ledger-by-hand fail "without the broker's signature" -- in_b 'git fetch -q origin run/gr && git merge -q --no-edit FETCH_HEAD && { [ -f runs/gr/execution.tsv ] || cp runs/_template/execution.tsv runs/gr/; } && printf "x1\tt\thost\th\tw\te\n" >> runs/gr/execution.tsv && git add runs/gr/execution.tsv && git commit -qm x1 && git push origin HEAD:refs/heads/run/gr'
 expect forge-card-tag-refused fail 'card/gr is not a signed tag object' -- in_b 'git tag card/gr && git push origin card/gr'
 expect records-done-outside ok 'n1 done' -- "$broker_py" records "done" "$b/state/broker" n1
 

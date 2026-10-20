@@ -326,7 +326,7 @@ def handle(request, broker):
 
 # the loop -----------------------------------------------------------------------------------------------------------
 def load_approver(mode):
-    """The scripted approver (eval/broker/approver.py, on sys.path where the evaluation's broker runs) for the card's
+    """The scripted approver (eval/broker/approver.py, on sys.path where eval/broker/broker.py runs) for the card's
     or config's approver, or None for never."""
     if mode in (None, "never"):
         return None
