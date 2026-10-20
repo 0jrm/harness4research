@@ -20,7 +20,7 @@ Launch hosts are off until a human sets `launch_hosts` on the protected branch, 
 
 ## The execution envelope
 
-The question card holds the design, and the broker writes it once. Execution facts go in `runs/<id>/execution.tsv`. A `restart` or `resume` row may cite a resource stop (OUT_OF_MEMORY, HOST_OUT_OF_MEMORY, NODE_FAIL, PREEMPTED, SUPERVISOR_FAILED, CANCELLED, LAUNCH_FAILED), never a science stop (FAILED, TIMEOUT), which needs `--cause` on the next `guard run`; the lists only grow. The fence rules `execution-ledger` and `execution-history` follow the ratchet.
+The question card holds the design, and the broker writes it once. Execution facts go in `runs/<id>/execution.tsv`, one row each with `guard ledger add <id> <field> <value> --why W --evidence E` (`guard ledger list <id>` prints it): behind the broker the row is committed to `run/<id>`, signed, after the fence's ledger check; without one it is appended to the working tree's file, checked the same way, for you to commit. A `restart` or `resume` row may cite a resource stop (OUT_OF_MEMORY, HOST_OUT_OF_MEMORY, NODE_FAIL, PREEMPTED, SUPERVISOR_FAILED, CANCELLED, LAUNCH_FAILED), never a science stop (FAILED, TIMEOUT), which needs `--cause` on the next `guard run`; the lists only grow. The fence rules `execution-ledger` and `execution-history` follow the ratchet.
 
 ## Merge policy
 

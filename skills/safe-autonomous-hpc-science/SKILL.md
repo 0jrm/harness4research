@@ -45,7 +45,7 @@ This text describes guard schema 8. Once per session, read `git show origin/main
 1. Name the run and its question in `--why`; `guard run` writes `runs/<run_id>/question.card` on `run/<run_id>`. Never write a card yourself.
 2. Reproduce the baseline at the smallest configuration exercising the whole pipeline. Missing its tolerance means stop and report.
 3. Climb tiny, small, full rungs, each with a written pass check, each its own `guard run`.
-4. Execution facts go in `runs/<run_id>/execution.tsv`, not the card.
+4. Execution facts go in `runs/<run_id>/execution.tsv`, not the card: `guard ledger add <run_id> <field> <value> --why W --evidence E` appends one checked row.
 5. Verify with a model, agent, or script that did not write the code; it reads artifacts and the card, never the implementer's summary.
 6. Write the report, then decide continue, kill, or escalate. Log the row.
 
