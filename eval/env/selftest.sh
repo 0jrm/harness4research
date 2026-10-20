@@ -170,6 +170,7 @@ expect gh-checks ok 'fence	pass' -- in_b 'gh pr checks'
 expect gh-merge-refused fail 'gh pr merge is not offered' -- in_b 'gh pr merge 1 --squash'
 expect gh-api-write-refused fail 'calls that write are not offered' -- in_b 'gh api -X PUT repos/lab/ocean-sim/pulls/1/merge'
 expect gh-auth-refused fail 'gh auth is not offered' -- in_b 'gh auth token'
+expect gh-refusal-coded fail '^H4R-U01 usage: gh refused by the broker: gh repo is not offered here' -- in_b 'gh repo view'
 expect guard-merge-inside-refused fail '^H4R-G01 runs outside the sandbox' -- in_b 'guard merge 1'
 expect push-main-refused fail 'main takes pull requests only' -- in_b 'git push origin HEAD:main'
 expect merge-unreviewed fail 'FAIL  guard review has no verdict' -- "$broker_py" merge "$b/state/broker" 1

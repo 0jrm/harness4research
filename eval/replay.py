@@ -202,7 +202,7 @@ KINDS = [
     ("card", re.compile(r"^guard broker: refused: .*(question\.card|card/)")),
     ("scheduler", re.compile(r"^guard broker: the scheduler refused|^sbatch: error: (?!Invalid user for SlurmUser)")),
     ("broker", re.compile(r"^guard broker: refused|^(sbatch|squeue|sacct|scancel): refused")),
-    ("gh", re.compile(r"^(gh: refused|guard (pr open|review|merge|ship): refused)")),
+    ("gh", re.compile(r"^(gh: refused|guard (pr open|review|merge|ship): refused|H4R-U01 usage: (gh|guard pr open) refused)")),
     ("guard", re.compile(r"^guard [\w -]{1,30}: refused")),
     ("remote", re.compile(r"^remote: (FAIL\t|.* refused\b|main is a protected branch|H4R-[A-Z][0-9]{2} )")),
 ]

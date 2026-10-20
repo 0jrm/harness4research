@@ -218,7 +218,7 @@ def main(argv):
         return 0
     sys.stdout.write(reply.get("out", ""))
     err = reply.get("err", "")
-    sys.stderr.write(err.replace("gh: refused by the broker", "guard pr open: refused by the broker"))
+    sys.stderr.write(err.replace("gh refused by the broker", "guard pr open refused by the broker"))
     if argv[0] == "pr":
         return 0 if reply.get("rc") == 0 else 2
     return reply.get("rc", 1)
