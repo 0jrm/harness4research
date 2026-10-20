@@ -88,3 +88,32 @@ class SlowSolution(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReceiptsRef(unittest.TestCase):
+    """v8's broker publishes receipts on an orphan guard/receipts branch; its files are not the agent's pushes."""
+
+    def test_pushed_changes_skips_the_receipts_ref(self):
+        with tempfile.TemporaryDirectory() as ep:
+            project = os.path.join(ep, "home", "proj")
+            os.makedirs(project)
+            git("init", "-q", "-b", "main", cwd=project)
+            with open(os.path.join(project, "evaluate.py"), "w") as f:
+                f.write("x = 1\n")
+            ident = ["-c", "user.email=a@b", "-c", "user.name=a"]
+            git(*ident, "add", "evaluate.py", cwd=project)
+            git(*ident, "commit", "-qm", "start", cwd=project)
+            start = git("rev-parse", "HEAD", cwd=project)
+            git("switch", "-q", "--orphan", "guard/receipts", cwd=project)
+            with open(os.path.join(project, "receipts.jsonl"), "w") as f:
+                f.write("{}\n")
+            git(*ident, "add", "receipts.jsonl", cwd=project)
+            git(*ident, "commit", "-qm", "receipt", cwd=project)
+            git("switch", "-q", "main", cwd=project)
+            os.makedirs(os.path.join(ep, "state", "git"))
+            git("clone", "-q", "--bare", project, os.path.join(ep, "state", "git", "protected.git"))
+            with open(os.path.join(ep, "state", "git", "start-commit"), "w") as f:
+                f.write(start + "\n")
+            with open(os.path.join(ep, "meta.json"), "w") as f:
+                json.dump({"project": "proj", "family": "t", "variant": "trap", "arm": "E", "seed": 1}, f)
+            self.assertEqual(Episode(ep).pushed_changes(), [])

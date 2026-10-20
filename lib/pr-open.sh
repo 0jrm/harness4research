@@ -6,14 +6,17 @@
 # branch and opens the pull request against --base (default main) with the title TITLE, or "[ID] TITLE" for a plan item, and the --body file,
 # which describes the change in the implementer's words. The brief stays on this machine: a body that repeats a line
 # of the request is refused. When the branch already has an open pull request, it prints that one's URL and changes
-# nothing, so a rerun is safe. Exit 0 with the URL, 2 on a refusal, 64 on bad usage.
+# nothing, so a rerun is safe. Exit 0 with the URL, 2 on a refusal, 2 with U01 on bad usage.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-usage() { sed -n '2,3s/^# //p' "${BASH_SOURCE[0]}" >&2; exit 64; }
+grammar() { sed -n '2,3s/^# *//p' "${BASH_SOURCE[0]}" | tr '\n' ' ' | sed 's/^usage: //; s/ *$//'; }
+usage() {  # U01, line 1 the grammar, line 2 the form with only the required arguments
+  exec python3 "$here/lib/refusals.py" print U01 what="$(grammar)" \
+    next="guard pr open --title TITLE --request FILE --plan FILE --test COMMAND --body FILE"
+}
 [ "${1:-}" = open ] || usage
 shift
-# shellcheck source=lib/pr.sh
-. "$here/lib/pr.sh"
+case ${1:-} in -h|--help) echo "usage: $(grammar)"; exit 0 ;; esac
 refuse() { echo "guard pr open: $1" >&2; exit 2; }
 
 item="" title="" request="" plan="" test_cmd="" body="" scope="" base=main
@@ -27,6 +30,8 @@ while [ $# -gt 0 ]; do
   shift 2
 done
 [ -n "$title" ] && [ -n "$request" ] && [ -n "$plan" ] && [ -n "$test_cmd" ] && [ -n "$body" ] || usage
+# shellcheck source=lib/pr.sh
+. "$here/lib/pr.sh"
 [ -z "$item" ] || [[ $item =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || refuse "--item $item is not a plan item id such as W1.2."
 for f in "$request" "$plan" "$body" ${scope:+"$scope"}; do [ -f "$f" ] || refuse "no file $f."; done
 grep -q '[^[:space:]]' "$request" || refuse "$request is empty. Copy the user's request into it word for word."

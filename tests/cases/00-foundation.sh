@@ -172,3 +172,27 @@ say("records", {"verb": "add", "store": "needs-you", "item": {"kind": "run", "ti
 expect_refusal foundation-u01-sacct-help U01 -- py "$ubroker"'
 b.cfg["slurm_bin"] = "/bin"
 say("scheduler", {"verb": "acct", "args": ["--help"]})'
+# A9 for argparse: a flag or argument an agent verb does not take is U01, line 2 the verb's form, inside a sandbox
+# (the sockets exist) and outside it; --help still prints the help and exits 0.
+usock=$tmp/u01-socks; mkdir -p "$usock"; : > "$usock/records.sock"; : > "$usock/gh.sock"
+inbox() { GUARD_SOCK_DIR=$usock "$guard" "$@"; }
+outbox() { GUARD_SOCK_DIR=$tmp/u01-none "$guard" "$@"; }
+expect_refusal foundation-u01-box-needs-you-add U01 -- inbox needs-you add --bogus
+expect_refusal foundation-u01-box-needs-you-find U01 -- inbox needs-you find --kind check
+expect_refusal foundation-u01-box-needs-you-show U01 -- inbox needs-you show
+expect_refusal foundation-u01-box-pr-open U01 -- inbox pr open --bogus
+expect_refusal foundation-u01-pr-not-open U01 -- inbox pr list
+expect_refusal foundation-u01-ledger U01 -- inbox ledger add
+expect_refusal foundation-u01-needs-you U01 -- outbox needs-you --bogus
+expect_refusal foundation-u01-needs-you-add U01 -- outbox needs-you add --kind check
+expect_refusal foundation-u01-needs-you-ack U01 -- outbox needs-you ack
+expect_refusal foundation-u01-pr-open U01 -- outbox pr open --bogus
+expect_refusal foundation-u01-holdout-seal U01 -- outbox holdout seal --bogus
+expect_refusal foundation-u01-holdout-score U01 -- outbox holdout score x
+expect_refusal foundation-u01-holdout U01 -- outbox holdout x
+expect_refusal foundation-u01-status U01 -- outbox status x
+expect foundation-u01-pr-open-line ok '^guard pr open --title TITLE --request FILE --plan FILE --test COMMAND --body FILE$' -- bash -c 'GUARD_SOCK_DIR=$1 "$2" pr open --bogus 2>&1 | tail -1' _ "$usock" "$guard"
+expect foundation-u01-grammar ok '^H4R-U01 usage: the following arguments are required: --kind, --title; guard needs-you add .*--kind \{approve,run,check\} --title TITLE' -- bash -c 'GUARD_SOCK_DIR=$1 "$2" needs-you add --bogus 2>&1 | head -1' _ "$usock" "$guard"
+expect foundation-u01-help-box ok '^usage: guard pr open' -- inbox pr open --help
+expect foundation-u01-help-needs-you ok '^usage: guard needs-you add' -- outbox needs-you add --help
+expect foundation-u01-help-seal ok '^usage: guard holdout seal' -- outbox holdout seal --help

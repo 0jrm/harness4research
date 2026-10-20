@@ -110,7 +110,12 @@ expect host-r13-gpu-hours-line2 fail '12.0 GPU-h over the remaining 10.0 of max_
 expect host-r13-gpu-hours-fits ok '--gpus=2 --time=300 runs/job.sh$' -- bash -c '(cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=360 --gpus=2 runs/job.sh 2>&1 | tail -1)' _ "$hp" "$drive"
 printf 'GPU-aaaa, 1\nGPU-bbbb, 1\nGPU-cccc, 1\n' > "$tmp/host-apps"
 expect_refusal host-r14-gpus R14 -- env MOCK_NVSMI_APPS="$tmp/host-apps" bash -c 'cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=5 --gpus=2 runs/job.sh' _ "$hp" "$drive"
-expect host-r14-gpus-reason ok '^H4R-R14 1 GPUs free, 2 asked$' -- env MOCK_NVSMI_APPS="$tmp/host-apps" bash -c 'cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=5 --gpus=2 runs/job.sh 2>&1 | head -1' _ "$hp" "$drive"
+# Without a user namespace R14 names the missing bwrap first, so the GPU reason shows only where bwrap runs.
+if ! bwrap --unshare-user --ro-bind / / true 2>/dev/null; then
+  skip host-r14-gpus-reason "bwrap cannot make a user namespace on this host"
+else
+  expect host-r14-gpus-reason ok '^H4R-R14 1 GPUs free, 2 asked$' -- env MOCK_NVSMI_APPS="$tmp/host-apps" bash -c 'cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=5 --gpus=2 runs/job.sh 2>&1 | head -1' _ "$hp" "$drive"
+fi
 expect_refusal host-r14-nvidia-smi R14 -- env PATH="$(path_without nvidia-smi)" bash -c 'cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=5 --gpus=1 runs/job.sh' _ "$hp" "$drive"
 expect_refusal host-r14-memory R14 -- env HPC_LAUNCH_TEST_AVAILABLE_KB=1048576 bash -c 'cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=5 --mem=2G runs/job.sh' _ "$hp" "$drive"
 expect_refusal host-r14-bwrap R14 -- env PATH="$(path_without bwrap)" bash -c 'cd "$1" && "$2" launch runs/r1 "Run job.sh." -- --time=5 runs/job.sh' _ "$hp" "$drive"
