@@ -18,12 +18,14 @@ import datetime as dt
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
 import time
 
 import needs_you
+import refusals
 
 RUN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 VERBS = ("add", "list", "show", "find")
@@ -92,7 +94,25 @@ class Records:
             return {"rc": 0, "out": out}
         except (Refused, needs_you.Refused) as e:
             self.log({"verb": verb, "store": store, "refused": str(e)})
-            return {"rc": 2, "err": f"guard broker: refused: {e}\n"}
+            return refusals.reply(self.refusal(str(e), req))
+
+    @staticmethod
+    def refusal(why, req):
+        """A refused request as a coded refusal (A9): a row the fence's ledger check fails is F05; anything else is
+        an argument the store does not take, U01, line 2 the form that runs."""
+        if why.startswith("guard fence --ledger: "):
+            return refusals.refuse("F05", reason=why[len("guard fence --ledger: "):].replace("F05 execution-ledger: ", ""))
+        if req.get("store") == "needs-you" and req.get("verb") == "add":
+            title = str((req.get("item") or {}).get("title") or "what needs a person")
+            line = f"guard needs-you add --kind check --title {shlex.quote(title)}"
+        elif req.get("store") == "ledger" and isinstance(req.get("run"), str) and RUN.match(req["run"]):
+            line = f"guard ledger list {req['run']}"
+        else:
+            line = "guard needs-you" if req.get("store") == "needs-you" else "guard status"
+        try:
+            return refusals.refuse("U01", what=why, next=line)
+        except ValueError:
+            return refusals.refuse("U01", what=why, next="guard status")
 
     def log(self, row):
         with open(self.log_path, "a") as f:

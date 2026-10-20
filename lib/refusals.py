@@ -71,6 +71,7 @@ TABLE = [
     _code("R17", "run", "partition {partition} is not in partitions {allowed}", None),
     _code("R18", "run", "dependency names job {job}, which this session did not submit", None),
     _code("R19", "run", "output {output} is outside the project", None),
+    _code("U01", "a verb's or stand-in's arguments", "usage: {what}", None),
     _code("X00", "socket", "{verb} is not built in this harness", "guard status"),
     _code("G01", "guard review, merge, ship in a sandbox", "runs outside the sandbox; push and stop",
           "git push origin {branch}"),

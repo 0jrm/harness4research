@@ -153,3 +153,22 @@ b = scheduler.Broker(tmp + "/nosubmit-state", {"session": "s1", "origin": tmp + 
                      "paths": [[tmp, tmp]], "slurm_bin": "/nonexistent", "user": "u"})
 r = server.answer(b, "scheduler", {"verb": "submit", "run": "r1", "cwd": tmp, "script": "job.sh", "fields": {"time": "5"}})
 sys.stderr.write(r.get("err", "")); sys.exit(r["rc"])'
+
+# A9: an argument a verb or a stand-in does not take is refused with a code too (U01), line 2 a form that runs.
+ubroker='import os, sys
+from broker import scheduler, server
+tmp = os.environ["TMPDIR_FOUNDATION"]
+b = scheduler.Broker(tmp + "/u01-state", {"session": "s1", "origin": tmp + "/ext-origin.git", "project": tmp,
+                     "paths": [[tmp, tmp]], "slurm_bin": "/nonexistent", "user": "u"})
+def say(sock, req):
+    r = server.answer(b, sock, req); sys.stderr.write(r.get("err", "")); sys.exit(r["rc"])
+'
+expect_refusal foundation-u01-needs-you-kind U01 -- py "$ubroker"'
+say("records", {"verb": "add", "store": "needs-you", "item": {"kind": "card", "title": "run001 card"}})'
+expect foundation-u01-needs-you-line ok "^guard needs-you add --kind check --title 'run001 card'$" -- bash -c 'py() { python3 -c "import sys; sys.path.insert(0, sys.argv[1] + \"/lib\"); import _path; exec(sys.argv[2])" "$here" "$1"; }; here=$1; py "$2" 2>&1 | tail -1' _ "$here" "$ubroker"'
+say("records", {"verb": "add", "store": "needs-you", "item": {"kind": "card", "title": "run001 card"}})'
+expect_refusal foundation-u01-needs-you-run U01 -- py "$ubroker"'
+say("records", {"verb": "add", "store": "needs-you", "item": {"kind": "run", "title": "run001"}})'
+expect_refusal foundation-u01-sacct-help U01 -- py "$ubroker"'
+b.cfg["slurm_bin"] = "/bin"
+say("scheduler", {"verb": "acct", "args": ["--help"]})'

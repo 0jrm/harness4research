@@ -25,6 +25,11 @@ class Refused(Exception):
     pass
 
 
+def usage(why):
+    """U01 (lib/refusals.py), written here so a stand-in copied without the harness says it too."""
+    return f"H4R-U01 usage: {str(why).replace(chr(10), ' ')}\nguard status\n"
+
+
 def branch():
     done = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True)
     return done.stdout.strip()
@@ -71,8 +76,8 @@ def gh(args):
     try:
         request, jq = gh_request(args)
     except Refused as e:
-        sys.stderr.write(f"gh: refused: {e}\n")
-        return 1
+        sys.stderr.write(usage(e))
+        return 2
     reply = ask(request, GH)
     out = reply.get("out", "")
     if jq is not None and reply.get("rc") == 0:
@@ -121,8 +126,8 @@ def main(cmd, args):
         else:
             raise Refused("not offered here")
     except Refused as e:
-        sys.stderr.write(f"{cmd}: refused: {e}\n")
-        return 1
+        sys.stderr.write(usage(f"{cmd} is {e}"))
+        return 2
     reply = ask(request)
     sys.stdout.write(reply.get("out", ""))
     sys.stderr.write(reply.get("err", ""))

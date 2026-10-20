@@ -25,6 +25,7 @@ Every refusal is two lines: `H4R-<code> <reason>`, then a command to run as it i
 | R17 | run | `partition <partition> is not in partitions <allowed>` | the agent's command, corrected | 2 |
 | R18 | run | `dependency names job <job>, which this session did not submit` | the agent's command, corrected | 2 |
 | R19 | run | `output <output> is outside the project` | the agent's command, corrected | 2 |
+| U01 | a verb's or stand-in's arguments | `usage: <what>` | the agent's command, corrected | 2 |
 | X00 | socket | `<verb> is not built in this harness` | `guard status` | 2 |
 | G01 | guard review, merge, ship in a sandbox | `runs outside the sandbox; push and stop` | `git push origin <branch>` | 2 |
 | C01 | compute gate | `<entry> runs only inside a job; guard/budget.card lists it under compute` | `guard run runs/<run> --why 'Run <script> for run <run>.' -- --time=<minutes> <script>` | 2 |

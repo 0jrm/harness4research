@@ -226,7 +226,11 @@ class Broker:
             return refusals.reply(refusals.refuse("X00", verb=verb))
         if not self.cfg.get("slurm_bin"):
             return {"rc": 1, "err": "guard broker: refused: this host has no scheduler\n"}
-        return self.locked(handler, req)
+        with self.lock:
+            try:
+                return handler(req)
+            except Refused as e:  # an option or job id the stand-in does not take (A9)
+                return refusals.reply(refusals.refuse("U01", what=str(e), next="guard status"))
 
     def locked(self, handler, req):
         with self.lock:

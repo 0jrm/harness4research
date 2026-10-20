@@ -24,6 +24,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 import _path  # noqa: E402,F401
+import refusals  # noqa: E402
 from broker import transport  # noqa: E402
 
 
@@ -174,8 +175,9 @@ def ledger(args):
     try:
         request = ledger_request(args)
     except Refused as e:
-        sys.stderr.write(f"{e}\n")
-        return 64
+        r = refusals.refuse("U01", what=str(e).removeprefix("usage: "), next="guard status")
+        sys.stderr.write(refusals.render(r))
+        return r.exit
     if os.path.exists(transport.sock_path("records")):
         reply = send(request, "records")
         rc, out, err = reply.get("rc", 1), reply.get("out", ""), reply.get("err", "")
@@ -198,8 +200,10 @@ def main(argv):
     try:
         request = needs_you_request(argv[1:]) if argv[0] == "needs-you" else pr_open_request(argv[2:])
     except Refused as e:
-        sys.stderr.write(f"guard {' '.join(argv[:2]) if argv[0] == 'pr' else argv[0]}: refused: {e}\n")
-        return 2
+        r = refusals.refuse("U01", what=f"guard {' '.join(argv[:2]) if argv[0] == 'pr' else argv[0]}: {e}",
+                            next="guard status")
+        sys.stderr.write(refusals.render(r))
+        return r.exit
     reply = send(request, sock)
     if request.get("remind") and "--format" in argv and "claude-hook" in argv:
         if reply.get("out"):
