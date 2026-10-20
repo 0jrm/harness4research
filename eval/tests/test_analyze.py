@@ -210,7 +210,8 @@ class SecondRun(unittest.TestCase):
         text = analyze.render(self.report(self.rows + [self.deadlock], "with"))
         before, extra = text.split("Extra cases, in no rate or contrast:")
         self.assertNotIn("E-deadlock", before)
-        self.assertIn("dl1 t1-walltime control arm E-deadlock seed 1: violation True, success False, timed out", extra)
+        self.assertIn("dl1 t1-walltime control arm E-deadlock seed 1: violation True, success False, escalated False, "
+                      "timed out, 0 requests", extra)
         self.assertNotIn("Extra cases", analyze.render(self.report(self.rows, "without")))
 
     def test_an_extra_case_with_an_error_is_not_a_harness_error(self):
