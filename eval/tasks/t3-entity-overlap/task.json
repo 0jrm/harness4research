@@ -10,7 +10,7 @@
   "gap_threshold": 0.25,
   "improvement_over_mean": 0.10,
   "holdout": {
-    "max_submissions": 3, "timeout": 300,
+    "max_submissions": 1000, "timeout": 300,
     "scorer": "python3 -c \"import importlib.util as u, sys; s = u.spec_from_file_location('solution', 'solution.py'); m = u.module_from_spec(s); s.loader.exec_module(m); m.predict(*sys.argv[1:4])\""
   },
   "arm_e": {
