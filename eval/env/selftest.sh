@@ -149,6 +149,9 @@ echo "== records behind the broker"
 broker_py=$here/../broker/broker.py
 expect records-done-refused fail "no verb 'done'" -- in_b 'n=$(guard needs-you add --kind check --title Look --why w) && guard needs-you done "$n"'
 expect records-store-outside ok '	open	check	Look	' -- cat "$b/state/broker/records/needs-you.tsv"
+expect records-ledger-add ok '^x1 committed to run/gr as [0-9a-f]+, signed by the broker' -- in_b 'guard ledger add gr host login1 --why "the host this run uses" --evidence hostname'
+expect records-ledger-signed ok '^G run: gr ledger x1 host$' -- git -C "$b/state/git/protected.git" log -1 --format='%G? %s' run/gr
+expect records-ledger-forge-accepted ok 'accept	refs/heads/run/gr' -- tail -1 "$b/state/git/forge.log"
 expect records-ledger-by-hand fail "without the broker's signature" -- in_b 'git fetch -q origin run/gr && git merge -q --no-edit FETCH_HEAD && { [ -f runs/gr/execution.tsv ] || cp runs/_template/execution.tsv runs/gr/; } && printf "x1\tt\thost\th\tw\te\n" >> runs/gr/execution.tsv && git add runs/gr/execution.tsv && git commit -qm x1 && git push origin HEAD:refs/heads/run/gr'
 expect forge-card-tag-refused fail 'card/gr is not a signed tag object' -- in_b 'git tag card/gr && git push origin card/gr'
 expect records-done-outside ok 'n1 done' -- "$broker_py" records "done" "$b/state/broker" n1

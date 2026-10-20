@@ -153,6 +153,12 @@ expect run-card-keys ok '^why command backend minutes nodes cores gpus tasks cor
 # evaluation's fake Slurm, names the job's owner, so sacct and guard wait find the job).
 expect run-local-env ok '^user=tester$' -- tail -1 "$rs/user.log"
 expect run-sbatch-argv ok '--account=gom --job-name=sim --comment=guard:local:1 --time=5 --nodes=1' -- tail -1 "$rs/sbatch.log"
+# guard ledger add without a broker writes the row into the working tree's execution.tsv, checked by the fence.
+expect run-ledger-local ok '^x1 written to runs/sim/execution.tsv; commit it with the run$' -- \
+  gsh 'guard ledger add sim host login1 --why "the host this run uses" --evidence hostname'
+expect run-ledger-local-row ok '^x1	[0-9TZ:-]+	host	login1	the host this run uses	hostname$' -- tail -1 "$rp/runs/sim/execution.tsv"
+expect_refusal run-ledger-local-f05 F05 -- gsh 'guard ledger add sim colour blue --why w --evidence e'
+expect run-ledger-local-unchanged ok '^2$' -- bash -c "wc -l < '$rp/runs/sim/execution.tsv' | tr -d ' '"
 expect_refusal run-r11-e2e R11 -- gr runs/sim --why "Run the configured steps." -- job.sh
 ended
 expect run-launcher-stripped ok '^job 1002 submitted' -- gr runs/sim --why w -- sbatch --time=4 job.sh

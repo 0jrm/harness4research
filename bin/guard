@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# usage: guard <run|wait|ask|status|holdout|survey|init|archive|doctor|config|review|merge|ship|enter|broker|manifest|fence|code|atlas|needs-you|hooks|version> [args...]
+# usage: guard <run|wait|ask|status|holdout|ledger|survey|init|archive|doctor|config|review|merge|ship|enter|broker|manifest|fence|code|atlas|needs-you|hooks|version> [args...]
 set -euo pipefail
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 cmd=${1:-help}; shift || true
@@ -13,7 +13,7 @@ case $cmd in
   review|merge|ship) [ -z "${GUARD_SESSION:-}" ] || { b=$(git branch --show-current 2>/dev/null || :); refusal print G01 branch="${b:-HEAD}"; } ;;&
   survey|init|archive|doctor|config|review|merge) exec bash "$here/lib/$cmd.sh" "$@" ;;
   ship) exec bash "$here/lib/batch.sh" ship "$@" ;;
-  needs-you|pr) exec python3 "$here/lib/verbs/records.py" "$cmd" "$@" ;;
+  needs-you|pr|ledger) exec python3 "$here/lib/verbs/records.py" "$cmd" "$@" ;;
   enter) exec python3 "$here/lib/enter.py" "$@" ;;
   broker) exec python3 "$here/lib/broker_host.py" "$@" ;;
   atlas) exec python3 "$here/lib/atlas.py" "$@" ;;

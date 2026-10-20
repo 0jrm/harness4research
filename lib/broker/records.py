@@ -361,7 +361,7 @@ class Records:
         path, card = f"runs/{run}/execution.tsv", f"runs/{run}/question.card"
         card_text = self.blob(base, card) or self.mirror.show(card)
         if card_text is None:
-            raise Refused(f"no {card} on run/{run} or main; guard card add {run} first")
+            raise Refused(f"no {card} on run/{run} or main; guard run runs/{run} writes it with the first job")
         current = self.blob(base, path) or self.mirror.show("runs/_template/execution.tsv") \
             or "id\tts\tfield\tvalue\twhy\tevidence\n"
         current += "" if current.endswith("\n") else "\n"

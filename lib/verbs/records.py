@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""guard needs-you and guard pr open, inside a sandbox through the broker's sockets, else the human commands.
+"""guard needs-you, guard ledger and guard pr open, inside a sandbox through the broker's sockets, else the human
+commands.
 
     records.py needs-you [--remind] | add --kind K --title T [...] | find --kind K --title T | show <id>
+    records.py ledger add <run_id> <field> <value> [--why W] [--evidence E] | list <run_id>
     records.py pr open --title T --request FILE --plan FILE --test CMD --body FILE [--item ID] [--scope FILE] [--base B]
 
 With /run/guard/records.sock (GUARD_SOCK_DIR moves it), needs-you is one request on it, which offers add, list, show
 and find; ack, done and dismiss are a person's and the broker refuses them. With /run/guard/gh.sock, pr open pushes
 the branch and sends the brief's parts to it, and the broker writes the brief in its own state and opens the pull
-request (decision A3). Without the socket, each runs lib/needs_you.py or lib/pr-open.sh, as on a person's machine."""
+request (decision A3). Without the socket, each runs lib/needs_you.py or lib/pr-open.sh, as on a person's machine.
+
+guard ledger appends one row to runs/<run_id>/execution.tsv, the execution envelope (design-v8 section 3): behind the
+broker the records socket commits it to run/<run_id>, signed, after the fence's ledger check; without one this
+appends it to the working tree's file, checks it with this harness's fence --ledger, and leaves the commit to the
+agent, as any file of the run."""
 import argparse
 import json
 import os
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 import _path  # noqa: E402,F401
@@ -84,6 +92,69 @@ def pr_open_request(args):
     return request
 
 
+LEDGER_USAGE = "usage: guard ledger add <run_id> <field> <value> [--why W] [--evidence E] | list <run_id>"
+
+
+def ledger_request(args):
+    """One records request from guard ledger arguments; Refused with the usage when they are not one."""
+    p = argparse.ArgumentParser(prog="guard ledger", add_help=False)
+    p.add_argument("verb", choices=("add", "list"))
+    p.add_argument("run")
+    p.add_argument("field", nargs="?")
+    p.add_argument("value", nargs="?")
+    p.add_argument("--why", default="")
+    p.add_argument("--evidence", default="")
+    try:
+        a = p.parse_args(args)
+    except SystemExit:
+        raise Refused(LEDGER_USAGE)
+    run = os.path.basename(os.path.normpath(a.run))
+    if a.verb == "list":
+        return {"verb": "list", "store": "ledger", "run": run}
+    if a.field is None or a.value is None:
+        raise Refused(LEDGER_USAGE)
+    return {"verb": "add", "store": "ledger", "run": run, "field": a.field, "value": a.value, "why": a.why,
+            "evidence": a.evidence}
+
+
+def ledger_local(request):
+    """guard ledger without a broker: the row appended to the working tree's runs/<run_id>/execution.tsv, kept only
+    when this harness's fence --ledger passes it. (exit status, text for stdout, text for stderr)"""
+    lib = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip()
+    if not top:
+        return 2, "", f"guard ledger: refused: {os.getcwd()} is not inside a git project\n"
+    rel = f"runs/{request['run']}/execution.tsv"
+    path = os.path.join(top, rel)
+    old = open(path).read() if os.path.isfile(path) else None
+    if request["verb"] == "list":
+        return (0, old, "") if old is not None else (2, "", f"guard ledger: refused: no {rel}\n")
+    template = os.path.join(top, "runs", "_template", "execution.tsv")
+    text = old if old is not None else (open(template).read() if os.path.isfile(template)
+                                        else "id\tts\tfield\tvalue\twhy\tevidence\n")
+    text += "" if text.endswith("\n") else "\n"
+    cells = [request[k] for k in ("field", "value", "why", "evidence")]
+    if any(c in v for v in cells for c in "\t\n\r"):
+        return 2, "", "guard ledger: refused: a ledger cell holds no tab or newline\n"
+    n = sum(1 for line in text.splitlines()[1:] if line.strip() and not line.startswith("#")) + 1
+    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(text + "\t".join([f"x{n}", ts, *cells]) + "\n")
+    checked = subprocess.run(["bash", os.path.join(lib, "guard", "fence.sh"), "--ledger", rel], cwd=top,
+                             capture_output=True, text=True)
+    if checked.returncode:
+        if old is None:
+            os.unlink(path)
+        else:
+            with open(path, "w") as f:
+                f.write(old)
+        refusal = [l for l in checked.stdout.splitlines() if l.startswith("H4R-")]
+        tail = checked.stdout.splitlines()[-2:] if refusal else [checked.stderr.strip() or "fence --ledger failed"]
+        return 2, "", "\n".join(tail) + "\n"
+    return 0, f"x{n} written to {rel}; commit it with the run\n", ""
+
+
 def send(request, sock):
     try:
         reply = transport.over_socket(transport.sock_path(sock), request)
@@ -99,7 +170,25 @@ def human(argv):
     os.execvp("bash", ["bash", os.path.join(lib, "pr-open.sh"), *argv[1:]])
 
 
+def ledger(args):
+    try:
+        request = ledger_request(args)
+    except Refused as e:
+        sys.stderr.write(f"{e}\n")
+        return 64
+    if os.path.exists(transport.sock_path("records")):
+        reply = send(request, "records")
+        rc, out, err = reply.get("rc", 1), reply.get("out", ""), reply.get("err", "")
+    else:
+        rc, out, err = ledger_local(request)
+    sys.stdout.write(out)
+    sys.stderr.write(err)
+    return rc
+
+
 def main(argv):
+    if argv[:1] == ["ledger"]:
+        return ledger(argv[1:])
     if not argv or argv[0] not in ("needs-you", "pr") or (argv[0] == "pr" and argv[1:2] != ["open"]):
         sys.stderr.write(__doc__.split("\n\n")[1] + "\n")
         return 64
