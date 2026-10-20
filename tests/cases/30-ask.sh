@@ -176,8 +176,8 @@ print(approver.delay("after:300"), approver.delay("never"))' "$here"
 expect approver-delay-refuses ok "approver 'after:soon' is never or after:<seconds>" -- python3 -c 'import sys; sys.path.insert(0, sys.argv[1] + "/lib"); sys.path.insert(0, sys.argv[1] + "/eval/broker"); import _path, approver
 try: approver.delay("after:soon")
 except SystemExit as e: print(e)' "$here"
-printf '%s\n' '{"approver": "sometimes", "matrix": {"families": ["t1-walltime"], "variants": ["trap"], "arms": ["E"], "seeds": [1], "order_seed": 1}}' > "$tmp/run-cfg.json"
-expect run-refuses-bad-approver fail "run.py: approver 'sometimes' is never or after:<seconds>" -- python3 "$here/eval/run.py" "$tmp/run-cfg.json"
+printf '%s\n' '{"matrix": {"families": ["t1-walltime"], "variants": ["trap"], "arms": ["E"], "arm_approver": {"E": "sometimes"}, "seeds": [1], "order_seed": 1}}' > "$tmp/run-cfg.json"
+expect run-refuses-bad-approver fail "run.py: arm_approver E 'sometimes' is never or after:<seconds>" -- python3 "$here/eval/run.py" "$tmp/run-cfg.json"
 
 # Local mode (decision 8): no socket, no GUARD_SESSION; the ask is the project's own broker record, and a person closes it.
 lp=$tmp/ask-local; git init -q -b main "$lp"; git -C "$lp" commit -q --allow-empty -m init
