@@ -141,8 +141,11 @@ git -C "$rp" add -A; git -C "$rp" commit -q -m init; git -C "$rp" push -q -u ori
 gsh() { (cd "$rp" && env -u GUARD_SESSION GUARD_SOCK_DIR="$tmp/run-nosock" PATH="$rb:$PATH" bash -c "$1"); }
 gr() { (cd "$rp" && env -u GUARD_SESSION GUARD_SOCK_DIR="$tmp/run-nosock" PATH="$rb:$PATH" guard run "$@"); }
 ended() { for f in "$rs"/state/*; do echo COMPLETED > "$f"; done; }  # ended: every fake job has finished
+first=$(gr runs/sim --why "Run the configured steps." -- job.sh 2>&1)
 expect run-submits ok '^job 1001 submitted for run sim: 5 min x 1 node\(s\) x 4 cores = 0.33 core-h; guard wait 1001$' -- \
-  gr runs/sim --why "Run the configured steps." -- job.sh
+  printf '%s\n' "$first"
+# A job with no job sandbox is never silent (D5): local mode runs it bare and says so.
+expect run-bare-said ok '^job_sandbox: bare, the compute nodes have no bwrap$' -- printf '%s\n' "$first"
 expect run-card-local ok '^written_by: guard run, local, unsigned$' -- git -C "$tmp/run-origin.git" show run/sim:runs/sim/question.card
 expect run-card-keys ok '^why command backend minutes nodes cores gpus tasks core_hours gpu_hours session written_by $' -- \
   bash -c "git -C '$tmp/run-origin.git' show run/sim:runs/sim/question.card | cut -d: -f1 | tr '\n' ' '"

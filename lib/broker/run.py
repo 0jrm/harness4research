@@ -444,7 +444,8 @@ def submit(broker, inv, spec, c, lim, b, r, cwd, script_in, failed):
     broker.write({"seq": seq, "state": "submitted", "job": job, "job_id": job})
     tasks = f" x {spec.array_n} tasks" if spec.array_n > 1 else ""
     return {"rc": 0, "out": f"job {job} submitted for run {inv.run_id}: {c.minutes} min x {c.nodes} node(s) x "
-                            f"{lim.cores_per_node} cores{tasks} = {hours(c.core_hours)} core-h; guard wait {job}\n"}
+                            f"{lim.cores_per_node} cores{tasks} = {hours(c.core_hours)} core-h; guard wait {job}\n",
+            "err": f"job_sandbox: bare, {bare}\n" if bare else ""}  # a job with no job sandbox is never silent (D5)
 
 
 def launch_host(broker, inv, spec, c, row, r):
