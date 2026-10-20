@@ -10,8 +10,9 @@
 #     carry a signature from one of those keys (decision D13), and a card/<run_id> tag must be a tag object of that
 #     name, signed by one of them, on a commit holding runs/<run_id>/question.card; it is never moved or deleted
 #     through the forge (decision D2's tag ruleset).
-#   - With git config guard.holdout set (lib/broker/holdout.py seal), an update to main that changes solution.py runs
-#     that command with the new commit; it scores the solution on the sealed holdout and refuses on its verdict.
+#   - With git config guard.holdout set (lib/broker/holdout.py seal), an update to main runs that command with the new
+#     and the old commit; when the tree the scorer loads changed, it scores it on the sealed holdout and refuses on its
+#     verdict.
 #   - refs/heads/guard/receipts, the broker's signed receipts (design-v8 decision 17), in place of the GitHub ruleset
 #     that requires signed commits there: it is never deleted, only fast-forwarded, and every commit an update adds
 #     verifies against broker_key: on main's guard/budget.card, or, on a main without one, against the forge's
@@ -103,8 +104,8 @@ while read -r old new ref; do
         log refuse-fence "$ref" "$old" "$new"; status=1; continue
       fi
     fi
-    if [ -n "$holdout" ] && [ "$old" != "$zero" ] && ! git diff --quiet "$old" "$new" -- solution.py; then
-      if ! out=$(bash -c "$holdout"' "$@"' holdout "$new" 2>&1); then
+    if [ -n "$holdout" ] && [ "$old" != "$zero" ]; then
+      if ! out=$(bash -c "$holdout"' "$@"' holdout "$new" "$old" 2>&1); then
         echo "$out"; log refuse-holdout "$ref" "$old" "$new"; status=1; continue
       fi
     fi

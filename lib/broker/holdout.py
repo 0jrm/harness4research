@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """The broker's sealed holdout (design-v8 sections 3 and 6; E7, finding 8, owner decision 3).
 
-    holdout.py push <state_dir> <commit>    the forge's pre-receive, through git config guard.holdout, on a push to
-                                            main that changes solution.py; exit 0 lets it through
+    holdout.py push <state_dir> <commit> [<old>]
+                                            the forge's pre-receive, through git config guard.holdout, on a push to
+                                            main; exit 0 lets it through, at once when old's scored tree is the same
     handle(request, broker)                 the records socket's holdout verb: guard holdout score
     seal(state_dir, data_dir, ...)          guard holdout seal, outside the sandbox (lib/verbs/holdout.py)
 
@@ -10,7 +11,10 @@ seal copies train.csv, public_test.csv, sealed_test.csv and sealed_features.csv 
 <state_dir>/holdout/, writes seal.json (the threshold, the submission limit, the scorer command, its time limit and
 the inputs' sha256), and, when origin is a repository on this host, sets guard.holdout there for the pre-receive.
 
-A submission lays out the commit's tree from git, never from the agent's checkout, and runs the scorer command as
+A submission lays out the commit's tree from git, never from the agent's checkout, minus the records and the prose
+(runs/, guard/ and every *.md), and its solution_sha256 is the sha256 of every path, mode and byte left: the scored
+tree, so a helper that solution.py imports, or a file it reads, is part of the key, and a push that changes only
+results.md is not a new submission. It runs the scorer command as
 `<scorer> <train> <test> <out>` (E7's predict contract) once on the public test rows and once on the sealed features,
 each in a box of its own (lib/box.sh) holding the tree and copies of the inputs, and nothing of the sealed targets.
 Its verdict:
@@ -22,7 +26,8 @@ Its verdict:
 
 Only the verdict and the ledger id leave the broker; the numbers stay in holdout/log.jsonl, which only the evaluator and
 the owner read, so no score is an oracle (E7 seed 7 tuned against printed scores). A solution_sha256 already scored
-answers with that verdict and a new receipt and counts nothing. A score counts; a push never counts and is never
+answers with that verdict and a new receipt and counts nothing, unless that run timed out: a slow host is not the
+solution's fault, so a timeout is never a cached verdict, while a missing solution.py or no public predictions is. A score counts; a push never counts and is never
 refused for the limit, so the deliverable push cannot deadlock, but a push that fails or is unscorable is refused.
 Each row's receipt (receipts.receipt_add) carries the verdict, the commit and the sha, never a number.
 
@@ -52,6 +57,34 @@ LIB = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 INPUTS = ("train.csv", "public_test.csv", "sealed_test.csv", "sealed_features.csv")
 SOLUTION = "solution.py"
 SCORED = ("pass", "fail", "unscorable")
+RECORD_DIRS = ("runs", "guard")
+
+
+def scored_tree(project):
+    """Removes the records and the prose from a laid-out tree, and returns the sha256 of every path, kind and byte
+    left: the content the scorer can load."""
+    h = hashlib.sha256()
+    for root, dirs, files in os.walk(project):
+        if root == project:
+            for d in RECORD_DIRS:
+                if d in dirs:
+                    dirs.remove(d)
+                    (os.remove if os.path.islink(os.path.join(root, d)) else shutil.rmtree)(os.path.join(root, d))
+        dirs.sort()
+        for name in sorted(files + [d for d in dirs if os.path.islink(os.path.join(root, d))]):
+            path = os.path.join(root, name)
+            if name.endswith(".md"):
+                os.remove(path)
+                continue
+            if os.path.islink(path):
+                kind, body = "l", os.fsencode(os.readlink(path))
+            else:
+                kind = "x" if os.access(path, os.X_OK) else "f"
+                with open(path, "rb") as f:
+                    body = f.read()
+            h.update(f"{os.path.relpath(path, project)}\0{kind}\0{len(body)}\0".encode())
+            h.update(body)
+    return h.hexdigest()
 
 
 def sha256(path):
@@ -130,14 +163,15 @@ class Holdout:
         return self.seal["max_submissions"] * (1 + grants)
 
     def cached(self, sha):
-        return next((r for r in reversed(self.rows()) if sha and r["solution_sha256"] == sha and r["verdict"] in SCORED),
-                    None)
+        """The last verdict on this scored tree, but never a timeout's."""
+        return next((r for r in reversed(self.rows()) if sha and r["solution_sha256"] == sha and r["verdict"] in SCORED
+                     and not r.get("timed_out")), None)
 
     # scoring -------------------------------------------------------------------------------------------------------
     @contextlib.contextmanager
     def tree(self, git, commit):
-        """(work dir, solution_sha256) for commit's tree, laid out with git (an argv prefix naming the git dir) under a
-        scratch directory; the sha is None when there is no commit, no tree or no solution.py."""
+        """(work dir, solution_sha256) for commit's scored tree, laid out with git (an argv prefix naming the git dir)
+        under a scratch directory; the sha is None when there is no commit, no tree or no solution.py."""
         work = tempfile.mkdtemp(prefix="holdout-", dir=self.state)
         try:
             project = os.path.join(work, "project")
@@ -147,7 +181,7 @@ class Holdout:
                 subprocess.run(git + ["--work-tree", project, *args], env=env, capture_output=True).returncode == 0
                 for args in (["read-tree", commit], ["checkout-index", "-a", "-f"]))
             path = os.path.join(project, SOLUTION)
-            yield work, sha256(path) if laid and os.path.isfile(path) else None
+            yield work, scored_tree(project) if laid and os.path.isfile(path) else None
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
@@ -172,6 +206,8 @@ class Holdout:
         pub, sea = row["public_err"], row["sealed_err"]
         row["gap"] = sea - pub if pub is not None and sea is not None else None
         row["verdict"] = judge(pub, sea, timed_out, self.seal["gap_threshold"])
+        if timed_out:
+            row["timed_out"] = True
         return row
 
     def run(self, work, test, out):
@@ -277,13 +313,18 @@ def redecide(broker, effect):
     return h.locked(grant)
 
 
-def push(state_dir, commit):
-    """The pre-receive's check: exit 0 lets the push through; a refusal prints its two lines and its status."""
+def push(state_dir, commit, old=None):
+    """The pre-receive's check: exit 0 lets the push through; a refusal prints its two lines and its status. A push
+    whose scored tree is old's (results.md, runs/ or guard/ alone) is let through and not recorded."""
     with open(os.path.join(state_dir, "config.json")) as f:
         cfg = json.load(f)
     broker = types.SimpleNamespace(dir=os.path.abspath(state_dir), cfg=cfg,
                                    mirror=scheduler.Mirror(os.path.join(state_dir, "mirror.git"), cfg["origin"]))
     h = Holdout(broker)
+    if old:
+        with h.tree(["git"], old) as (_, before), h.tree(["git"], commit) as (_, after):
+            if before == after:
+                return 0
     _, said = h.locked(h.answer, "push", ["git"], commit)
     if isinstance(said, str):
         return 0
@@ -292,6 +333,6 @@ def push(state_dir, commit):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 4 and sys.argv[1] == "push":
-        sys.exit(push(sys.argv[2], sys.argv[3]))
+    if len(sys.argv) in (4, 5) and sys.argv[1] == "push":
+        sys.exit(push(*sys.argv[2:]))
     sys.exit(__doc__)
