@@ -10,7 +10,6 @@
         the broker's state for the project around the current directory (or --state DIR). CMD runs as
         `CMD <train> <test> <out>` in the solution's tree and writes a CSV with a prediction column; --python binds
         VENV read-only into the scorer's box and puts its bin first on PATH."""
-import argparse
 import hashlib
 import json
 import os
@@ -19,6 +18,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 import _path  # noqa: E402,F401
+import refusals  # noqa: E402
 from broker import holdout, transport  # noqa: E402
 
 
@@ -39,11 +39,11 @@ def project_state():
 
 
 def seal(argv):
-    p = argparse.ArgumentParser(prog="guard holdout seal")
-    p.add_argument("dir")
-    p.add_argument("--threshold", type=float, required=True)
-    p.add_argument("--max", type=int, required=True, dest="max_submissions")
-    p.add_argument("--scorer", required=True)
+    p = refusals.ArgumentParser(prog="guard holdout seal")
+    p.add_argument("dir", metavar="DIR")
+    p.add_argument("--threshold", type=float, required=True, metavar="T")
+    p.add_argument("--max", type=int, required=True, dest="max_submissions", metavar="N")
+    p.add_argument("--scorer", required=True, metavar="CMD")
     p.add_argument("--timeout", type=int, default=300)
     p.add_argument("--python")
     p.add_argument("--state")
@@ -64,8 +64,7 @@ def seal(argv):
 
 def score(argv):
     if argv:
-        sys.stderr.write("usage: guard holdout score\n")
-        return 64
+        return refused("guard holdout score takes no arguments")
     branch = git("rev-parse", "--abbrev-ref", "HEAD") or "HEAD"
     reply = transport.send({"verb": "holdout", "action": "score", "branch": branch, "cwd": os.getcwd()}, "records")
     sys.stdout.write(reply.get("out", ""))
@@ -78,8 +77,13 @@ def main(argv):
         return score(argv[1:])
     if argv[:1] == ["seal"]:
         return seal(argv[1:])
-    sys.stderr.write("usage: guard holdout score | guard holdout seal <dir> --threshold T --max N --scorer CMD\n")
-    return 64
+    return refused("guard holdout score | guard holdout seal DIR --threshold T --max N --scorer CMD")
+
+
+def refused(what):
+    r = refusals.usage(what, "guard holdout score")
+    sys.stderr.write(refusals.render(r))
+    return r.exit
 
 
 if __name__ == "__main__":

@@ -19,11 +19,15 @@ of the open or acked item with that kind and title, and exits 1 when there is no
 The items a<n> are the broker's guard asks, kept where the agent's sandbox cannot write (ask_queues). They list, show
 and close here with the project's own: done a<n> [--note ANSWER] answers it (no note means yes), dismiss a<n> means no.
 """
-import argparse, datetime as dt, fcntl, hashlib, json, os, subprocess, sys
+import datetime as dt, fcntl, hashlib, json, os, subprocess, sys
 from collections import namedtuple
+
+import refusals
 
 COLUMNS = ("id", "ts", "state", "kind", "title", "action", "paths", "commands", "source")
 KINDS = ("approve", "run", "check")
+ADD, FIND, LIST = ("guard needs-you add --kind check --title TITLE", "guard needs-you find --kind check --title TITLE",
+                   "guard needs-you")
 ACTION_KEYS = ("why", "expect", "worry", "undo", "note")
 SEP = ";;"
 Move = namedtuple("Move", "sets from_states")
@@ -233,18 +237,12 @@ def move(queue, verb, ident, note):
         return it._replace(ts=now(), state=state, note=note or it.note)
     transact(queue, change)
 
-class Parser(argparse.ArgumentParser):
-    def error(self, message):
-        self.print_usage(sys.stderr)
-        print(f"{self.prog}: {message}", file=sys.stderr)
-        sys.exit(64)
-
 def main():
-    ap = Parser(prog="guard needs-you", description=__doc__.split("\n\n")[1])
+    ap = refusals.ArgumentParser(prog="guard needs-you", description=__doc__.split("\n\n")[1])
     ap.add_argument("--remind", action="store_true", help="print the open items for a person or an agent hook, or nothing")
     ap.add_argument("--format", choices=("text", "claude-hook"), default="text")
-    sub = ap.add_subparsers(dest="cmd", parser_class=Parser)
-    p = sub.add_parser("add", help="queue an item and print its id")
+    sub = ap.add_subparsers(dest="cmd", parser_class=refusals.ArgumentParser)
+    p = sub.add_parser("add", help="queue an item and print its id", next=ADD)
     p.add_argument("--kind", required=True, choices=KINDS)
     p.add_argument("--title", required=True)
     p.add_argument("--why", default="")
@@ -255,12 +253,12 @@ def main():
     p.add_argument("--undo", default="")
     p.add_argument("--source", default="")
     p.add_argument("--update", action="store_true", help="give an open or acked item of the same kind and title this content")
-    p = sub.add_parser("find", help="print the id of the open or acked item with this kind and title")
+    p = sub.add_parser("find", help="print the id of the open or acked item with this kind and title", next=FIND)
     p.add_argument("--kind", required=True, choices=KINDS)
     p.add_argument("--title", required=True)
-    sub.add_parser("show", help="print one item's block").add_argument("id")
+    sub.add_parser("show", help="print one item's block", next=LIST).add_argument("id")
     for verb in MOVES:
-        p = sub.add_parser(verb, help=f"mark an item {MOVES[verb].sets}")
+        p = sub.add_parser(verb, help=f"mark an item {MOVES[verb].sets}", next=LIST)
         p.add_argument("id")
         p.add_argument("--note", default="")
     a = ap.parse_args()
