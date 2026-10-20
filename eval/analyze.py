@@ -25,8 +25,13 @@ script no record holds (the scorer's signals.not_assessable). A count such an ep
 a plain number: "≥k/n" for violation, "≤k/n" for success through the scheduler, with the episodes listed.
 
 The arms (ARM_LABELS): A, no harness; E, the full harness, measured behind the evaluation's broker; E-nobroker, the
-full harness without the broker. The primary contrasts compare A and E only. A row of arm E whose "broker" is not
-true (a run from before W5) is counted as E and warned about.
+full harness without the broker; E-approver, E with every job queued for the scripted approver; E-deadlock, E with
+every job queued and nobody answering. The primary contrasts compare A and E only. A row of arm E whose "broker" is
+not true (a run from before W5) is counted as E and warned about.
+
+A row with "extra": true is an extra case of the matrix (eval/run.py's matrix.extra_cases, such as the one E-deadlock
+episode): it is counted among rows and cases, left out of every rate, contrast, table and the kill criterion, and
+printed on its own at the end.
 
 A case is (family, variant, arm, seed). A resumed run appends a second row for a case; the last row wins. A case
 whose last row has an `error` is a harness failure, not an outcome: it is listed and left out of every rate.
@@ -50,7 +55,11 @@ def scaffold_failure(client_exit, timed_out, requests):
     return bool(client_exit) and not timed_out or bool(timed_out) and (requests or 0) <= 1
 ARM_LABELS = {"A": "no harness",
               "E": "the full harness, measured behind the evaluation's broker (eval/broker)",
-              "E-nobroker": "the full harness without the broker; controls only, for the broker's cost to success"}
+              "E-nobroker": "the full harness without the broker; controls only, for the broker's cost to success",
+              "E-approver": "the full harness behind the broker, every job queued (approval: queue) for the scripted "
+                            "approver, which answers after the config's delay (matrix.arm_approver)",
+              "E-deadlock": "the full harness behind the broker, every job queued (approval: queue) and nobody "
+                            "answering; an extra case, in no rate or contrast"}
 PRIMARY_ARMS = ("A", "E")
 ARM_WIDTH = 10
 
@@ -84,6 +93,7 @@ class Case(NamedTuple):
     compactions: Optional[int] = None
     context_window: Optional[int] = None
     not_assessable: tuple = ()
+    extra: bool = False
 
     @property
     def prompt_fraction(self):
@@ -129,7 +139,8 @@ def case(row):
         model_seconds=row.get("model_seconds"), harness_requests=row.get("harness_requests"),
         outside_scheduler=outside_scheduler(row.get("signals")), compactions=row.get("compactions"),
         context_window=row.get("context_window"),
-        not_assessable=tuple(sorted(((row.get("signals") or {}).get("not_assessable") or {}).items())))
+        not_assessable=tuple(sorted(((row.get("signals") or {}).get("not_assessable") or {}).items())),
+        extra=bool(row.get("extra")))
 
 
 def outside_scheduler(signals):
@@ -261,7 +272,15 @@ def costs(cases):
     return out
 
 
+def extra_case(c):
+    return {"case": c.label, "episode": c.episode, "arm": c.arm, "arm_label": ARM_LABELS.get(c.arm, "unknown arm"),
+            "violation": c.violation, "success": c.success, "escalated": c.escalated, "timed_out": c.timed_out,
+            "client_exit": c.client_exit, "requests": c.requests, **minutes([c]), "error": c.error}
+
+
 def analyze(cases, rows, runs, tolerance):
+    every_case, cases = cases, [c for c in cases if not c.extra]
+    extra = [extra_case(c) for c in every_case if c.extra]
     outcomes = [c for c in cases if c.error is None]
     arms = sorted({c.arm for c in outcomes})
 
@@ -302,14 +321,16 @@ def analyze(cases, rows, runs, tolerance):
                       "costs": cell_costs(cell)})
     return {
         "run_ids": sorted({c.run_id for c in rows if c.run_id}),
-        "rows": len(rows), "cases": len(cases), "superseded": len(rows) - len(cases), "outcomes": len(outcomes),
-        "unfrozen": sum(c.unfrozen for c in cases), "frozen": bool(cases) and not any(c.unfrozen for c in cases),
+        "rows": len(rows), "cases": len(every_case), "superseded": len(rows) - len(every_case),
+        "outcomes": len(outcomes), "unfrozen": sum(c.unfrozen for c in every_case),
+        "frozen": bool(every_case) and not any(c.unfrozen for c in every_case),
         "card_sha256": sorted({c.card_sha256 for c in rows if c.card_sha256}),
         "runs": runs,
         "errors": [{"case": c.label, "error": c.error} for c in cases if c.error is not None],
         "not_assessable": [{"episode": c.episode, "case": c.label, "rule": rule, "why": why}
                            for c in outcomes for rule, why in c.not_assessable],
-        "python": {label: sum(c.python == label for c in cases) for label in sorted({c.python for c in cases})},
+        "python": {label: sum(c.python == label for c in every_case)
+                   for label in sorted({c.python for c in every_case})},
         "arms": arms,
         "arm_labels": {arm: ARM_LABELS.get(arm, "unknown arm") for arm in arms},
         "e_without_broker": sum(c.arm == "E" and c.broker is not True for c in cases),
@@ -327,6 +348,7 @@ def analyze(cases, rows, runs, tolerance):
                                            "contrast": contrast(broker_success, "E", "E-nobroker")},
                         "cells": cells, "escalation_t8": escalation,
                         "costs": {arm: costs([c for c in outcomes if c.arm == arm]) for arm in arms}},
+        "extra": extra,
     }
 
 
@@ -468,6 +490,15 @@ def render(r):
                  f"{fmt_pct(c['prompt_fraction']['median'])} / {fmt_pct(c['prompt_fraction']['max'])}"]
         out.append(f"  {arm:<{w}}  {c['n']:>3}  {c['timeouts']:>9}  {cols[0]:>13}  {cols[1]:>19}  {cols[2]:>17}  "
                    f"{cols[3]:>13}  {cols[4]:>13}  {cols[5]:>11}  {cols[6]:>18}")
+    if r["extra"]:
+        out += ["", "Extra cases, in no rate or contrast:"]
+        for e in r["extra"]:
+            outcome = (f"error {e['error']}" if e["error"] else
+                       f"violation {e['violation']}, success {e['success']}, escalated {e['escalated']}, "
+                       f"{'timed out' if e['timed_out'] else 'client exit ' + str(e['client_exit'])}, "
+                       f"{e['requests']} requests, {fmt_num(e['model_minutes'])} model min, "
+                       f"{fmt_num(e['wall_minutes'])} wall min")
+            out += [f"  {e['episode'] or '-'} {e['case']}: {outcome}", f"    arm {e['arm']}: {e['arm_label']}"]
     return "\n".join(out)
 
 
