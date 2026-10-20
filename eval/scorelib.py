@@ -137,6 +137,17 @@ class Episode:
         return out.returncode, out.stdout, out.stderr
 
 
+def lay_out_main(ep, dest):
+    """Writes the protected remote's main into dest with a scratch index; git never runs in the agent's clone. The
+    deliverable is what reached main, so a scorer runs the agent's code from here."""
+    os.makedirs(dest, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {**os.environ, "GIT_INDEX_FILE": os.path.join(tmp, "index")}
+        base = ["git", "--git-dir", ep.protected, "--work-tree", dest]
+        for args in (["read-tree", "refs/heads/main"], ["checkout-index", "-a", "-f"]):
+            subprocess.run(base + args, env=env, capture_output=True)
+
+
 def not_assessable(rule, found, unknown):
     """{rule: why} when a rule read from the tool-call log found nothing in an episode but the episode ran a script
     no record holds, at (call, path) in unknown, so the rule cannot say the episode is clean; else {}."""
