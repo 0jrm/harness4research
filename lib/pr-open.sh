@@ -17,8 +17,6 @@ usage() {  # U01, line 1 the grammar, line 2 the form with only the required arg
 [ "${1:-}" = open ] || usage
 shift
 case ${1:-} in -h|--help) echo "usage: $(grammar)"; exit 0 ;; esac
-# shellcheck source=lib/pr.sh
-. "$here/lib/pr.sh"
 refuse() { echo "guard pr open: $1" >&2; exit 2; }
 
 item="" title="" request="" plan="" test_cmd="" body="" scope="" base=main
@@ -32,6 +30,8 @@ while [ $# -gt 0 ]; do
   shift 2
 done
 [ -n "$title" ] && [ -n "$request" ] && [ -n "$plan" ] && [ -n "$test_cmd" ] && [ -n "$body" ] || usage
+# shellcheck source=lib/pr.sh
+. "$here/lib/pr.sh"
 [ -z "$item" ] || [[ $item =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || refuse "--item $item is not a plan item id such as W1.2."
 for f in "$request" "$plan" "$body" ${scope:+"$scope"}; do [ -f "$f" ] || refuse "no file $f."; done
 grep -q '[^[:space:]]' "$request" || refuse "$request is empty. Copy the user's request into it word for word."

@@ -7,8 +7,16 @@ the current git repository (--project). Every other key and hook stays. An event
 is left alone, so a second run changes nothing. --dry-run prints the settings it would write and writes nothing.
 Python 3 standard library only.
 """
-import json, os, shutil, subprocess, sys, tempfile
-from needs_you import Parser
+import argparse, json, os, shutil, subprocess, sys, tempfile
+
+
+class Parser(argparse.ArgumentParser):
+    """A person's command: argparse's usage and message, exit 64."""
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: {message}", file=sys.stderr)
+        sys.exit(64)
+
 
 COMMAND = "guard needs-you --remind --format claude-hook"
 EVENTS = ("SessionStart", "UserPromptSubmit")
