@@ -15,7 +15,6 @@ guard ledger appends one row to runs/<run_id>/execution.tsv, the execution envel
 broker the records socket commits it to run/<run_id>, signed, after the fence's ledger check; without one this
 appends it to the working tree's file, checks it with this harness's fence --ledger, and leaves the commit to the
 agent, as any file of the run."""
-import argparse
 import json
 import os
 import subprocess
@@ -24,8 +23,12 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 import _path  # noqa: E402,F401
+import needs_you  # noqa: E402
 import refusals  # noqa: E402
 from broker import transport  # noqa: E402
+
+
+PR_OPEN = "guard pr open --title TITLE --request FILE --plan FILE --test COMMAND --body FILE"
 
 
 class Refused(Exception):
@@ -49,10 +52,11 @@ def needs_you_request(args):
     if not args or args[0].startswith("-"):
         return {"verb": "list", "store": "needs-you", "remind": "--remind" in args}
     verb, rest = args[0], args[1:]
-    p = argparse.ArgumentParser(prog=f"guard needs-you {verb}")
+    line2 = {"add": needs_you.ADD, "find": needs_you.FIND}.get(verb, needs_you.LIST)
+    p = refusals.ArgumentParser(prog=f"guard needs-you {verb}", next=line2)
     if verb == "add":
-        for name in ("kind", "title"):
-            p.add_argument(f"--{name}", required=True)
+        p.add_argument("--kind", required=True, choices=needs_you.KINDS)
+        p.add_argument("--title", required=True)
         for name in ("why", "expect", "worry", "undo", "source"):
             p.add_argument(f"--{name}", default="")
         p.add_argument("--path", action="append", default=[])
@@ -60,7 +64,7 @@ def needs_you_request(args):
         p.add_argument("--update", action="store_true")
         return {"verb": verb, "store": "needs-you", "item": vars(p.parse_args(rest))}
     if verb == "find":
-        p.add_argument("--kind", required=True)
+        p.add_argument("--kind", required=True, choices=needs_you.KINDS)
         p.add_argument("--title", required=True)
         return {"verb": verb, "store": "needs-you", **vars(p.parse_args(rest))}
     if verb == "show":
@@ -71,12 +75,13 @@ def needs_you_request(args):
 
 def pr_open_request(args):
     """The pr-open request; pushes the branch first, so the broker opens a pull request for a head it can fetch."""
-    p = argparse.ArgumentParser(prog="guard pr open")
-    for name in ("title", "request", "plan", "test", "body"):
-        p.add_argument(f"--{name}", required=True)
-    for name in ("item", "scope"):
-        p.add_argument(f"--{name}", default="")
-    p.add_argument("--base", default="main")
+    p = refusals.ArgumentParser(prog="guard pr open")
+    for name, value in (("title", "TITLE"), ("request", "FILE"), ("plan", "FILE"), ("test", "COMMAND"),
+                        ("body", "FILE")):
+        p.add_argument(f"--{name}", required=True, metavar=value)
+    for name, value in (("item", "ID"), ("scope", "FILE")):
+        p.add_argument(f"--{name}", default="", metavar=value)
+    p.add_argument("--base", default="main", metavar="BRANCH")
     a = p.parse_args(args)
     head = branch()
     if not head:
@@ -98,17 +103,15 @@ LEDGER_USAGE = "usage: guard ledger add <run_id> <field> <value> [--why W] [--ev
 
 def ledger_request(args):
     """One records request from guard ledger arguments; Refused with the usage when they are not one."""
-    p = argparse.ArgumentParser(prog="guard ledger", add_help=False)
+    p = refusals.ArgumentParser(prog="guard ledger", add_help=False, usage=LEDGER_USAGE.removeprefix("usage: "),
+                                next="guard status")
     p.add_argument("verb", choices=("add", "list"))
     p.add_argument("run")
     p.add_argument("field", nargs="?")
     p.add_argument("value", nargs="?")
     p.add_argument("--why", default="")
     p.add_argument("--evidence", default="")
-    try:
-        a = p.parse_args(args)
-    except SystemExit:
-        raise Refused(LEDGER_USAGE)
+    a = p.parse_args(args)
     run = os.path.basename(os.path.normpath(a.run))
     if a.verb == "list":
         return {"verb": "list", "store": "ledger", "run": run}
@@ -191,7 +194,11 @@ def ledger(args):
 def main(argv):
     if argv[:1] == ["ledger"]:
         return ledger(argv[1:])
-    if not argv or argv[0] not in ("needs-you", "pr") or (argv[0] == "pr" and argv[1:2] != ["open"]):
+    if argv[:1] == ["pr"] and argv[1:2] != ["open"]:
+        r = refusals.usage(f"guard pr takes open, not {' '.join(argv[1:2]) or 'nothing'}", PR_OPEN)
+        sys.stderr.write(refusals.render(r))
+        return r.exit
+    if not argv or argv[0] not in ("needs-you", "pr"):
         sys.stderr.write(__doc__.split("\n\n")[1] + "\n")
         return 64
     sock = "records" if argv[0] == "needs-you" else "gh"

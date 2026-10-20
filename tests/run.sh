@@ -22,6 +22,8 @@ if [ -z "${HPC_TESTS_IN_NS:-}" ] && "${ns[@]}" true 2>/dev/null; then
   while :; do wait $u; rc=$?; kill -0 $u 2>/dev/null || exit $rc; done
 fi
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+# The fence prints its CI repair under GITHUB_ACTIONS=true; the cases that want it set it themselves.
+unset GITHUB_ACTIONS
 # The sourced cases read guard.
 # shellcheck disable=SC2034
 guard=$here/bin/guard

@@ -124,8 +124,9 @@ def local_facts(cwd=None):
 
 def main(argv):
     if argv:
-        sys.stderr.write("usage: guard status\n")
-        return 64
+        r = refusals.usage("guard status takes no arguments", "guard status")
+        sys.stderr.write(refusals.render(r))
+        return r.exit
     reply = transport.send({"verb": "status", "cwd": os.getcwd()})
     if reply.get("rc") != 0:
         sys.stderr.write(reply.get("err", ""))
