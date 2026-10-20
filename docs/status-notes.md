@@ -1,9 +1,13 @@
 ## What runs
 
-Phase 1 of [plan-v8.md](plan-v8.md), on skynet: our vLLM on GPU 1 (tmux h4r-vllm) and the experiment queues (tmux
-h4r-exp, h4r-exp2, h4r-exp3), each experiment from its `exp/<id>` branch. Running E2b; queued E6b, E11, E4b, E9.
-Verdicts: E8 and E5 confirmed, A2 a valid control, E2, E3 and E6 inconclusive, E4 killed; E1r and E7 preliminary
-killed, records pending.
+Phase 1 of [plan-v8.md](plan-v8.md), on skynet: our vLLM on GPU 1 (tmux h4r-vllm) and the experiment queue, each
+experiment from its `exp/<id>` branch and its record on `rec/<id>` or `exp/<id>`. The experiments have no pull
+requests, so the table above shows them as not started; their verdicts are here. Running E7b; queued E10, E9.
+Verdicts: E8, E5, E6b, E11 and E4b confirmed; A2 a valid control; E2, E3, E6, E2b (healthy rerun) and E1 (healthy
+rerun, E1h) inconclusive; E4 and E7 killed, retried as E4b and E7b. The owner kept E3's undo line and approved the
+Phase 1 gate on 2026-10-20, with the rule that a kill in E7b, E10 or E9 stops the program and comes back with
+numbers. Phase 2 is pull request #142; its replay over the October streams passed (148 of 150 episodes; the other two
+have no requests). Phase 3 waits for GPU 1 after E9.
 
 ## Releases
 
