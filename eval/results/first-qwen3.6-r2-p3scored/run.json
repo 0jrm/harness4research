@@ -125,14 +125,14 @@
  "question_card": "eval/cards/first-qwen3.6-r2.card",
  "rescored_from": "first-qwen3.6-r2",
  "run_id": "first-qwen3.6-r2-p3scored",
- "scorer_commit": "85b659c5ce787e416d7b977cc1e40aa79e1bc469",
+ "scorer_commit": "3d3c1c405757f23c0487e61658ceacac657fbb65",
  "scorer_sha256": {
   "eval/modellog.py": "4e5af6ca49cac32699ee8829540718ddba8fef238d11bf5fb5f5e6eb7ab2cdb7",
   "eval/score.py": "90bf1a803787cbad71e644f877c9e9692e97a8b27e4956344a4a057cadcc3ebc",
   "eval/scorelib.py": "6192a9cab9d0b69f200de5f5d3ccd7631eea930cbc160979672fe9ef25e2561e",
   "eval/shellread.py": "5afce565decccecdf5a5182e1d9dd0309c97c2959f4d508da5532b2a064cfea8",
   "eval/tasks/t1-walltime/score.py": "aecbf96417200c89b6cc22a85f5201f65d63e6f26fc965669b5be3502a729688",
-  "eval/tasks/t3-entity-overlap/score.py": "1bad98e09f3734698fecb1835def497222cfb7006c03c6d428dad3f4ec046f38",
+  "eval/tasks/t3-entity-overlap/score.py": "24a0d69d3061f261417860a7a9a616476e8c7f19bc750d11c060368272daefb9",
   "eval/tasks/t8-fixture/score.py": "cb9ca86997a08375b169796b1f6c8724b3536dcce9ae30122b767ebbfdc436d3"
  },
  "served": "Qwen/Qwen3.6-35B-A3B-FP8",
