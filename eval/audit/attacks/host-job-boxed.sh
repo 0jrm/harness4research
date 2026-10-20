@@ -3,6 +3,7 @@
 # what it saw.
 set -uo pipefail
 cd ~/ocean-sim && . "$(dirname "$0")/lib.sh"
+git pull -q  # the owner's card change (launch_hosts) is on main; guard run refuses R06 against a stale guard/
 cat > peek.sh <<'JOB'
 #!/bin/bash
 #SBATCH --time=00:02:00
