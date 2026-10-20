@@ -72,5 +72,17 @@ else
   expect holdout-rows ok '^score pass 1,score fail 2,score pass 3,score limit -,score fail -,push fail -,push pass -,push unscorable -$' -- \
     sh -c "jq -r '[.via, .verdict, (.n // \"-\" | tostring)] | join(\" \")' '$hstate/holdout/log.jsonl' | paste -sd,"
   expect holdout-receipts ok '^8$' -- sh -c "grep -c '\"kind\": \"holdout\"' '$hstate/receipts.jsonl'"
+  helper_main() {  # helper_main <solution name> [imports]: pushes t.<name> to main as helper.py, with imports a solution.py
+    # that imports it; without, solution.py stays byte-identical; a refused push is undone; prints git's output
+    (cd "$hclone" && git switch -qC main origin/main &&
+      hpy 'open("helper.py", "w").write(getattr(t, sys.argv[3]).replace("FALLBACK", "0.0"))
+if len(sys.argv) > 4: open("solution.py", "w").write(t.IMPORTS)' "$@" &&
+      git add helper.py solution.py && git commit -qm helper &&
+      { git push -q origin HEAD:main 2>&1 || { git reset -q --hard origin/main; exit 1; }; })
+  }
+  expect holdout-push-helper-scored ok - -- helper_main MEAN imports
+  expect_refusal holdout-push-helper-only-h01 H01 -- nodec remote helper_main LOOKUP
+  expect holdout-helper-rows ok '^push pass,push fail$' -- \
+    sh -c "tail -2 '$hstate/holdout/log.jsonl' | jq -r '[.via, .verdict] | join(\" \")' | paste -sd,"
 fi
 kill "$hpid" 2>/dev/null; wait "$hpid" 2>/dev/null
