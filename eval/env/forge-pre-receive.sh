@@ -69,7 +69,11 @@ receipts_problem() {
   fi
   key=$(git show refs/heads/main:guard/budget.card 2>/dev/null | awk -F': *' '$1 == "broker_key" { print $2; exit }')
   if [[ $key =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com)\ [A-Za-z0-9+/]+ ]]; then
-    signers=$(mktemp); trap "rm -f '${signers:?}'" EXIT; printf 'broker namespaces="git" %s\n' "$(cut -d' ' -f1,2 <<<"$key")" > "$signers"
+    signers=$(mktemp)
+    # signers is local and gone by EXIT, so the trap takes its value now.
+    # shellcheck disable=SC2064
+    trap "rm -f '${signers:?}'" EXIT
+    printf 'broker namespaces="git" %s\n' "$(cut -d' ' -f1,2 <<<"$key")" > "$signers"
   elif [ "$records" = signed ] && signers=$(git config gpg.ssh.allowedSignersFile); then :
   else echo "no broker_key on main, so nothing can sign guard/receipts"; return; fi
   while read -r c; do
@@ -78,7 +82,7 @@ receipts_problem() {
       echo "commit ${c:0:12} is not signed by broker_key"; return
     fi
     [ "$(git rev-list --no-walk --count --merges "$c")" = 0 ] || { echo "commit ${c:0:12} is a merge"; return; }
-  done < <(git rev-list "$2" $([ "$1" = "$zero" ] || echo "^$1"))
+  done < <(if [ "$1" = "$zero" ]; then git rev-list "$2"; else git rev-list "$2" "^$1"; fi)
 }
 
 status=0

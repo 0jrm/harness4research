@@ -22,6 +22,8 @@ if [ -z "${HPC_TESTS_IN_NS:-}" ] && "${ns[@]}" true 2>/dev/null; then
   while :; do wait $u; rc=$?; kill -0 $u 2>/dev/null || exit $rc; done
 fi
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+# The sourced cases read guard.
+# shellcheck disable=SC2034
 guard=$here/bin/guard
 tmp=$(mktemp -d); cache=${XDG_CACHE_HOME:-$HOME/.cache}; mkdir -p "$cache"
 keep=$(mktemp -d "$cache/guard-tests.XXXXXX"); trap 'rm -rf "$tmp" "$keep"' EXIT
@@ -92,11 +94,13 @@ v7=(survey archive init merge-the-guard preflight ripples manifest code launch f
   fence-workflow update-moves v6.1-to-v7 merge-policy doctor config review pr-open merge tiers batch atlas quickstart
   needs-you hooks-install gateway guard-enter-broker plan-status budget)
 for name in "${v7[@]}"; do
+  # shellcheck source=/dev/null
   [ ! -e "$here/tests/cases/v7-$name.sh" ] || . "$here/tests/cases/v7-$name.sh"
 done
 for case in "$here"/tests/cases/[0-9]*.sh; do
   [ -e "$case" ] || continue
   cd "$tmp" || exit 1
+  # shellcheck source=/dev/null
   . "$case"
 done
 
