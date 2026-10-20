@@ -11,9 +11,6 @@ The config is the question card's machine part:
   "question_card": "eval/cards/first-qwen3.6.card",    frozen: committed once, unchanged, no <placeholder>
   "episodes_dir": "~/.cache/hpc-sessions",            episode directories, named at random so nothing in a path
                                                        names the task, arm or seed (the mount table shows paths)
-  "approver": "never",                                optional: behind the broker, never (the default) or after:<seconds>,
-                                                       the scripted approver of eval/broker/approver.py: the third arm's
-                                                       after:300 answers every queued ask and job after five minutes
   "results_dir": "eval/results/smoke-1",              verdicts.jsonl
   "model": {"upstream": "http://127.0.0.1:9090",      the model host's relay
             "alias": "default-model",                 the name the proxy pins every request to
@@ -26,16 +23,25 @@ The config is the question card's machine part:
             "text_into_reasoning": true},             and the agent's past text inside its reasoning
   "scaffold": {"name": "codex", "release_dir": "~/.codex/packages/standalone/releases/<version>",
                "context_window": 65536, "timeout_minutes": 30, "parallel": 4, "disable_features": [...],
-               "timeout_minutes_by_family": {"t3-entity-overlap": 180}},   optional: a family's own time limit
+               "timeout_minutes_by_family": {"t3-entity-overlap": 180},    optional: a family's own time limit
+               "settings": {"background_terminal_max_timeout": 1200000}},   optional: top-level Codex config keys
   "matrix": {"families": ["t1-walltime"], "variants": ["trap", "control"], "arms": ["A", "E", "E-nobroker"],
              "arm_variants": {"E-nobroker": ["control"]},   optional: the variants an arm runs, else all of them
+             "arm_approver": {"E-approver": "after:300"},   optional: behind the broker, an arm's scripted approver
+                                                       (eval/broker/approver.py), never (the default) or after:<seconds>
+             "extra_cases": [{"family": "t1-walltime", "variant": "control", "arm": "E-deadlock", "seed": 1}],
+                                                       optional: cases beyond the product, in no rate or contrast
              "seeds": [1, 2],
              "order_seed": 20261010}                 the cases run in an order shuffled with this seed, so that
 }                                                      arm and family do not move with the time of day or the server
 
 The arms (ARMS below): A, no harness; E, the full harness behind the evaluation's broker (episode.sh E --broker);
 E-nobroker, the same harness without the broker (episode.sh E). E-nobroker exists to measure task success with the
-broker against without, so the first run's config gives it the controls only.
+broker against without, so the first run's config gives it the controls only. E-approver and E-deadlock are E with
+approval: queue on the budget card, so every job waits for a person: E-approver's config gives it the approver
+after:300, and E-deadlock's gives it never, so nobody answers. An arm's approver is matrix.arm_approver's, never by
+default; the top-level approver of older configs is refused. An extra case (matrix.extra_cases) runs with the matrix
+in the same shuffle; its verdict has "extra": true, and eval/analyze.py and the kill criterion leave it out.
 
 Before the first episode it checks the question card, refuses one that is not frozen, and writes run.json in
 results_dir with the card's sha256 and commit, the harness commit and the config; a resumed run must match it.
@@ -102,13 +108,16 @@ HOST_PATH = "/usr/local/bin:/usr/bin:/bin"            # the host's /usr, which t
 
 
 class Arm(NamedTuple):
-    """What episode.sh builds for an arm: its harness arm, and whether the sandbox reaches the scheduler, the
-    records and gh only through the evaluation's broker."""
+    """What episode.sh builds for an arm: its harness arm, whether the sandbox reaches the scheduler, the records
+    and gh only through the evaluation's broker, and the budget card's approval behind it (queue: every job waits)."""
     harness: str
     broker: bool
+    approval: str = "auto"
 
 
-ARMS = {"A": Arm("A", broker=False), "E": Arm("E", broker=True), "E-nobroker": Arm("E", broker=False)}
+ARMS = {"A": Arm("A", broker=False), "E": Arm("E", broker=True), "E-nobroker": Arm("E", broker=False),
+        "E-approver": Arm("E", broker=True, approval="queue"), "E-deadlock": Arm("E", broker=True, approval="queue")}
+CASE_FIELDS = ("family", "variant", "arm", "seed")
 
 
 def expand(path):
@@ -120,21 +129,54 @@ def git(*args):
     return out.stdout.strip() if out.returncode == 0 else None
 
 
+def extra_cases(m):
+    """The matrix's extra_cases as (family, variant, arm, seed) tuples."""
+    try:
+        return [tuple(c[k] for k in CASE_FIELDS) for c in m.get("extra_cases", [])]
+    except (KeyError, TypeError) as e:
+        sys.exit(f"run.py: extra case without {e}: each names {', '.join(CASE_FIELDS)}")
+
+
 def matrix_cases(m):
-    """Every case (family, variant, arm, seed) of the config's matrix, in the order shuffled with order_seed. An arm
-    runs the variants arm_variants gives it, else all of them; without arm_variants the cases and their order are
-    those of itertools.product."""
-    unknown = [a for a in m["arms"] if a not in ARMS]
+    """Every case (family, variant, arm, seed) of the config's matrix and its extra cases, in the order shuffled
+    with order_seed. An arm runs the variants arm_variants gives it, else all of them; without arm_variants and
+    extra_cases the cases and their order are those of itertools.product."""
+    extras = extra_cases(m)
+    unknown = [a for a in m["arms"] + [c[2] for c in extras] if a not in ARMS]
     if unknown:
         sys.exit(f"run.py: unknown arm {', '.join(unknown)}; the arms are {', '.join(ARMS)}")
     arm_variants = m.get("arm_variants", {})
     for arm, variants in arm_variants.items():
         if arm not in m["arms"] or not set(variants) <= set(m["variants"]):
             sys.exit(f"run.py: arm_variants names {arm}: {variants}, not an arm of the matrix with its variants")
+    for arm, approver in m.get("arm_approver", {}).items():
+        if arm not in ARMS:
+            sys.exit(f"run.py: arm_approver names {arm}, not one of {', '.join(ARMS)}")
+        if not re.fullmatch(r"never|after:[0-9]+", approver):
+            sys.exit(f"run.py: arm_approver {arm} {approver!r} is never or after:<seconds>")
     every = [(f, v, a, s) for f, v, a, s in itertools.product(m["families"], m["variants"], m["arms"], m["seeds"])
              if v in arm_variants.get(a, m["variants"])]
+    for c in extras:
+        if c in every or extras.count(c) > 1:
+            sys.exit(f"run.py: extra case {c[0]} {c[1]} arm {c[2]} seed {c[3]} is already a case of the matrix")
+    every += extras
     random.Random(m["order_seed"]).shuffle(every)
     return every
+
+
+def episode_env(cfg, arm):
+    """What run_episode adds to episode.sh's environment for an arm behind the broker: the arm's scripted approver
+    (matrix.arm_approver, never by default) for the broker's config, and the budget card's approval."""
+    if not ARMS[arm].broker:
+        return {}
+    return {"H4R_APPROVER": cfg["matrix"].get("arm_approver", {}).get(arm, "never"),
+            "H4R_APPROVAL": ARMS[arm].approval}
+
+
+def case_fields(case, extras):
+    """The fields of a verdict that name its case and its arm's build, and whether it is an extra case."""
+    arm = ARMS[case[2]]
+    return {**dict(zip(CASE_FIELDS, case)), "broker": arm.broker, "approval": arm.approval, "extra": case in extras}
 
 
 def case_key(row):
@@ -264,6 +306,12 @@ def codex_config(scaffold, port, alias):
         'approval_policy = "never"',
         'sandbox_mode = "danger-full-access"',
         'web_search = "disabled"',
+    ]
+    for k, v in scaffold.get("settings", {}).items():
+        if isinstance(v, str) and re.fullmatch(r"<[^>]*>", v):
+            sys.exit(f"run.py: scaffold.settings {k} is still {v}; fill it in the config")
+        lines.append(f"{k} = {json.dumps(v)}")
+    lines += [
         "",
         "[model_providers.site]",
         'name = "site"',
@@ -303,7 +351,7 @@ def kill_tripped(verdicts):
     for line in open(verdicts):
         r = json.loads(line)
         latest[(r["family"], r["variant"], r["arm"], r["seed"])] = r
-    outcomes = [r for r in latest.values() if "error" not in r]
+    outcomes = [r for r in latest.values() if "error" not in r and not r.get("extra")]
     failures = sum(scaffold_failure(r.get("client_exit"), r.get("timed_out"), r.get("requests")) for r in outcomes)
     return len(outcomes) >= KILL_MIN and failures > KILL_THRESHOLD * len(outcomes), failures, len(outcomes)
 
@@ -319,9 +367,7 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     if disk_free_gb(ep) < MIN_FREE_GB:
         return {"episode": ep, "error": f"disk: {disk_free_gb(ep):.0f} GiB free under episodes_dir, below "
                 f"{MIN_FREE_GB}", "stop_run": True}
-    env = dict(os.environ)
-    if ARMS[arm].broker:
-        env["H4R_APPROVER"] = cfg.get("approver", "never")
+    env = {**os.environ, **episode_env(cfg, arm)}
     built = subprocess.run([os.path.join(HERE, "episode.sh"), family, variant, ARMS[arm].harness, ep, "--seed",
                             str(seed)] + (["--broker"] if ARMS[arm].broker else []), capture_output=True, text=True,
                            env=env)
@@ -436,9 +482,13 @@ def main():
     limit = int(args[args.index("--limit") + 1]) if "--limit" in args else None
     unfrozen = "--unfrozen" in args
     card_sha = card_commit = None
+    if "approver" in cfg:
+        sys.exit("run.py: the top-level approver is gone; name each arm's in matrix.arm_approver, such as "
+                 '"arm_approver": {"E-approver": "after:300"}')
     every = matrix_cases(cfg["matrix"])
-    if not re.fullmatch(r"never|after:[0-9]+", cfg.get("approver", "never")):
-        sys.exit(f"run.py: approver {cfg['approver']!r} is never or after:<seconds>")
+    extras = extra_cases(cfg["matrix"])
+    run_arms = dict.fromkeys(cfg["matrix"]["arms"] + [c[2] for c in extras])
+    codex_config(cfg["scaffold"], RELAY_PORT, cfg["model"]["alias"])
     python = offered_python()
     if not unfrozen:
         require_site_python(python)
@@ -460,7 +510,7 @@ def main():
             json.dump({"run_id": cfg["run_id"], "question_card": cfg.get("question_card"), "card_sha256": card_sha,
                        "card_commit": card_commit, "unfrozen": unfrozen, "harness_commit": git("rev-parse", "HEAD"),
                        "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **served.record(),
-                       "python": python, "arms": {a: ARMS[a]._asdict() for a in cfg["matrix"]["arms"]},
+                       "python": python, "arms": {a: ARMS[a]._asdict() for a in run_arms}, "extra_cases": extras,
                        "config": cfg}, f, indent=1)
     verdicts = os.path.join(results, "verdicts.jsonl")
     cases = cases_left(every, verdicts)
@@ -485,10 +535,11 @@ def main():
                       "without them", flush=True)
                 continue
             for fut in done:
-                family, variant, arm, seed = running.pop(fut)
+                case = running.pop(fut)
+                family, variant, arm, seed = case
                 row = fut.result()
-                row.update({"run_id": cfg["run_id"], "family": family, "variant": variant, "arm": arm,
-                            "broker": ARMS[arm].broker, "seed": seed, "card_sha256": card_sha, "unfrozen": unfrozen})
+                row.update({"run_id": cfg["run_id"], **case_fields(case, extras), "card_sha256": card_sha,
+                            "unfrozen": unfrozen})
                 with open(verdicts, "a") as f:
                     f.write(json.dumps(row, sort_keys=True) + "\n")
                 n += 1

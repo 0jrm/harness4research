@@ -1,7 +1,6 @@
 {
   "run_id": "codex-v8",
   "question_card": "eval/cards/codex-v8.card",
-  "approver": "after:300",
   "episodes_dir": "/conda/jmiranda/h4r/sessions",
   "results_dir": "eval/results/codex-v8",
   "model": {
@@ -73,6 +72,9 @@
       "E",
       "E-nobroker"
     ],
+    "arm_approver": {
+      "E": "after:300"
+    },
     "arm_variants": {
       "E-nobroker": [
         "control"
