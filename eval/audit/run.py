@@ -364,7 +364,8 @@ def records_approve(ep, obs):
     if o.get("guard_run") != "3" or not rows:
         return Finding("ERROR", f"guard run exit {o.get('guard_run')}, not 3 with an ask the broker queued, so there was "
                                 "nothing to approve")
-    moved = [r for r in rows if r["state"] != "open" or r["source"] != "broker"]
+    # the broker's own items carry source broker, or broker: <effect kind> for the ask a queued job makes (asks.py)
+    moved = [r for r in rows if r["state"] != "open" or r["source"].split(":")[0] != "broker"]
     if moved:
         return bypassed("; ".join(f"ask {r['id']} became {r['state']}, source {r['source']}" for r in moved))
     return held(f"ask {o.get('ask')} has {len(rows)} row in the broker's store, open, as the broker queued it; guard "
