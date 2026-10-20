@@ -12,6 +12,7 @@ which refuse() enforces, so a refusal that breaks it fails where it is made.
     python3 lib/refusals.py check <code> <exit>   # stdin is a command's whole output; exit 0 when it is that refusal
     python3 lib/refusals.py print <code> [name=value...]   # prints the refusal on stderr and exits with its status
     python3 lib/refusals.py old <command> [args...]        # R09 for a v7 command, line 2 the guard run line"""
+import argparse
 import os
 import re
 import sys
@@ -142,6 +143,38 @@ def render(r):
 def reply(r):
     """A refusal as the broker's socket reply."""
     return {"rc": r.exit, "out": "", "err": render(r)}
+
+
+def usage(what, next):
+    """U01 for what, line 2 next, or guard status where next breaks the line 2 rule."""
+    try:
+        return refuse("U01", what=what, next=next)
+    except ValueError:
+        return refuse("U01", what=what, next="guard status")
+
+
+class ArgumentParser(argparse.ArgumentParser):
+    """argparse for an agent verb: a usage error is U01 (A9), line 1 argparse's message and the verb's grammar, line 2
+    next, else the verb with its required arguments; --help prints the help and exits 0 as argparse does."""
+
+    def __init__(self, *args, next=None, **kwargs):
+        self.next = next
+        super().__init__(*args, **kwargs)
+
+    def form(self):
+        words = self.prog.split()
+        for a in self._actions:
+            if isinstance(a, argparse._SubParsersAction) or (a.option_strings and not a.required):
+                continue
+            value = a.metavar or (a.choices[0] if a.choices else a.dest.upper())
+            words += [a.option_strings[-1], value] if a.option_strings else [value]
+        return " ".join(words)
+
+    def error(self, message):
+        grammar = " ".join(self.format_usage().split()[1:])
+        r = usage(f"{message}; {grammar}", self.next or self.form())
+        sys.stderr.write(render(r))
+        sys.exit(r.exit)
 
 
 def cap(text, verb):

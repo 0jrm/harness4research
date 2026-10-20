@@ -192,7 +192,7 @@ expect_refusal foundation-u01-holdout-score U01 -- outbox holdout score x
 expect_refusal foundation-u01-holdout U01 -- outbox holdout x
 expect_refusal foundation-u01-status U01 -- outbox status x
 expect foundation-u01-pr-open-line ok '^guard pr open --title TITLE --request FILE --plan FILE --test COMMAND --body FILE$' -- bash -c 'GUARD_SOCK_DIR=$1 "$2" pr open --bogus 2>&1 | tail -1' _ "$usock" "$guard"
-expect foundation-u01-grammar ok '^H4R-U01 usage: unrecognized arguments: --bogus; guard needs-you add .*--kind \{approve,run,check\} --title TITLE' -- bash -c 'GUARD_SOCK_DIR=$1 "$2" needs-you add --bogus 2>&1 | head -1' _ "$usock" "$guard"
+expect foundation-u01-grammar ok '^H4R-U01 usage: the following arguments are required: --kind, --title; guard needs-you add .*--kind \{approve,run,check\} --title TITLE' -- bash -c 'GUARD_SOCK_DIR=$1 "$2" needs-you add --bogus 2>&1 | head -1' _ "$usock" "$guard"
 expect foundation-u01-help-box ok '^usage: guard pr open' -- inbox pr open --help
 expect foundation-u01-help-needs-you ok '^usage: guard needs-you add' -- outbox needs-you add --help
 expect foundation-u01-help-seal ok '^usage: guard holdout seal' -- outbox holdout seal --help
