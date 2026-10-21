@@ -11,10 +11,12 @@ which refuse() enforces, so a refusal that breaks it fails where it is made.
     python3 lib/refusals.py markdown              # docs/refusals.md, which tests/refusals.sh compares
     python3 lib/refusals.py check <code> <exit>   # stdin is a command's whole output; exit 0 when it is that refusal
     python3 lib/refusals.py print <code> [name=value...]   # prints the refusal on stderr and exits with its status
-    python3 lib/refusals.py old <command> [args...]        # R09 for a v7 command, line 2 the guard run line"""
+    python3 lib/refusals.py old <command> [args...]        # R09 for a v7 command, line 2 the guard run line
+    python3 lib/refusals.py git <subcommand> [args...]     # R20 for git wrapped in guard run, line 2 the plain git"""
 import argparse
 import os
 import re
+import shlex
 import sys
 import tempfile
 from typing import NamedTuple, Optional
@@ -72,6 +74,7 @@ TABLE = [
     _code("R17", "run", "partition {partition} is not in partitions {allowed}", None),
     _code("R18", "run", "dependency names job {job}, which this session did not submit", None),
     _code("R19", "run", "output {output} is outside the project", None),
+    _code("R20", "run, guard/run", "{git} is not a job; guard run is for cluster jobs, and git runs as it is", None),
     _code("U01", "a verb's or stand-in's arguments", "usage: {what}", None),
     _code("X00", "socket", "{verb} is not built in this harness", "guard status"),
     _code("G01", "guard review, merge, ship in a sandbox", "runs outside the sandbox; push and stop",
@@ -253,7 +256,20 @@ def old(cmd, args, scripts=()):
         return refuse("R09", old=said, next="guard status")
 
 
+def plain_git(args):
+    """R20 for git args wrapped in guard run or guard/run, line 2 the same git command on its own, else git status."""
+    said = " ".join(["git", *args[:1]])
+    try:
+        return refuse("R20", git=said, next=shlex.join(["git", *args]) if args else "git status")
+    except ValueError:
+        return refuse("R20", git=said, next="git status")
+
+
 def main(argv):
+    if len(argv) >= 2 and argv[1] == "git":
+        r = plain_git(argv[2:])
+        sys.stderr.write(render(r))
+        return r.exit
     if len(argv) >= 3 and argv[1] in ("print", "old"):
         if argv[1] == "old":
             r = old(argv[2], argv[3:], batch_scripts())

@@ -3,7 +3,8 @@
 
 The only way a job reaches the scheduler (E6b). This end reads argv into a Request (design-v8 section 3) and prints
 the broker's reply; it decides nothing and reads no file. A leading sbatch, srun, bash or sh after -- is dropped
-(E2b). When argv is not a guard run line, R01's line 2 is the line rebuilt from the words it has."""
+(E2b). When argv is not a guard run line, R01's line 2 is the line rebuilt from the words it has. git in place of the
+job is R20, line 2 the git command on its own (E7b: agents wrapped git push in guard run)."""
 import dataclasses
 import os
 import shlex
@@ -50,6 +51,15 @@ def rebuilt(run_dir, why, cause, words):
     return line
 
 
+def wrapped_git(run_dir, rest, words, cut):
+    """The git arguments when the job is a git command (after --, or with no --, in place of the run directory or after
+    it), else None."""
+    job = list(words) if cut is not None else ([run_dir, *rest] if run_dir == "git" else list(rest))
+    while job and job[0] in LAUNCHERS:
+        job.pop(0)
+    return job[1:] if job and os.path.basename(job[0]) == "git" else None
+
+
 def usage(what, line):
     try:
         r = refusals.refuse("R01", what=what, next=line)
@@ -63,6 +73,11 @@ def main(argv):
     cut = argv.index("--") if "--" in argv else None
     head, words = (argv[:cut], argv[cut + 1:]) if cut is not None else (argv, [])
     run_dir, why, cause, rest = own_options(head)
+    git = wrapped_git(run_dir, rest, words, cut)
+    if git is not None:
+        r = refusals.plain_git(git)
+        sys.stderr.write(refusals.render(r))
+        return r.exit
     if cut is None:
         return usage("put -- between guard run's own options and the job's sbatch options and script",
                      rebuilt(run_dir, why, cause, rest))

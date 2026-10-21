@@ -179,6 +179,15 @@ expect_refusal run-r12-e2e R12 -- gr ../elsewhere --why w -- --time=5 job.sh
 expect_refusal run-r17-e2e R17 -- gr runs/sim --why w -- --time=5 --partition=gpu job.sh
 expect_refusal run-r18-e2e R18 -- gr runs/sim --why w -- --time=5 --dependency=afterok:77 job.sh
 expect_refusal run-r19-e2e R19 -- gr runs/sim --why w -- --time=5 --output=/tmp/x.out job.sh
+# guard run is for cluster jobs; git wrapped in it (E7b, 35 control pushes) is R20, line 2 the plain git command.
+expect_refusal run-r20-git-push R20 -- gr runs/r1 --why "x" -- git push origin main
+expect run-r20-git-push-line fail '^git push origin main$' -- gr runs/r1 --why "x" -- git push origin main
+expect run-r20-code-first fail '^H4R-R20 git push is not a job' -- gr runs/r1 --why "x" -- git push origin main
+expect run-r20-commit-line fail "^git commit -m 'fit the model'$" -- gr runs/r1 --why x -- git commit -m "fit the model"
+expect run-r20-pull-no-why fail '^git pull --rebase origin main$' -- gr push-results -- git pull --rebase origin main
+expect run-r20-no-dashes fail '^git push origin main$' -- gr git push origin main
+expect run-r20-launcher fail '^git push$' -- gr runs/r1 --why x -- bash git push
+expect run-r20-placeholder fail '^git status$' -- gr runs/r1 --why x -- git push origin '<branch>'
 expect run-afterok-own ok 'submitted' -- gr runs/sim --why w -- --time=5 --dependency=afterok:1001 job.sh
 echo 'print(2)' > "$rp/sim.py"
 expect_refusal run-r06-e2e R06 -- gr runs/sim --why w -- --time=1 job.sh
