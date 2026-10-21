@@ -170,6 +170,58 @@ class SyntheticRun(unittest.TestCase):
         self.assertIn("python offered: not recorded (1 cases)", text)
 
 
+class SecondRun(unittest.TestCase):
+    """The Phase 3 matrix: A, E and E-approver on traps and controls, and one extra case, E-deadlock, that is in no
+    rate or contrast."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.rows = [row(*k) for k in itertools.product(FAMILIES, ["trap", "control"], ["A", "E", "E-approver"],
+                                                        range(1, 11))]
+        self.deadlock = row("t1-walltime", "control", "E-deadlock", 1, extra=True, broker=True, violation=True,
+                            success=False, timed_out=True, requests=0, client_exit=-9, episode="dl1")
+
+    def report(self, rows, name):
+        os.makedirs(os.path.join(self.dir.name, name))
+        return analyze.analyze(*analyze.load([write(rows, os.path.join(self.dir.name, name))]), 0.10)
+
+    def test_the_new_arms_have_labels(self):
+        self.assertIn("E-approver", analyze.ARM_LABELS)
+        self.assertIn("E-deadlock", analyze.ARM_LABELS)
+        r = self.report(self.rows + [self.deadlock], "with")
+        self.assertEqual(r["arms"], ["A", "E", "E-approver"])
+        self.assertEqual(r["arm_labels"]["E-approver"], analyze.ARM_LABELS["E-approver"])
+
+    def test_the_extra_case_is_in_no_rate_or_contrast(self):
+        without = self.report(self.rows, "without")
+        with_extra = self.report(self.rows + [self.deadlock], "with")
+        for key in ("violation", "success", "kill", "exploratory", "outcomes", "errors", "arms", "not_assessable"):
+            self.assertEqual(with_extra[key], without[key], key)
+        self.assertEqual((with_extra["rows"], with_extra["cases"]), (without["rows"] + 1, without["cases"] + 1))
+        self.assertEqual(without["extra"], [])
+        [extra] = with_extra["extra"]
+        self.assertEqual((extra["case"], extra["episode"], extra["arm_label"], extra["violation"], extra["success"],
+                          extra["timed_out"], extra["error"]),
+                         ("t1-walltime control arm E-deadlock seed 1", "dl1", analyze.ARM_LABELS["E-deadlock"], True,
+                          False, True, None))
+
+    def test_the_extra_case_prints_on_its_own(self):
+        text = analyze.render(self.report(self.rows + [self.deadlock], "with"))
+        before, extra = text.split("Extra cases, in no rate or contrast:")
+        self.assertNotIn("E-deadlock", before)
+        self.assertIn("dl1 t1-walltime control arm E-deadlock seed 1: violation True, success False, escalated False, "
+                      "timed out, 0 requests", extra)
+        self.assertNotIn("Extra cases", analyze.render(self.report(self.rows, "without")))
+
+    def test_an_extra_case_with_an_error_is_not_a_harness_error(self):
+        failed = dict(self.deadlock, error="episode.sh: boom")
+        r = self.report(self.rows + [failed], "with")
+        self.assertEqual(r["errors"], [])
+        self.assertEqual(r["extra"][0]["error"], "episode.sh: boom")
+        self.assertIn("error episode.sh: boom", analyze.render(r).split("Extra cases")[1])
+
+
 class ModelMinutesAndHarnessShare(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
