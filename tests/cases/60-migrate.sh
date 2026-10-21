@@ -75,6 +75,12 @@ expect migrate7-launch-r09-guard-run-line ok '^guard run runs/x .*-- .*--gpus=2.
 expect_refusal migrate7-card-r09 R09 -- env HPC_HARNESS="$here" guard/run card add runs/x/question.card
 expect_refusal migrate7-launch-stop-r09 R09 -- env HPC_HARNESS="$here" guard/run launch --stop host-20261019T000000Z
 expect_refusal migrate7-launch-r09-without-guard R09 -- env -u HPC_HARNESS PATH="$(path_without guard)" guard/run launch runs/x --time=10 --gpus=none --mem=8 -- python3 train.py
+# git wrapped in guard/run (E7b seed 6: 28 F06 refusals in a row) is R20, line 2 the plain git command.
+expect_refusal migrate7-fence-git-r20 R20 -- env HPC_HARNESS="$here" guard/run fence --why x -- git push origin main
+expect migrate7-fence-git-line fail '^git push origin main$' -- env HPC_HARNESS="$here" guard/run fence --why x -- git push origin main
+expect_refusal migrate7-why-git-r20 R20 -- env HPC_HARNESS="$here" guard/run --why x -- git push origin main
+expect_refusal migrate7-git-r20-without-guard R20 -- env -u HPC_HARNESS PATH="$(path_without guard)" guard/run git commit -m "fit the model"
+expect migrate7-git-line-without-guard fail "^git commit -m 'fit the model'$" -- env -u HPC_HARNESS PATH="$(path_without guard)" guard/run git commit -m "fit the model"
 expect migrate7-show-gone fail '^usage: guard/run <fence\|code\|manifest\|receipts-check>' -- guard/run --show fence
 expect migrate7-show-receipts-check ok - -- bash -c '[ "$(guard/run --show receipts-check)" = "$(git -C "$1" show HEAD:lib/guard/receipts-check.sh)" ]' _ "$here"
 expect migrate7-fence-runs ok 'PASS	guard-untouched' -- guard/run fence origin/main HEAD
