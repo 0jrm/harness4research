@@ -2453,7 +2453,7 @@ jqf='.items[] | select(.id=="n1") | .body.why'; expect needs-json-update-wins ok
 jqf='.items[] | select(.id=="n2") | .status'; expect needs-json-ack-wins ok '^acked$' -- njq
 jqf='.items | map(.id) | join(",")'; expect needs-json-default-states ok '^n1,n2$' -- njq
 jqf='.items | map(.id) | join(",")'; expect needs-json-state-all ok '^n1,n2,n3$' -- njq --state all
-jqf='.items | map(.status) | join(",")'; expect needs-json-state-done ok '^done$' -- njq --state done
+jqf='.items | map(.status) | join(",")'; expect needs-json-state-done ok '^done$' -- njq --state 'done'
 jqf='.items[] | select(.id=="n1") | .created < .updated'; expect needs-json-created-kept ok '^true$' -- njq
 jqf='.items[] | select(.id=="n1") | .created'; expect needs-json-created-format ok "$NJTS" -- njq
 jqf='.items[] | select(.id=="n1") | .updated'; expect needs-json-updated-format ok "$NJTS" -- njq
