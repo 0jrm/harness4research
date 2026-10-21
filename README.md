@@ -2,16 +2,16 @@
 
 harness4research keeps an auditable record of what AI agents run on a research repository and on shared compute, and refuses at the point of action: a job over its budget or outside the scheduler, a merge that changes the guardrails, a number reported without evidence. Each refusal names the command to run instead, and a queue holds the steps only a person can take. The rules live in git, GitHub, and the scheduler, so they apply the same way to Claude Code, Codex, Cursor, and agents on local models.
 
-What it does not check, it does not prevent. In our benchmark of a local model, rule-breaking fell where a check exists and not elsewhere ([re-scored results](eval/experiments/baseline-r2-rescored.md)). The [enforcement audit](docs/enforcement-audit.md) attacks each rule with a script: 60 held, 1 bypassed of 61 rows.
+What it does not check, it does not prevent. In our benchmark of a local model, rule-breaking fell where a check exists and not elsewhere ([re-scored results](eval/experiments/baseline-r2-rescored.md)). The [enforcement audit](docs/enforcement-audit.md) attacks each rule with a script: 66 held, 2 bypassed of 68 rows.
 
 ## Who it is for
 
 It is for research groups whose agents write code, submit jobs, and report results. The scripts support these places to run compute:
 
-- A Slurm cluster. `guard/run preflight` submits through `sbatch`.
-- A GPU box without a scheduler. `guard/run launch` runs each job under a supervisor that enforces its limits.
+- A Slurm cluster. `guard run` prices each job and submits it through `sbatch`.
+- A GPU box without a scheduler. On a host named in `launch_hosts`, the same `guard run` line runs the job, boxed, under a supervisor that enforces its limits.
 - A cloud instance, such as one on AWS, works as a GPU box without a scheduler. This is not tested yet.
-- Another HPC scheduler, such as PBS or Flux. Not supported yet. Preflight and ripples need a small port in `lib/guard/`.
+- Another HPC scheduler, such as PBS or Flux. Not supported yet. The broker's scheduler calls need a small port in `lib/broker/`.
 
 ## Try it in two minutes
 
@@ -22,16 +22,14 @@ git clone https://github.com/0jrm/harness4research ~/harness4research
 ~/harness4research/examples/quickstart/run.sh ~/guard-quickstart
 ```
 
-You see six numbered steps. In step 3, the agent raises its own walltime cap, and preflight refuses the job:
+You see numbered steps. In one, the agent raises its own walltime cap, and `guard run` refuses the job with two lines: a code and its reason, then the command to run instead:
 
 ```text
-== 3. A refusal: the agent raises its own walltime cap
-PREFLIGHT FAIL: guard/ differs from origin/main: M guard/budget.card; restore it with git restore --source=origin/main --staged --worktree -- guard, commit, and remove any untracked file under guard/
-== 4. Preflight, then the job
-PREFLIGHT OK: cheap-evo nodes=1 time=5m tasks=1 projected=10 spent=30 queued=3072 available=8500
+H4R-R06 guard/budget.card differ from main and the human owns them
+git checkout origin/main -- guard/budget.card
 ```
 
-Then the job runs, the fence passes the report because every number names its file, and ripples checks the finished job. The summary ends with the paths to the question card, the report, and the manifest, and with a `guard atlas` command that draws the project as one page. [examples/quickstart/README.md](examples/quickstart/README.md) explains each step.
+After the agent runs that line, `guard run` writes the run's question card, prices the job and submits it, and `guard wait` follows it to `COMPLETED`. The fence passes the report because every number names its file. The summary ends with the paths to the question card, the report, and the manifest, and with a `guard atlas` command that draws the project as one page. [examples/quickstart/README.md](examples/quickstart/README.md) explains each step.
 
 ## Set it up
 
@@ -131,11 +129,11 @@ The walls are only as strong as the gap between your credentials and the agent's
 |---|---|---|
 | `guard survey <repo>` | your machine | read-only inventory |
 | `guard init <repo>` | your machine | propose the guard on a new branch |
-| `guard init <repo> --update [--force]` | your machine | propose the new `harness:` pin, or once, the move from `guard/bin/` to the pin |
+| `guard init <repo> --update [--force]` | your machine | propose the new `harness:` pin, or once, the move from schema 7 to schema 8 |
 | `guard version` | anywhere | this harness's release and schema; inside a project, which side is behind |
 | `guard archive <repo>` | your machine | tag every remote branch |
 | `guard doctor [repo]` | your machine, the agent's shell, the cluster | read-only checklist of the setup: pass, FAIL, or cannot check from here, with a remedy for each; exit 1 when an item fails |
-| `guard atlas [repo] [--out f.html \| --serve PORT\|SOCKET]` | anywhere with the repo | read-only page of runs, ripples, question cards, receipts, and what needs you ([docs/atlas.md](docs/atlas.md)) |
+| `guard atlas [repo] [--out f.html \| --serve PORT\|SOCKET]` | anywhere with the repo | read-only page of runs, jobs, question cards, receipts, and what needs you ([docs/atlas.md](docs/atlas.md)) |
 | `guard enter <dir> [--agent NAME] [--no-tty] -- <cmd...>` | your machine, a login node | runs any agent (or `bash`, to look at a tree an agent wrote) in a sandbox built by `lib/box.sh`: `<dir>` read-write and a home of the agent's own, both at their real paths; no network, `~/.ssh`, `~/.config/gh`, `~/.config/guard`, ssh-agent or munge; `sbatch` and friends reach the scheduler only through the broker, and the session's allowlist only through its proxy: `net_allow:` in `guard/budget.card` on `main` (PyPI and conda when the card does not say, D4) plus the profile's `net:` hosts. With `--no-tty`, a profile's `model:` line sends the model through the broker's gateway, which adds the key from `~/.config/guard/models/` outside the sandbox (D3). A pre-flight probe checks those walls from inside first and starts nothing if one fails. Profiles in `~/.config/guard/agents/` list binaries and config to copy; a CLI login is bound only without `--no-tty` |
 | `guard broker setup` | once per host | the broker's state and signing key in `~/.local/state/guard/`, the default profiles for claude, codex and cursor-agent, the model upstreams for anthropic and openai in `~/.config/guard/models/` (put each key beside its file, mode 0600), and a sandbox self-test |
 | `guard broker status \| stop` | that host | whether the broker answers, its sessions with the limits each got (a scope's wall or prlimit's speed bump), live jobs and recent refusals (exit 1 when down); `stop` ends it, and every session's sockets then refuse. `guard enter` starts it under `systemd-run --user` where a user manager answers, else in tmux; `GUARD_BROKER_LAUNCH=tmux` picks tmux, as on skynet (D7) |
@@ -149,25 +147,16 @@ The walls are only as strong as the gap between your credentials and the agent's
 | `guard review --batch` | the repository | sorts every open pull request into a tier and reviews the ones without a verdict at their head: records approve without a model, small ones share one read-only reviewer session, large ones get `guard review <pr>`, and new question cards and guard changes go to you as 🩺 items ([docs/autonomy.md](docs/autonomy.md#tiers-and-batches)) |
 | `guard merge --batch` | the repository | runs `guard merge` on every pull request approved at its head, lowest number first, and queues one item for the ones it refuses |
 | `guard ship [--now]` | the repository | `guard review --batch`, then `guard merge --batch`, at once when a records pull request has passed every check, and otherwise once `review_batch_max` pull requests wait or the oldest is `ship_interval_hours` old; until then it refreshes the question card digest and says when the batch is due |
-| `guard/run preflight <run_dir> <job.sh> [sbatch options]` | cluster | submit or refuse |
-| `guard/run ripples <run_dir>` | cluster | warning signs |
+| `guard run runs/<id> --why S [--cause C] -- <sbatch options> <script> [args]` | the agent's shell | price and submit a job, or launch it on a host in `launch_hosts`; or refuse with the command to run instead |
+| `guard wait <job_id> \| -- <command>` | the agent's shell | wait, and return every 5 minutes with the last 20 lines; `guard wait --stop <host job>` stops a host job |
+| `guard ask Q --default D --deadline 5m\|30m\|2h` | the agent's shell | a question for a person, answered by its default when nobody answers in time |
+| `guard status` | the agent's shell | what runs, what is blocked, the last refusal, the budget, the branch, and the next command |
 | `guard/run manifest <run_dir> "$0" "$@"` | inside a job | provenance record |
 | `guard/run fence [base] [head]` | anywhere, CI | merge inspector |
 | `guard/run fence --ledger <runs/<id>/execution.tsv>` | anywhere | checks one execution ledger by the fence's rules before you commit it |
 | `guard/run code <repo> <commit>` | cluster | absolute path of a clean worktree at that commit |
-| `guard/run launch <run_dir> --time=T --gpus=I,J\|none --mem=GB -- <cmd>` | a host in `launch_hosts` | run a job under a supervisor, or refuse |
-| `guard/run launch --stop <job_id> [--reason=<text>]` | that host | stop a launched job gently; `--list [run_dir]` shows them |
 
-`guard preflight`, `guard ripples`, `guard manifest`, `guard fence`, `guard code`, and `guard launch` on PATH run the enclosing project's `guard/run` from its protected branch, and refuse outside a guarded project.
-
-## What a ripple is
-
-A ripple is a warning sign about one run. `guard/run ripples <run_dir>` prints one line per check, each with a status:
-
-- `RIPPLE`: something is wrong, such as a failed job, a question card edited after it froze, a guard file changed on the branch, or spend above 80% of the budget. The command exits 1, and preflight refuses new submissions until the cause is handled.
-- `HANDLED`: a failure that an incident write-up in `runs/<id>/incidents/` on the protected branch, or a `restart` or `resume` row in `runs/<id>/execution.tsv`, explains. An incident counts once its pull request merges, and a model reviews that pull request.
-- `UNCHECKED`: the check could not see its input from this host, for example `sacct` off the cluster, a `sacct` that lists no job for the run, or a `quota_pct_cmd` whose path is not mounted here. An unchecked line is not a pass.
-- `PASS`: the check saw its input and found nothing.
+`guard manifest`, `guard fence` and `guard code` on PATH run the enclosing project's `guard/run` from its protected branch, and refuse outside a guarded project. Every refusal is two lines, a code and a command; [docs/refusals.md](docs/refusals.md) lists them. `guard preflight`, `ripples`, `launch` and `card`, gone in schema 8, print H4R-R09 with the `guard run` line to use instead.
 
 ## What `init` adds to a repository
 
@@ -176,11 +165,11 @@ AGENTS.md                         short list of landmines every agent reads (CLA
 FACTS.md                          verified facts only, each with evidence that guard review checks
 guard/budget.card                 computing budget, per-job limits, merge_policy, and the harness: pin
 guard/watch.list                  verifier, test, and threshold paths agents may not edit
-guard/run                         runs the script of the pinned harness release: preflight, ripples, manifest, fence, code, launch
+guard/run                         runs the script of the pinned harness release: manifest, fence, code, receipts-check
 guard/harness-<pin>.sh            offline only: the pinned release's scripts, for a host that cannot reach the harness
 guard/SURVEY.md                   the survey, for the cleanup
 .github/workflows/guard-fence.yml runs the fence on every pull request, from the harness release guard/budget.card pins
-runs/_template/                   question card and report templates
+runs/_template/                   report and execution ledger templates
 ```
 
 `init` never touches your checked-out tree, never overwrites a file, and never pushes. `guard archive <repo>` tags every branch before a cleanup and prints, without running, the commands to publish the tags and delete merged branches.
@@ -194,7 +183,7 @@ git -C ~/harness4research pull --recurse-submodules
 guard init ~/path/to/your-repo --update
 ```
 
-The update arrives on branch `guard/update` in a new worktree, like `init`. For a pinned project it changes one line, the `harness:` pin in `guard/budget.card`; an offline project also gets the new release's `guard/harness-<pin>.sh` in place of the old one. A project installed before the pin, with its scripts in `guard/bin/`, gets the move once: the `harness:` line is added, `guard/bin/` is deleted, and `guard/run`, the fence workflow and `guard/VERSION` are replaced. A site edit to `guard/bin/` stops running, so read the pull request's diff before you merge it. Your card values, `watch.list`, `runs/_template/`, `FACTS.md`, and `AGENTS.md` are not changed.
+The update arrives on branch `guard/update` in a new worktree, like `init`. For a pinned project it changes one line, the `harness:` pin in `guard/budget.card`; an offline project also gets the new release's `guard/harness-<pin>.sh` in place of the old one. A schema 7 project gets the move to schema 8 once: the new card keys appended, `guard/run` and the fence workflow replaced, `runs/_template/question.card` deleted, `AGENTS.md` above its `## Project landmines` heading replaced, and `guard/VERSION` rewritten ([release notes](docs/releases/v8.0.md)). Your card values, `watch.list`, and the landmines stay as they are. A project older than schema 7 moves with v7.0 first; the update prints the command.
 
 Pushing a change to `.github/workflows/` needs a token with the `workflow` scope (`gh auth refresh -s workflow`). To roll back, revert the update pull request. [docs/compatibility.md](docs/compatibility.md) lists what an update may and may not change.
 

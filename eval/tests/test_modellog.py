@@ -106,7 +106,8 @@ class Harness(unittest.TestCase):
                      "sbatch: refused: a job belongs to a run",
                      "To origin\n ! [remote rejected] main\nremote: main is a protected branch: the guard-fence check failed.",
                      "remote: refs/tags/card/r1 refused: card/r1 is not signed by the owner's or the broker's key.",
-                     "remote: FAIL\tquestion-cards-frozen\tchanged after first commit"]:
+                     "remote: FAIL\tquestion-cards-frozen\tchanged after first commit",
+                     "To origin\n ! [remote rejected] main\nremote: H4R-F01 guard-untouched: guard/budget.card"]:
             self.assertTrue(modellog.is_harness_refusal(text), text)
         for text in ["step 3/12", "Traceback (most recent call last):", "Permission denied", "",
                      'refuse() { echo "$*" >&2; exit 1; }']:

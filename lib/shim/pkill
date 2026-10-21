@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# The PATH shim for pkill (design-v8 section 2, refusal S01): pkill -f matches whole command lines, so pkill -f python3
+# also kills jobs (GUARD_JOB_ID or SLURM_JOB_ID in their environment), another guard session's processes and the
+# harness's own. When the pattern matches any of those it stops; otherwise the next pkill on PATH runs unchanged. A
+# guide: kill <pid> or /usr/bin/pkill passes.
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+harness=$(dirname "$(dirname "$here")")
+real() {  # real <name>: the first <name> on PATH that is not in this directory
+  local d IFS=:
+  for d in $PATH; do [ "$(readlink -f "$d")" = "$here" ] || [ ! -x "$d/$1" ] || { echo "$d/$1"; return; }; done
+  echo "/usr/bin/$1"
+}
+full=0 sel=() pattern="" i=0
+args=("$@")
+while [ $i -lt ${#args[@]} ]; do
+  a=${args[$i]}
+  case $a in
+    --signal) i=$((i + 2)); continue ;;
+    --signal=*|-[0-9]*|-SIG*|-[A-Z][A-Z]*) i=$((i + 1)); continue ;;
+    --full) full=1 ;;
+    -e|--echo) i=$((i + 1)); continue ;;
+    -[a-zA-Z]*) [[ $a == -*f* ]] && full=1 ;;
+    *) pattern=$a ;;
+  esac
+  sel+=("$a"); i=$((i + 1))
+done
+if [ $full = 1 ]; then
+  ancestors=" " p=$$
+  while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null; do ancestors+="$p "; p=$(awk '/^PPid:/ {print $2}' /proc/"$p"/status 2>/dev/null); done
+  for pid in $("$(real pgrep)" "${sel[@]}" 2>/dev/null); do
+    [[ $ancestors == *" $pid "* ]] && continue
+    env=$(tr '\0' '\n' < /proc/"$pid"/environ 2>/dev/null)
+    cmd=$(tr '\0' ' ' < /proc/"$pid"/cmdline 2>/dev/null)
+    session=$(sed -n 's/^GUARD_SESSION=//p' <<<"$env")
+    if grep -qE '^(GUARD_JOB_ID|SLURM_JOB_ID)=' <<<"$env" || { [ -n "$session" ] && [ "$session" != "${GUARD_SESSION:-}" ]; } \
+      || [[ $cmd == *"$harness/lib/"* || $cmd == *"/opt/harness4research/lib/"* ]]; then
+      exec python3 "$here/../refusals.py" print S01 pattern="$pattern"
+    fi
+  done
+fi
+exec "$(real pkill)" "$@"

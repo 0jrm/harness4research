@@ -3,11 +3,24 @@
 # The merge inspector. CI runs the protected branch's copy of this file against a pull request.
 # It reads the pull request as data and never executes it. --ledger checks one execution ledger in the working tree
 # before it is committed, by the rules the pull request check applies.
+# Each line is STATUS<TAB>check<TAB>detail, and a FAIL's detail starts with its refusal code (lib/refusals.py). When a
+# check fails, the last two lines are the first FAIL as a refusal: H4R-<code> <reason>, then the command that repairs
+# it. The repair amends the head commit, for a push the forge refused; under GitHub Actions (GITHUB_ACTIONS=true) the
+# branch is already pushed, so it makes a new commit instead.
 set -uo pipefail
-status=0
-say() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; [ "$1" = FAIL ] && status=1; return 0; }
+status=0 first=""
+ci=0; [ "${GITHUB_ACTIONS:-}" = true ] && ci=1
+say() {  # say <STATUS> <check> [<code> <reason> [<next>]]: one line, and the refusal of the first FAIL
+  printf '%s\t%s\t%s\n' "$1" "$2" "${3:+$3 }${4:-}"
+  [ "$1" = FAIL ] || return 0
+  status=1
+  local next=${5:-none}
+  [[ $next != *[\<\[]* && $next != *...* ]] || next=none
+  [ -n "$first" ] || first="H4R-$3 ${4//$'\n'/ }"$'\n'"$next"
+}
+finish() { [ -z "$first" ] || printf '%s\n' "$first"; exit $status; }
 
-# The execution ledger is append-only and its field vocabulary is fixed here, as in launch.sh.
+# The execution ledger is append-only and its field vocabulary is fixed here.
 fields=' host gpus start concurrency workers staging mem_stop_gb stage_minutes resume restart '
 # ledger_problems <question card>: reads a ledger on stdin and prints one line per problem. Lines starting with # are
 # comments. A row whose field is outside the vocabulary passes only when a later `void <id>` row retracts it, and a void
@@ -42,98 +55,94 @@ if [ "${1:-}" = --ledger ]; then
   if size=$(git cat-file -s "HEAD:./$2" 2>/dev/null) && ! cmp -s <(git show "HEAD:./$2") <(head -c "$size" "$2"); then
     problems="committed rows changed or removed; the ledger is append-only${problems:+$'\n'$problems}"
   fi
-  if [ -z "$problems" ]; then say PASS execution-ledger "$2"
-  else while IFS= read -r p; do say FAIL execution-ledger "$2: $p"; done <<<"$problems"; fi
-  exit $status
+  if [ -z "$problems" ]; then say PASS execution-ledger "" "$2"
+  else while IFS= read -r p; do say FAIL execution-ledger F05 "execution-ledger: $2: $p"; done <<<"$problems"; fi
+  finish
 fi
 
 base=${1:-${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}}
 head=${2:-HEAD}
-git rev-parse --verify -q "$base" >/dev/null || { say FAIL refs "base $base not found"; exit 1; }
-git rev-parse --verify -q "$head" >/dev/null || { say FAIL refs "head $head not found"; exit 1; }
+git rev-parse --verify -q "$base" >/dev/null || { say FAIL refs F06 "refs: base $base not found" "git fetch origin"; finish; }
+git rev-parse --verify -q "$head" >/dev/null || { say FAIL refs F06 "refs: head $head not found" "git fetch origin"; finish; }
 mapfile -t watch < <(git show "$base:guard/watch.list" 2>/dev/null | sed 's/#.*//' | awk 'NF')
 
-g=$(git diff --name-only "$base...$head" -- guard .github/workflows AGENTS.md CLAUDE.md | tr '\n' ' ')
-if [ -z "$g" ]; then say PASS guard-untouched ""; else say FAIL guard-untouched "a human merges changes to: $g"; fi
+# undo <paths>: one command that puts each path back as the base has it. The fence reads the net change from the merge
+# base to the head, so one amend repairs an edit made in any earlier commit (experiment E3).
+undo() {
+  local restore="" remove="" p cmd="" msg
+  for p in "$@"; do
+    if git cat-file -e "$base:$p" 2>/dev/null; then restore="$restore $(printf '%q' "$p")"
+    else remove="$remove $(printf '%q' "$p")"; fi
+  done
+  [ -z "$restore" ] || cmd="git checkout origin/main --$restore"
+  [ -z "$remove" ] || cmd="${cmd:+$cmd && }git rm -qf --$remove"
+  if [ $ci = 0 ]; then echo "$cmd && git commit --amend --no-edit --allow-empty"; return; fi
+  msg="restore $*"; [[ $msg == *"'"* ]] && msg=$(printf '%q' "$msg") || msg="'$msg'"
+  echo "$cmd && git commit -m $msg"
+}
 
+mapfile -t g < <(git diff --no-renames --name-only "$base...$head" -- guard .github/workflows AGENTS.md CLAUDE.md)
+w=()
+[ ${#watch[@]} -eq 0 ] || mapfile -t w < <(git diff --no-renames --name-only "$base...$head" -- "${watch[@]}")
+# One command repairs every path that failed either check, so it rides both.
+mapfile -t both < <(printf '%s\n' "${g[@]}" "${w[@]}" | awk 'NF && !seen[$0]++')
+if [ ${#g[@]} -eq 0 ]; then say PASS guard-untouched
+else say FAIL guard-untouched F01 "guard-untouched: ${g[*]}; a human merges changes to these" "$(undo "${both[@]}")"; fi
 if [ ${#watch[@]} -gt 0 ]; then
-  w=$(git diff --name-only "$base...$head" -- "${watch[@]}" | tr '\n' ' ')
-  if [ -z "$w" ]; then say PASS watched-paths ""; else say FAIL watched-paths "a human merges changes to: $w"; fi
+  if [ ${#w[@]} -eq 0 ]; then say PASS watched-paths
+  else say FAIL watched-paths F02 "watched-paths: ${w[*]}; a human merges changes to these" "$(undo "${both[@]}")"; fi
 fi
 
 mb=$(git merge-base "$base" "$head")
-cards=$(git diff --name-status "$base...$head" | awk '$1 !~ /^A/ && $NF ~ /^runs\/[^/]+\/question\.card$/ && $NF !~ /^runs\/_template\// {print $NF}' | tr '\n' ' ')
-# An added card is frozen too: one commit adds it, and the head holds what that commit added.
-while read -r f; do
-  c=$(git rev-list --full-history --no-merges "$mb..$head" -- "$f")
-  [ "$(wc -w <<<"$c")" = 1 ] && [ "$(git rev-parse "$c:$f")" = "$(git rev-parse "$head:$f")" ] || cards="$cards$f "
-done < <(git diff --name-only --diff-filter=A "$base...$head" -- 'runs/*/question.card' | grep -v '^runs/_template/')
-if [ -z "$cards" ]; then say PASS question-cards-frozen ""; else say FAIL question-cards-frozen "changed after first commit, open a new run id: $cards"; fi
-
-first_val() {
-  awk -v k="$1" -v h="${2:-0}" '
-    h && /^## / { exit }
-    index($0, k ":") == 1 {
-      sub("^" k ":", "")
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "")
-      print
-      exit
-    }
-  '
+# A question card is a CardRecord the broker writes once on run/<id> (design-v8 section 3): an added card carries exactly
+# its keys, comes from one commit by guard broker that the head still holds, and, where the forge verifies records
+# (git config guard.records signed), that commit's signature. A card already on the base never changes.
+record_keys="backend command core_hours cores gpu_hours gpus minutes nodes session tasks why written_by"
+card_problem() {  # card_problem <path>: why an added card is not the broker's, or nothing
+  local c keys
+  c=$(git rev-list --full-history --no-merges "$mb..$head" -- "$1")
+  [ "$(wc -w <<<"$c")" = 1 ] && [ "$(git rev-parse "$c:$1")" = "$(git rev-parse "$head:$1")" ] || { echo "changed after it was added"; return; }
+  [ "$(git log -1 --format=%cn "$c")" = "guard broker" ] || { echo "not committed by guard broker"; return; }
+  keys=$(git show "$head:$1" | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\):.*/\1/p' | sort | tr '\n' ' ')
+  [ "$keys" = "$record_keys " ] || { echo "keys are not the CardRecord's"; return; }
+  [ "$(git config guard.records 2>/dev/null)" != signed ] || git verify-commit "$c" >/dev/null 2>&1 || echo "unsigned"
 }
+cards=()
+while read -r st f; do
+  case $f in runs/_template/*) continue ;; esac
+  [ "$st" != A ] || [ -n "$(card_problem "$f")" ] && cards+=("$f")
+done < <(git diff --no-renames --name-status "$base...$head" -- 'runs/*/question.card')
+if [ ${#cards[@]} -eq 0 ]; then say PASS broker-cards
+else say FAIL broker-cards F03 "${cards[*]} is a card only the broker writes; guard run writes it" "$(undo "${cards[@]}")"; fi
 
-unset_setting=""
-while read -r f; do
-  [ -n "$f" ] || continue
-  case "$f" in runs/_template/*) continue ;; esac
-  s=$(git show "$head:$f" | first_val setting)
-  [ -n "$s" ] || unset_setting="$unset_setting $f"
-done < <(git diff --name-only --diff-filter=A "$base...$head" -- 'runs/*/question.card')
-if [ -z "$unset_setting" ]; then say PASS setting-key ""; else say FAIL setting-key "added card has no setting:$unset_setting"; fi
-
-# name_parent <id> <ids>: the run id that <id> extends by name, as the atlas reads it. A prefix ending in -
-# wins (the longest), then a trailing letter steps back (054b to 054a, else 054), then a trailing number (054 to 053).
-name_parent() {
-  local id=$1 ids=" $2 " p best="" pre l n
-  for p in $2; do [[ $id == "$p"-* ]] && [ ${#p} -gt ${#best} ] && best=$p; done
-  [ -z "$best" ] || { echo "$best"; return; }
-  if [[ $id =~ ^(.*[0-9])([a-z])$ ]]; then
-    pre=${BASH_REMATCH[1]}; l=${BASH_REMATCH[2]}
-    while [ "$l" != a ]; do
-      l=$(tr b-z a-y <<<"$l")
-      [[ $ids == *" $pre$l "* ]] && { echo "$pre$l"; return; }
-    done
-    [[ $ids != *" $pre "* ]] || echo "$pre"
-  elif [[ $id =~ ^(.*[^0-9])?([0-9]+)$ ]]; then
-    pre=${BASH_REMATCH[1]}; n=${BASH_REMATCH[2]}
-    [ $((10#$n)) -gt 0 ] || return 0
-    p=$pre$(printf "%0${#n}d" $((10#$n - 1)))
-    [[ $ids != *" $p "* ]] || echo "$p"
+# receipt_ok <id>: the broker published receipt <id> on guard/receipts, as lib/guard/receipts-check.sh verifies against
+# broker_key: on the base's card (exit 2 is F04). The checker is this file's sibling when the fence runs from a file,
+# else the base's guard/run shows the pinned harness's copy; a base that has none proves no receipt.
+declare -A receipts=()
+checker=""
+if [ -f "${BASH_SOURCE[0]:-}" ] && [ -f "$(dirname "${BASH_SOURCE[0]}")/receipts-check.sh" ]; then
+  checker=$(cat "$(dirname "${BASH_SOURCE[0]}")/receipts-check.sh")
+fi
+receipt_ok() {
+  if [ -z "${receipts[$1]+x}" ]; then
+    receipts[$1]=1
+    [ -n "$checker" ] || checker=$(HPC_GUARD_REF=$base bash -c "$(git show "$base:guard/run" 2>/dev/null)" guard/run \
+      --show receipts-check 2>/dev/null </dev/null) || checker=""
+    [ -z "$checker" ] || ! bash -c "$checker" receipts-check.sh "$base" "$1" >/dev/null 2>&1 </dev/null || receipts[$1]=0
   fi
+  return "${receipts[$1]}"
 }
-# An undeclared lineage only warns, because the atlas still infers the edge from the name.
-ids=$(git ls-tree -r --name-only "$head" -- runs | sed -n 's#^runs/\([^/]*\)/question\.card$#\1#p' | grep -v -e '^_template$' -e '^explore-' | tr '\n' ' ')
-undeclared=""
-while read -r f; do
-  [ -n "$f" ] || continue
-  id=${f#runs/}; id=${id%/question.card}
-  c=$(git show "$head:$f")
-  sup=$(first_val supersedes <<<"$c"); spawn=$(first_val spawned_from <<<"$c")
-  { [ -n "$sup" ] && [[ $sup != *"<"* ]]; } || { [ -n "$spawn" ] && [[ $spawn != *"<"* ]]; } && continue
-  p=$(name_parent "$id" "$ids")
-  [ -z "$p" ] || undeclared="$undeclared $id extends $p;"
-done < <(git diff --name-only --diff-filter=A "$base...$head" -- 'runs/*/question.card')
-[ -z "$undeclared" ] || say WARN card-lineage "set supersedes or spawned_from (or none) by amending the commit that added the card, since a second commit freezes the run:${undeclared%;}"
-
 # unproven_rows <ref> <report> [shape]: line numbers of ## Evidence rows with no backticked path that exists at <ref>,
-# from the repository top or the report's directory, with any :line suffix dropped. With shape, a token that
-# merely looks like a path is enough, which is the rule a modified report's merge-base copy may still be under.
+# from the repository top or the report's directory, with any :line suffix dropped, and no backticked receipt id
+# (L and 10 hex digits) the broker published. With shape, a token that merely looks like a path or a receipt id is
+# enough, which is the rule a modified report's merge-base copy may still be under.
 unproven_rows() {
   local ref=$1 f=$2 shape=${3:-} nr tok p
   local -A seen=() ok=()
   while IFS=$'\t' read -r nr tok; do
     seen[$nr]=1
-    if [ -n "$shape" ]; then [[ $tok == *[/.]* ]] && ok[$nr]=1; continue; fi
+    if [ -n "$shape" ]; then [[ $tok == *[/.]* || $tok =~ ^L[0-9a-f]{10}$ ]] && ok[$nr]=1; continue; fi
+    if [[ $tok =~ ^L[0-9a-f]{10}$ ]]; then receipt_ok "$tok" && ok[$nr]=1; continue; fi
     tok=${tok#./}
     [ -n "$tok" ] && [[ $tok != /* && $tok != *..* && $tok != *[[:space:]]* ]] || continue
     for p in "$tok" "${tok%%:*}" "${f%/*}/$tok" "${f%/*}/${tok%%:*}"; do
@@ -153,31 +162,8 @@ while read -r st f; do
   rows=$(unproven_rows "$head" "$f" ${rule:+"$rule"})
   [ -z "$rows" ] || unproven="$unproven $f:$(echo $rows | tr ' ' ',')"
 done < <(git diff --name-status --no-renames --diff-filter=AM "$base...$head" -- 'runs/*/report.md')
-if [ -z "$unproven" ]; then say PASS evidence-paths ""; else say FAIL evidence-paths "evidence rows without a backticked path to a file committed on the branch:$unproven"; fi
-
-# A rule added later judges an added file, and a modified file only if its merge-base copy already passed.
-bad_h=""
-while read -r st f; do
-  [ -n "$f" ] || continue
-  [ "$st" = M ] && [ -z "$(git show "$mb:$f" | first_val hypothesis 1)" ] && continue
-  hyp=$(git show "$head:$f" | first_val hypothesis 1)
-  if [ -z "$hyp" ] || printf '%s\n' "$hyp" | grep -qE '^<[^>]*>$'; then
-    bad_h="$bad_h $f"
-    continue
-  fi
-  folded=$(printf '%s\n' "$hyp" | LC_ALL=C awk '{
-    s=$0
-    gsub(/\357\274\217|\342\201\204|\342\210\225/, "/", s)
-    gsub(/\357\274\256|\357\275\216/, "n", s)
-    gsub(/\357\274\241|\357\275\201/, "a", s)
-    print tolower(s)
-  }')
-  [ "$folded" = n/a ] && continue
-  chyp=$(git show "$head:${f%/report.md}/question.card" 2>/dev/null | first_val hypothesis)
-  [ -n "$chyp" ] && [ "$hyp" = "$chyp" ] && continue
-  bad_h="$bad_h $f"
-done < <(git diff --name-status --no-renames --diff-filter=AM "$base...$head" -- 'runs/*/report.md')
-if [ -z "$bad_h" ]; then say PASS hypothesis-line ""; else say FAIL hypothesis-line "must be n/a or the card hypothesis:$bad_h"; fi
+if [ -z "$unproven" ]; then say PASS evidence-paths
+else say FAIL evidence-paths F04 "evidence-paths:$unproven cites no committed path or receipt"; fi
 
 ledger_ok() {  # ledger_ok <ref> <file>: ledger_problems finds nothing in the file at the ref
   [ -z "$(git show "$1:$2" 2>/dev/null | ledger_problems "$(git show "$1:${2%/execution.tsv}/question.card" 2>/dev/null)")" ]
@@ -202,7 +188,7 @@ if [ -n "$voids" ]; then
     | awk '!/^runs\/[^\/]+\// || /^runs\/_template\// || /\/(question\.card|report\.md)$/ || /^runs\/[^\/]+\/incidents\//' | tr '\n' ' ')
   [ -z "$other" ] || bad_l="$bad_l$voids (a void row goes in a pull request of run records only; this one also changes ${other% })"
 fi
-if [ -z "$bad_l" ]; then say PASS execution-ledger ""; else say FAIL execution-ledger "append rows with a field from the vocabulary; a change to the design needs a new card:$bad_l"; fi
+if [ -z "$bad_l" ]; then say PASS execution-ledger; else say FAIL execution-ledger F05 "execution-ledger: append rows with a field from the vocabulary; a change to the design needs a new card:$bad_l"; fi
 
 # history_problem <ref> <report>: prints why a run with a ledger fails the rule that its report has a
 # ## Execution history section citing every row id, or nothing.
@@ -224,13 +210,10 @@ while read -r st f; do
   [ "$st" = M ] && [ -n "$(history_problem "$mb" "$f")" ] && continue
   p=$(history_problem "$head" "$f"); [ -z "$p" ] || bad_x="$bad_x $f ($p)"
 done < <(git diff --name-status --no-renames --diff-filter=AM "$base...$head" -- 'runs/*/report.md')
-if [ -z "$bad_x" ]; then say PASS execution-history ""; else say FAIL execution-history "## Execution history must cite every execution.tsv row id:$bad_x"; fi
-
-ex=$(git diff --name-only --diff-filter=AM "$base...$head" -- 'runs/explore-*/report.md' | tr '\n' ' ')
-if [ -z "$ex" ]; then say PASS no-exploration-reports ""; else say FAIL no-exploration-reports "rerun under a question card before reporting: $ex"; fi
+if [ -z "$bad_x" ]; then say PASS execution-history; else say FAIL execution-history F07 "execution-history: ## Execution history must cite every execution.tsv row id:$bad_x"; fi
 
 for ctx in AGENTS.md CLAUDE.md; do
   n=$(git show "$head:$ctx" 2>/dev/null | wc -l)
-  [ "$n" -le 150 ] || say WARN context-size "$ctx has $n lines; keep landmines only"
+  [ "$n" -le 150 ] || say WARN context-size "" "$ctx has $n lines; keep landmines only"
 done
-exit $status
+finish

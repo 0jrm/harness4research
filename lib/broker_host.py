@@ -13,7 +13,9 @@ one; on skynet, whose user manager answers only in interactive logins, set GUARD
 directory /tmp/guard-$UID/s-<session>/ (mode 0700; GUARD_RUNTIME_DIR moves the parent) that the sandbox sees at
 /run/guard:
 
-    scheduler.sock   eval/broker/broker.py's scheduler verbs, one broker per project, against this host's Slurm by
+    records.sock     lib/broker/records.py's needs-you queue and the verbs lib/broker/server.py registers there
+                     (ask, holdout, receipt), the project's records in its state directory
+    scheduler.sock   lib/broker/scheduler.py's verbs, one broker per project, against this host's Slurm by
                      absolute path; with no sbatch on the host it refuses every request
     net.sock         a CONNECT proxy to the session's allowlist and no other host: net_allow: in the project's
                      guard/budget.card as the broker's mirror of main has it (decision D4: PyPI and conda when the card
@@ -26,7 +28,7 @@ directory /tmp/guard-$UID/s-<session>/ (mode 0700; GUARD_RUNTIME_DIR moves the p
 A model file holds upstream: URL, key: FILE (beside it, mode 0600; none for a local vLLM) and header: authorization
 (sent as Bearer) or a header name such as x-api-key. Its state, which no sandbox sees:
 ${XDG_STATE_HOME:-~/.local/state}/guard/, holding key (the signing key), projects/<name>/ (each project's ledger,
-mirror and spool, as eval/broker lays them out, and the origin pinned the first time the project was entered),
+mirror and spool, as lib/broker lays them out, and the origin pinned the first time the project was entered),
 broker.log, sessions.jsonl, net.jsonl, model.jsonl and refusals.jsonl. The sockets fail closed: with the broker down
 nothing answers, and a sandbox has no other route out."""
 import contextlib
@@ -50,11 +52,32 @@ import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HARNESS = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(HARNESS, "eval", "broker"))
-import broker as scheduler  # noqa: E402  eval/broker/broker.py, reused as the scheduler socket
+import _path  # noqa: E402,F401
+from broker import scheduler, server as sockets  # noqa: E402  lib/broker/, the scheduler socket
 import gateway  # noqa: E402  lib/gateway.py, the model gateway and the allowlist
 
 SOCKET_MAX = 104  # sun_path is 108 bytes on Linux; leave room for the terminating NUL and a margin
+
+
+def person_config(key):
+    """A key's value in the person's guard config (lib/config.sh's file), or None."""
+    path = os.environ.get("GUARD_CONFIG") or os.path.join(config_dir(), "config")
+    try:
+        with open(path) as f:
+            for line in f:
+                k, sep, v = line.partition(":")
+                if sep and k == key:
+                    return v.strip() or None
+    except OSError:
+        pass
+    return None
+
+
+def project_name(path):
+    """The name of a project's directory under the broker's state, projects/<name>/: lib/needs_you.py finds a
+    project's asks there by it."""
+    real = os.path.realpath(path)
+    return f"{os.path.basename(real) or 'root'}-{hashlib.sha1(real.encode()).hexdigest()[:8]}"
 
 
 def xdg(var, default):
@@ -187,7 +210,7 @@ class Host:
     def project(self, path):
         """The scheduler broker for a project, made once; its ledger and spool outlive every session."""
         if path not in self.projects:
-            name = f"{os.path.basename(path) or 'root'}-{hashlib.sha1(path.encode()).hexdigest()[:8]}"
+            name = project_name(path)
             pdir = os.path.join(self.state, "projects", name)
             os.makedirs(pdir, exist_ok=True)
             # The origin main is read from is pinned the first time: the clone's .git/config is the agent's to edit.
@@ -201,6 +224,10 @@ class Host:
             cfg = {"session": name, "project": path, "paths": [[path, path]], "origin": pinned,
                    "slurm_bin": self.slurm_bin, "slurm_env": {}, "user": os.environ.get("USER", ""),
                    "compute_bwrap": False}
+            if os.path.exists(os.path.join(self.state, "key")):  # guard broker setup ran; else receipts stay local
+                cfg["signing_key"] = os.path.join(self.state, "key")
+            if person_config("receipts_email"):
+                cfg["receipts_email"] = person_config("receipts_email")
             with open(os.path.join(pdir, "config.json"), "w") as f:
                 json.dump(cfg, f, indent=1)
             self.projects[path] = scheduler.Broker(pdir, cfg)
@@ -225,11 +252,14 @@ class Host:
         net = list(dict.fromkeys(card + [h for h in profile if h]))
         session = Session(sid, path, project, str(req.get("agent")), net, req.get("pid"))
         session.record = os.path.join(private_dir(os.path.join(self.state, "limits")), f"s-{sid}.jsonl")
-        sched = scheduler.Server(os.path.join(path, "scheduler.sock"), scheduler.Handler)
-        sched.answer = lambda r: self.logged(sid, "scheduler", r, broker.handle(r))
+        sched = sockets.bind(os.path.join(path, "scheduler.sock"), "scheduler", broker,
+                             lambda r, reply: self.logged(sid, "scheduler", r, reply), session=sid)
         self.serve_socket(session, "scheduler", sched)
+        recs = sockets.bind(os.path.join(path, "records.sock"), "records", broker,
+                            lambda r, reply: self.logged(sid, "records", r, reply), session=sid)
+        self.serve_socket(session, "records", recs)
         if net:
-            proxy = scheduler.Server(os.path.join(path, "net.sock"), Connect)
+            proxy = sockets.Server(os.path.join(path, "net.sock"), Connect)
             proxy.host, proxy.allowed = self, set(net)
             self.serve_socket(session, "net", proxy)
         if req.get("model"):
@@ -408,7 +438,7 @@ def serve():
         os.unlink(control)
     host = Host(state, runtime)
     signal.signal(signal.SIGTERM, lambda *_: (host.answer({"verb": "stop"}), None))
-    server = scheduler.Server(control, Control)
+    server = sockets.Server(control, Control)
     server.host = host
     print(f"guard broker: serving {control}, pid {os.getpid()}, harness {HARNESS}", flush=True)
     threading.Thread(target=reaper, args=(host,), daemon=True).start()

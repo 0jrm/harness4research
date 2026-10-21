@@ -15,11 +15,11 @@
 | `base`, `base_sha` | the protected branch the guard inputs are read from, and its commit |
 | `head`, `behind_base` | the checkout's HEAD, and how many commits of `base` it lacks. Above 0, the page tells the reader to pull |
 | `worktree`, `uncommitted` | whether uncommitted run files were read, and how many there were |
-| `rippled` | whether `guard/run ripples` ran. When false, no check reached a verdict |
+| `rippled` | whether the atlas's own run checks ran. When false, no check reached a verdict |
 | `summary` | counts of `runs`, of runs with a `ripple`, a `handled` failure or an `unchecked` line, and of runs where `needs_you` is not empty |
 | `waters` | one entry per place compute ran: `name`, `fence` (`bank` Slurm with a capped account, `bump` a launch host, `none` no gate), `runs`, `hand` (runs placed only by `execution.tsv` rows), `desc` and `count` |
 | `budget`, `version`, `watch`, `code`, `globs` | the budget card, `guard/VERSION`, the watch list, the code repositories reports cite, and the `--runs` filters |
-| `lineage` | edges of the question map: `from`, `to`, `kind` (`supersedes`, `spawned_from` or `inferred`) and `lineage_inferred`. An inferred edge links a card that sets neither key to the id it looks like it grew out of: `<parent>-<suffix>`, a trailing letter such as `054b` after `054` or `e2c` after `e2b`, or a trailing number one higher. The page draws it dotted and labels it "inferred from name". A key set to `none` stops inference |
+| `lineage` | edges of the question map, between v7 question cards only (a `guard run` card has no lineage keys and is never inferred into it): `from`, `to`, `kind` (`supersedes`, `spawned_from` or `inferred`) and `lineage_inferred`. An inferred edge links a card that sets neither key to the id it looks like it grew out of: `<parent>-<suffix>`, a trailing letter such as `054b` after `054` or `e2c` after `e2b`, or a trailing number one higher. The page draws it dotted and labels it "inferred from name". A key set to `none` stops inference |
 | `branches` | remote branches ahead of `base`, with what they change under `guard/`, `.github/` and watched paths |
 | `queue` | the `guard needs-you` items that are `open` or `acked`, the latest row of each, in id order. Read from `guard/needs-you.tsv` in the git common directory on every survey, so `--serve` shows a change on the next re-survey. Empty when the file does not exist. Each item has `id`, `ts` (when its latest row was written), `state`, `kind` (`approve`, `run` or `check`), `title`, `why`, `expect`, `undo`, `note`, `paths` (absolute, checked when queued), `commands` (in the order to run them) and `source`. The page lists open items first under "Needs you" and acked items last, muted |
 | `runs` | one object per run, below |
@@ -34,13 +34,13 @@
 | `severity` | `ripple` (a RIPPLE line, stop spending), `handled` (a failure an incident or ledger row handles), `warn` (a violation below), or `quiet` |
 | `needs_you` | short reasons the reader has to act, such as `awaiting verdict`, `uncommitted card`, `guard touched`, `report waits for review on <branch>` or `checkout behind <base>, run git pull`. Empty when nothing waits on a person |
 | `last_event` | the latest thing the run left behind: `type` (`card frozen`, `card edited`, `job`, `execution row`, `incident` or `report`), `time` in UTC, and `what` |
-| `card`, `card_from`, `card_frozen_on` | the question card's keys; `here` when read from this checkout or the base branch's name when only `base` has it; the ref whose history froze it, or null when nothing committed it |
+| `card`, `card_from`, `card_frozen_on` | the question card's keys, or the keys of the card `guard run` wrote; `here` when read from this checkout, the base branch's name when only `base` has it, or `origin/run/<id>` when only the run's records branch has it; the ref whose history froze it, or null when nothing committed it |
 | `card_history`, `card_blob` | the card's commits, oldest first, and its blob hash |
 | `manifests` | scheduler records, one per job |
 | `execution` | the `execution.tsv` ledger: `path`, `committed`, `header_ok`, and `rows` with `id ts field value why evidence`. Null when the run has none |
 | `incidents`, `stray_incidents` | incident write-ups under `incidents/`, and `incident*.md` files at the run root, where the guard does not count them |
 | `report`, `report_refs` | the report read here, with its evidence rows and their receipts; when there is none here, the refs that have one |
-| `ripples` | the run's `guard/run ripples` lines: `status`, `check`, `detail` |
+| `ripples` | the lines of the atlas's own run checks for the run: `status`, `check`, `detail` |
 | `violations` | sentences for what breaks the card discipline |
 | `committed_files`, `uncommitted_files`, `checks` | the run's files and domain checks |
 

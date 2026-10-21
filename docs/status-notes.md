@@ -1,14 +1,13 @@
 ## What runs
 
-Phase 1 of [plan-v8.md](plan-v8.md), on skynet: our vLLM on GPU 1 (tmux h4r-vllm) and the experiment queues (tmux
-h4r-exp, h4r-exp2, h4r-exp3), each experiment from its `exp/<id>` branch. Running E2b; queued E6b, E11, E4b, E9.
-Verdicts: E8 and E5 confirmed, A2 a valid control, E2, E3 and E6 inconclusive, E4 killed; E1r and E7 preliminary
-killed, records pending.
+Phase 1 on skynet (GPU 1): E7b running, then E10 and E9. Experiments have no pull requests, so the table lists them
+unstarted. Verdicts: E8, E5, E6b, E11, E4b confirmed; A2 a control; E2, E3, E6, E2b, E1 inconclusive; E4, E7
+killed, retried as E4b, E7b. The owner approved the Phase 1 gate on 2026-10-20; a kill in E7b, E10, E9 stops the
+program. Phase 2 is #142.
 
 ## Releases
 
-v6.2 (7126a73) and v7.0 (4281354) are tagged. RCC's reinstall on v6.2 is checkpoint 0 (n50), still open; its move to
-v7.0 is checkpoint 3 (n57), when the owner asks. The redesign ships as v8.
+v6.2 and v7.0 are tagged; the redesign ships as v8.
 
 ## Deviations from the plan
 

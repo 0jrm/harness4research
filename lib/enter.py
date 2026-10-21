@@ -250,7 +250,7 @@ def main(argv):
     shutil.rmtree(bindir, ignore_errors=True)
     os.mkdir(bindir, 0o700)
     for stand_in in STAND_INS:
-        os.symlink(os.path.join(HARNESS, "eval", "broker", "client.py"), os.path.join(bindir, stand_in))
+        os.symlink(os.path.join(HERE, "broker", "client.py"), os.path.join(bindir, stand_in))
     os.symlink(os.path.join(HARNESS, "bin", "guard"), os.path.join(bindir, "guard"))
 
     try:

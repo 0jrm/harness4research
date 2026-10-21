@@ -1,4 +1,4 @@
-"""The broker's records: design increment 2 of docs/design-sandboxed-agents.md, in the evaluation (W1.2).
+"""The broker's records: design increment 2 of docs/design-sandboxed-agents.md (W1.2).
 
 The records socket offers four verbs, add, list, show and find, over three stores:
 
@@ -18,13 +18,14 @@ import datetime as dt
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib"))
-import needs_you  # noqa: E402
+import needs_you
+import refusals
 
 RUN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 VERBS = ("add", "list", "show", "find")
@@ -93,7 +94,25 @@ class Records:
             return {"rc": 0, "out": out}
         except (Refused, needs_you.Refused) as e:
             self.log({"verb": verb, "store": store, "refused": str(e)})
-            return {"rc": 2, "err": f"guard broker: refused: {e}\n"}
+            return refusals.reply(self.refusal(str(e), req))
+
+    @staticmethod
+    def refusal(why, req):
+        """A refused request as a coded refusal (A9): a row the fence's ledger check fails is F05; anything else is
+        an argument the store does not take, U01, line 2 the form that runs."""
+        if why.startswith("guard fence --ledger: "):
+            return refusals.refuse("F05", reason=why[len("guard fence --ledger: "):].replace("F05 execution-ledger: ", ""))
+        if req.get("store") == "needs-you" and req.get("verb") == "add":
+            title = str((req.get("item") or {}).get("title") or "what needs a person")
+            line = f"guard needs-you add --kind check --title {shlex.quote(title)}"
+        elif req.get("store") == "ledger" and isinstance(req.get("run"), str) and RUN.match(req["run"]):
+            line = f"guard ledger list {req['run']}"
+        else:
+            line = "guard needs-you" if req.get("store") == "needs-you" else "guard status"
+        try:
+            return refusals.refuse("U01", what=why, next=line)
+        except ValueError:
+            return refusals.refuse("U01", what=why, next="guard status")
 
     def log(self, row):
         with open(self.log_path, "a") as f:
@@ -362,28 +381,21 @@ class Records:
         path, card = f"runs/{run}/execution.tsv", f"runs/{run}/question.card"
         card_text = self.blob(base, card) or self.mirror.show(card)
         if card_text is None:
-            raise Refused(f"no {card} on run/{run} or main; guard card add {run} first")
+            raise Refused(f"no {card} on run/{run} or main; guard run runs/{run} writes it with the first job")
         current = self.blob(base, path) or self.mirror.show("runs/_template/execution.tsv") \
             or "id\tts\tfield\tvalue\twhy\tevidence\n"
         current += "" if current.endswith("\n") else "\n"
         n = sum(1 for line in current.splitlines()[1:] if line.strip() and not line.startswith("#")) + 1
         new = current + "\t".join([f"x{n}", now(), row["field"], row["value"], row["why"], row["evidence"]]) + "\n"
-        # main's guard/run says where the fence comes from: the harness at the pin, or guard/bin/ before the pin.
-        runner = self.mirror.show("guard/run")
-        shown = runner and subprocess.run(
-            ["bash", "-c", runner, "guard/run", "--show", "fence"], cwd=self.mirror.path, capture_output=True, text=True,
-            env={"PATH": os.environ["PATH"], "HOME": self.mirror.path, "GIT_CONFIG_NOSYSTEM": "1",
-                 "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_DIR": self.mirror.path, "HPC_GUARD_REF": "refs/heads/main"})
-        if not shown or shown.returncode:
-            raise Refused("main's guard/run cannot give the fence to check the row with"
-                          + (f" ({shown.stderr.strip()[-200:]})" if shown else ""))
-        fence = shown.stdout
+        # The fence is this harness's own: schema 8's guard/run has no --show fence, and the broker runs the
+        # harness the project pins, as guard ledger does without a broker.
+        fence = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "guard", "fence.sh")
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "runs", run))
             for rel, data in ((path, new), (card, card_text)):
                 with open(os.path.join(tmp, rel), "w") as f:
                     f.write(data)
-            checked = subprocess.run(["bash", "-c", fence, "guard/bin/fence.sh", "--ledger", path], cwd=tmp,
+            checked = subprocess.run(["bash", fence, "--ledger", path], cwd=tmp,
                                      capture_output=True, text=True,
                                      env={"PATH": os.environ["PATH"], "GIT_DIR": os.path.join(tmp, "none")})
         if checked.returncode:

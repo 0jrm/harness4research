@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# The PATH shim for rm (design-v8 section 2, refusal S02): rm -rf stops unless every path is inside the project's
+# runs/ directory or, outside the project, in a temporary directory, so a project's data and checkout survive it. Every
+# other rm runs the next rm on PATH unchanged. A guide: /bin/rm -rf passes.
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+real() {  # real <name>: the first <name> on PATH that is not in this directory
+  local d IFS=:
+  for d in $PATH; do [ "$(readlink -f "$d")" = "$here" ] || [ ! -x "$d/$1" ] || { echo "$d/$1"; return; }; done
+  echo "/bin/$1"
+}
+r=0 f=0 targets=() opts=1
+for a in "$@"; do
+  if [ $opts = 1 ]; then
+    case $a in
+      --) opts=0; continue ;;
+      --recursive) r=1; continue ;;
+      --force) f=1; continue ;;
+      --*) continue ;;
+      -?*) [[ $a == *[rR]* ]] && r=1; [[ $a == *f* ]] && f=1; continue ;;
+    esac
+  fi
+  targets+=("$a")
+done
+if [ $r = 1 ] && [ $f = 1 ]; then
+  top=$(git rev-parse --show-toplevel 2>/dev/null || true)
+  run_dir=${top:+$top/runs}
+  if [ -n "$top" ] && [[ $PWD/ == "$top"/runs/?*/* ]]; then rest=${PWD#"$top"/runs/}; run_dir=$top/runs/${rest%%/*}; fi
+  for t in "${targets[@]}"; do
+    p=$(realpath -m -- "$t")
+    if [ -L "$t" ] && [[ $t != */ ]]; then p=$(realpath -m -- "$(dirname -- "$t")")/$(basename -- "$t"); fi
+    if [ -n "$top" ] && [[ $top/ == "$p"/* || $p == "$top"/* ]]; then
+      [[ $p == "$top"/runs/?* ]] && continue
+    else
+      case $p in "${TMPDIR:-/tmp}"/?*|/tmp/?*|/var/tmp/?*) continue ;; esac
+    fi
+    exec python3 "$here/../refusals.py" print S02 path="$t" run_dir="${run_dir:-the project runs directory}"
+  done
+fi
+exec "$(real rm)" "$@"

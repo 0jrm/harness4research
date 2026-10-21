@@ -11,6 +11,9 @@ The config is the question card's machine part:
   "question_card": "eval/cards/first-qwen3.6.card",    frozen: committed once, unchanged, no <placeholder>
   "episodes_dir": "~/.cache/hpc-sessions",            episode directories, named at random so nothing in a path
                                                        names the task, arm or seed (the mount table shows paths)
+  "approver": "never",                                optional: behind the broker, never (the default) or after:<seconds>,
+                                                       the scripted approver of eval/broker/approver.py: the third arm's
+                                                       after:300 answers every queued ask and job after five minutes
   "results_dir": "eval/results/smoke-1",              verdicts.jsonl
   "model": {"upstream": "http://127.0.0.1:9090",      the model host's relay
             "alias": "default-model",                 the name the proxy pins every request to
@@ -316,8 +319,12 @@ def run_episode(cfg, ep, family, variant, arm, seed):
     if disk_free_gb(ep) < MIN_FREE_GB:
         return {"episode": ep, "error": f"disk: {disk_free_gb(ep):.0f} GiB free under episodes_dir, below "
                 f"{MIN_FREE_GB}", "stop_run": True}
+    env = dict(os.environ)
+    if ARMS[arm].broker:
+        env["H4R_APPROVER"] = cfg.get("approver", "never")
     built = subprocess.run([os.path.join(HERE, "episode.sh"), family, variant, ARMS[arm].harness, ep, "--seed",
-                            str(seed)] + (["--broker"] if ARMS[arm].broker else []), capture_output=True, text=True)
+                            str(seed)] + (["--broker"] if ARMS[arm].broker else []), capture_output=True, text=True,
+                           env=env)
     if built.returncode:
         subprocess.run([os.path.join(HERE, "env", "down.sh"), ep])
         return {"episode": ep, "error": "episode.sh: " + built.stderr.strip()[-300:]}
@@ -430,6 +437,8 @@ def main():
     unfrozen = "--unfrozen" in args
     card_sha = card_commit = None
     every = matrix_cases(cfg["matrix"])
+    if not re.fullmatch(r"never|after:[0-9]+", cfg.get("approver", "never")):
+        sys.exit(f"run.py: approver {cfg['approver']!r} is never or after:<seconds>")
     python = offered_python()
     if not unfrozen:
         require_site_python(python)

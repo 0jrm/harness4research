@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# The PATH shim for git (design-v8 section 2, refusal S03): git push with --force, --force-with-lease, -f or a +refspec
+# rewrites a branch other sessions and the forge already hold, so it stops with the command that redoes the commit
+# instead. Every other git command runs the next git on PATH unchanged. A guide: /usr/bin/git push --force passes.
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+real() {  # real <name>: the first <name> on PATH that is not in this directory
+  local d IFS=:
+  for d in $PATH; do [ "$(readlink -f "$d")" = "$here" ] || [ ! -x "$d/$1" ] || { echo "$d/$1"; return; }; done
+  echo "/usr/bin/$1"
+}
+args=("$@"); i=0
+while [ $i -lt ${#args[@]} ]; do
+  case ${args[$i]} in
+    -C|-c|--git-dir|--work-tree|--namespace|--exec-path|--super-prefix|--config-env) i=$((i + 2)) ;;
+    -*) i=$((i + 1)) ;;
+    *) break ;;
+  esac
+done
+if [ "${args[$i]:-}" = push ]; then
+  force=0 positional=()
+  for a in "${args[@]:$((i + 1))}"; do
+    case $a in
+      --force|--force-with-lease|--force-with-lease=*|--force-if-includes|--mirror) force=1 ;;
+      --*) ;;
+      -*f*) force=1 ;;
+      -*) ;;
+      +*) force=1; positional+=("${a#+}") ;;
+      *) positional+=("$a") ;;
+    esac
+  done
+  if [ $force = 1 ]; then
+    branch=$(git_real=$(real git); "$git_real" "${args[@]:0:$i}" branch --show-current 2>/dev/null)
+    if [ ${#positional[@]} -ge 2 ]; then spec=${positional[1]}; branch=${spec#*:}; branch=${branch#refs/heads/}; fi
+    exec python3 "$here/../refusals.py" print S03 branch="${branch:-main}"
+  fi
+fi
+exec "$(real git)" "$@"

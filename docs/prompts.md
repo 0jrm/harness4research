@@ -49,14 +49,13 @@ do not fix it; add a row to guard/RESET.md with evidence and continue. Report ea
 skipped with its reason.
 ```
 
-## First carded run
+## First run
 
 ```text
-Use poteto-mode and the safe-autonomous-hpc-science skill. Copy runs/_template/question.card to
-runs/<run_id>/question.card and fill it from the question below. Stop and show me the card before any
-compute. After I approve it, commit it, then follow the skill's run lifecycle: baseline, smoke ladder,
-guard/run preflight for every submission, guard/run ripples at every wake, an independent verifier, and
-runs/<run_id>/report.md from the template.
+Use poteto-mode and the safe-autonomous-hpc-science skill. Start with guard status. Follow the skill's
+run lifecycle for the question below: baseline, smoke ladder, guard run for every submission with the
+question as its --why, guard wait for each job, an independent verifier, and runs/<run_id>/report.md
+from the template.
 
 Question: <one sentence>
 ```

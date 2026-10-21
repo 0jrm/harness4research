@@ -5,10 +5,13 @@
 # The project holds no scripts: guard/budget.card's harness: line pins this harness's HEAD, its release tag when HEAD
 # is one. Online, guard/run reads the scripts from this clone at the pin. When this host cannot reach the harness's
 # origin (offline), init also writes guard/harness-<pin>.sh, the scripts at the pin. --online or --offline overrides.
+# broker_key: on the card is this host's broker key ($XDG_STATE_HOME/guard/key.pub) once guard broker setup has run.
 # --update on a project pinned to another release proposes the new pin: one line of guard/budget.card, and offline the
-# vendored file of the new pin in place of the old one. On a project installed before the pin (guard/bin/ on the base
-# branch, no harness: line) it proposes the migration once: the harness: line, guard/bin/ deleted, guard/run and the
-# workflow from the templates, and guard/VERSION. No other file changes, except merge_policy: when GitHub offers the
+# vendored file of the new pin in place of the old one. On a schema 7 project it proposes the schema 8 migration once
+# (design-v8 section 8): the pin, the schema 8 card keys appended, guard/run and the workflow from the templates, the
+# question card template deleted, AGENTS.md above its "## Project landmines" heading from the template (without the
+# heading, guard/AGENTS.proposed.md instead), and guard/VERSION. A project older than schema 7 goes through v7.0's
+# --update first; this says how and stops. No other file changes, except merge_policy: when GitHub offers the
 # repository no rulesets, init and --update set it to semi-manual and say why. It refuses when this harness is older
 # than the project's pin or install, unless --force.
 set -euo pipefail
@@ -41,6 +44,13 @@ project_version "$repo"; base=$p_base
 git -C "$repo" rev-parse --verify -q "$base" >/dev/null || { echo "cannot find $base in $repo. Set origin/HEAD with: git -C $repo remote set-head origin -a" >&2; exit 2; }
 if [ $update = 0 ] && [ $p_guarded = 1 ]; then echo "$name is already guarded on $base. Use guard init $repo --update." >&2; exit 2; fi
 if [ $update = 1 ] && [ $p_guarded = 0 ]; then echo "$name has no guard/run on $base yet. Run guard init $repo without --update." >&2; exit 2; fi
+if [ $update = 1 ] && { [ "$p_schema" -lt 7 ] || [ -z "$p_pin" ]; }; then
+  v7dir=$(dirname "$here")/harness4research-v7.0
+  echo "$name is guard schema $p_schema, and this harness migrates schema 7 only. Migrate it with v7.0 first, merge that pull request, then rerun guard init $repo --update:" >&2
+  echo "  git -C $here worktree add --detach $v7dir v7.0 && $v7dir/bin/guard init $repo --update" >&2
+  exit 2
+fi
+migrate=0; [ $update = 1 ] && [ "$p_schema" -lt "$h_schema" ] && migrate=1
 if [ $update = 1 ] && [ $force = 0 ]; then
   case $(skew) in
     harness-older)
@@ -104,14 +114,54 @@ pin_project() {
     mode_note="Mode: online. $mode_note, so guard/run reads the scripts from the harness clone at $pin; keep it checked out there, at $here or the clone HPC_HARNESS names."
   fi
 }
+# broker_key_line: the card's broker_key: line, this host's broker public key when guard broker setup has run here.
+broker_key_line() {
+  local k=${XDG_STATE_HOME:-$HOME/.local/state}/guard/key.pub
+  if [ -s "$k" ]; then echo "broker_key: $(head -n1 "$k")"; else grep '^broker_key:' "$t/guard/budget.card"; fi
+}
+set_broker_key() {
+  local card=$wt/guard/budget.card line tmp; line=$(broker_key_line); tmp=$(mktemp)
+  awk -v line="$line" 'index($0, "broker_key:") == 1 { print line; next } { print }' "$card" > "$tmp" && mv "$tmp" "$card"
+}
+# migrate_card: appends each schema 8 key the card lacks, after one comment block; every existing line stays.
+migrate_card() {
+  local card=$wt/guard/budget.card k line new=()
+  for k in compute holdout_max_submissions ask_deadline approval broker_key; do
+    grep -q "^$k:" "$card" && continue
+    if [ $k = broker_key ]; then line=$(broker_key_line); else line=$(grep "^$k:" "$t/guard/budget.card"); fi
+    new+=("$line")
+  done
+  [ ${#new[@]} -gt 0 ] || return 0
+  {
+    echo "# Schema 8 keys, added by guard init --update. compute names the entrypoints that run only inside a job, none"
+    echo "# for no gate. holdout_max_submissions caps guard holdout score in a session. ask_deadline is when a question"
+    echo "# from the broker takes its default answer. approval auto runs each job that fits, and queue asks a person"
+    echo "# first. broker_key is the public key whose signed receipts the fence trusts, and only a person changes it."
+    printf '%s\n' "${new[@]}"
+  } >> "$card"
+  added+=(guard/budget.card)
+}
+# migrate_agents: AGENTS.md above its landmines heading becomes the template's text above it, and the heading and
+# everything under it stay verbatim. Without the heading AGENTS.md stays as it is, and the template is a proposal.
+migrate_agents() {
+  local heading='## Project landmines' tmp
+  if [ -f "$wt/AGENTS.md" ] && grep -qxF "$heading" "$wt/AGENTS.md"; then
+    tmp=$(mktemp)
+    { sed "/^$heading\$/,\$d" "$t/AGENTS.md"; sed -n "/^$heading\$/,\$p" "$wt/AGENTS.md"; } > "$tmp"
+    if cmp -s "$tmp" "$wt/AGENTS.md"; then rm -f "$tmp"; else mv "$tmp" "$wt/AGENTS.md"; added+=(AGENTS.md); fi
+  else
+    place "$t/AGENTS.md" guard/AGENTS.proposed.md replace
+    agents_note=$'\n'"AGENTS.md has no \"$heading\" heading, so it is unchanged. Merge guard/AGENTS.proposed.md into it, or delete it."
+  fi
+}
 if [ $update = 0 ]; then
   place "$t/guard/run" guard/run replace
   place "$t/guard/budget.card" guard/budget.card
   pin_project
+  set_broker_key
   place "$t/guard/watch.list" guard/watch.list
   place "$t/guard/README.md" guard/README.md
   place "$t/github/workflows/guard-fence.yml" .github/workflows/guard-fence.yml
-  place "$t/runs/_template/question.card" runs/_template/question.card
   place "$t/runs/_template/report.md" runs/_template/report.md
   place "$t/runs/_template/execution.tsv" runs/_template/execution.tsv
   place "$t/FACTS.md" FACTS.md
@@ -120,17 +170,20 @@ if [ $update = 0 ]; then
   else place "$t/AGENTS.md" AGENTS.md; fi
   place "$t/CLAUDE.md" CLAUDE.md
   "$here/lib/survey.sh" "$repo" > "$wt/guard/SURVEY.md"; added+=(guard/SURVEY.md)
-elif [ -n "$p_pin" ]; then
+elif [ $migrate = 0 ]; then
   pin_project
 else
-  # The migration from a project installed before the pin: its scripts in guard/bin/ give way to the pinned harness.
   pin_project
-  if [ -e "$wt/guard/bin" ]; then git -C "$wt" rm -q -r guard/bin; deleted+=(guard/bin/); fi
+  migrate_card
   for f in guard/run:guard/run github/workflows/guard-fence.yml:.github/workflows/guard-fence.yml; do
     mkdir -p "$(dirname "$wt/${f#*:}")"; cp "$t/${f%%:*}" "$wt/${f#*:}"
     [ "${f#*:}" = guard/run ] && chmod +x "$wt/guard/run"
     git -C "$wt" add -- "${f#*:}"; git -C "$wt" diff --cached --quiet -- "${f#*:}" || added+=("${f#*:}")
   done
+  if [ -e "$wt/runs/_template/question.card" ]; then
+    git -C "$wt" rm -q runs/_template/question.card; deleted+=(runs/_template/question.card)
+  fi
+  migrate_agents
 fi
 # set_merge_policy: guard merge refuses every merge without a ruleset, so a card whose repository GitHub offers no
 # rulesets gets merge_policy: semi-manual. Sets policy_note to say so, or to say that gh could not tell.
@@ -152,8 +205,8 @@ set_merge_policy() {
 }
 set_merge_policy
 
-# guard/VERSION records the install, so a pin move leaves it alone.
-if [ $update = 0 ] || [ -z "$p_pin" ]; then
+# guard/VERSION records the install and the schema, so a pin move leaves it alone.
+if [ $update = 0 ] || [ $migrate = 1 ]; then
   {
     echo "schema: $h_schema"
     echo "installer: $(git -C "$here" rev-parse HEAD 2>/dev/null || echo unknown)"
@@ -168,12 +221,15 @@ if [ $update = 1 ] && git -C "$wt" diff --cached --quiet; then
   git -C "$repo" worktree remove --force "$wt"; git -C "$repo" branch -q -D "$branch"
   echo "The guard in $name is current at harness: $pin. Nothing proposed."; exit 0
 fi
+gpu_note="Migrated cards keep max_gpu_hours: 0, so guard run refuses every GPU job on a launch host (H4R-R13) until a person raises it in guard/budget.card."
+body=("Installed by harness4research. Nothing outside the listed files changed.")
 if [ $update = 0 ]; then msg="feat(guard): add agent guard, facts file, and survey"
-elif [ -n "$p_pin" ]; then msg="chore(guard): pin harness4research $pin"
-else msg="chore(guard): migrate the guard to harness4research $pin, which the harness: pin names"; fi
+elif [ $migrate = 0 ]; then msg="chore(guard): pin harness4research $pin"
+else msg="chore(guard): migrate the guard to schema $h_schema, harness4research $pin"
+  body+=("The agent commands are now guard run, wait, ask and status; preflight, ripples, launch and the agent-written question card are gone. $gpu_note"); fi
 git -C "$wt" -c user.name="${GIT_AUTHOR_NAME:-$(git -C "$repo" config user.name || echo guard)}" \
   -c user.email="${GIT_AUTHOR_EMAIL:-$(git -C "$repo" config user.email || echo guard@localhost)}" \
-  commit -q -m "$msg" -m "Installed by harness4research. Nothing outside the listed files changed."
+  commit -q -m "$msg" "${body[@]/#/-m}"
 
 echo "Proposed on branch $branch in worktree $wt"
 list() { local head=$1; shift; [ $# -gt 0 ] || return 0; echo; echo "$head"; printf '  %s\n' "$@"; }
@@ -183,12 +239,13 @@ list "Left alone because they already exist:" "${skipped[@]}"
 [ -z "$policy_note" ] || { echo; echo "$policy_note"; }
 [ -z "$mode_note" ] || { echo; echo "$mode_note"; }
 if [ $update = 1 ]; then
-  if [ -z "$p_pin" ]; then
-    echo; echo "The scripts now come from harness4research at $pin, so a site edit to guard/bin/ no longer runs; guard/run and the workflow are the templates'. The pull request's diff shows what each drops."
+  if [ $migrate = 1 ]; then
+    echo; echo "Schema $h_schema: agents submit with guard run, and guard/run preflight, ripples and launch print the guard run line instead. $gpu_note"
+    [ -z "$agents_note" ] || echo "$agents_note"
   fi
   [[ " ${added[*]} " == *" .github/workflows/"* ]] && { echo; echo "Pushing a change under .github/workflows needs a token with the workflow scope: gh auth refresh -s workflow"; }
   from=$p_from; [ "$from" = unknown ] && from=""
-  [ -n "$from" ] && git -C "$here" cat-file -e "$from^{commit}" 2>/dev/null && ! git -C "$here" diff --quiet "$from" HEAD -- templates/AGENTS.md \
+  [ $migrate = 0 ] && [ -n "$from" ] && git -C "$here" cat-file -e "$from^{commit}" 2>/dev/null && ! git -C "$here" diff --quiet "$from" HEAD -- templates/AGENTS.md \
     && { echo; echo "templates/AGENTS.md changed since your install. Compare by hand: git -C $here diff $from HEAD -- templates/AGENTS.md"; }
   exit 0
 fi

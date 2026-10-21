@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # usage: examples/quickstart/run.sh [DIR]
-# Builds a guarded throwaway project in DIR (default ~/guard-quickstart) and walks one carded run through
-# init, preflight, the job, the report, the fence and ripples, with a mock sbatch and no cluster.
+# Builds a guarded throwaway project in DIR (default ~/guard-quickstart) and walks one run through init, guard run,
+# the job, the report, the fence and guard run again after the job, with a mock sbatch and no cluster and no broker.
 # A rerun replaces DIR only when an earlier run of this script created it.
 set -euo pipefail
 # git rebase --exec and git hooks export GIT_DIR, which would turn every throwaway repo below into the caller's own.
@@ -57,7 +57,7 @@ git commit -q -am "chore(guard): set budget"
 git push -q origin guard/init:main
 echo "guard/ merged to main. The human owns it from now on."
 
-echo "== 2. The human commits the checks, the agent commits the question card"
+echo "== 2. The human commits the checks, the agent copies the experiment"
 git switch -q -c human/checks origin/main
 mkdir -p runs/cheap-evo/checks
 cp "$here/checks/"*.sh runs/cheap-evo/checks/
@@ -67,19 +67,20 @@ git fetch -q origin
 cd "$dir/proj"; git pull -q
 git switch -q -c agent/run
 mkdir -p runs/cheap-evo/data
-cp "$here/campaign.py" "$here/job.sh" "$here/question.card" runs/cheap-evo/
+cp "$here/campaign.py" "$here/job.sh" runs/cheap-evo/
 cp "$here/data/wdbc.data" runs/cheap-evo/data/
 cp "$here/job.sh" job.sh
-git add runs/cheap-evo/campaign.py runs/cheap-evo/job.sh runs/cheap-evo/question.card
-git commit -q -m "run: cheap-evo question card"
+git add runs/cheap-evo/campaign.py runs/cheap-evo/job.sh
+git commit -q -m "run: cheap-evo"
+run() { "$harness/bin/guard" run runs/cheap-evo --why "Search for a small team of decision stumps." "$@"; }
 
 echo "== 3. A refusal: the agent raises its own walltime cap"
 sed -i 's/^max_walltime_minutes: 720$/max_walltime_minutes: 9999/' guard/budget.card
-guard/run preflight runs/cheap-evo job.sh || true
+run -- job.sh runs/cheap-evo || true
 git checkout -q -- guard/budget.card
 
-echo "== 4. Preflight, then the job"
-guard/run preflight runs/cheap-evo job.sh
+echo "== 4. guard run writes the run's card and submits, then the job"
+run -- job.sh runs/cheap-evo
 env SLURM_JOB_ID=555 LOADEDMODULES=none bash job.sh runs/cheap-evo
 
 echo "== 5. The report and the fence"
@@ -87,9 +88,10 @@ python3 runs/cheap-evo/campaign.py --write-report runs/cheap-evo
 git add runs/cheap-evo/report.md runs/cheap-evo/campaign.json; git commit -q -m "report: cheap-evo"
 guard/run fence origin/main HEAD
 
-echo "== 6. Ripples after the job"
-printf '555|cheap-evo|COMPLETED|30|300\n' > "$dir/sacct.rows"
-MOCK_SACCT_ROWS=$dir/sacct.rows guard/run ripples runs/cheap-evo
+echo "== 6. The run's card, as guard run wrote it on run/cheap-evo"
+git fetch -q origin run/cheap-evo
+git show FETCH_HEAD:runs/cheap-evo/question.card > "$dir/question.card"
+cat "$dir/question.card"
 
 python3 - "$dir/proj/runs/cheap-evo/campaign.json" "$start" "$dir" <<'PY'
 import json
@@ -106,10 +108,10 @@ print("== Summary")
 print(f"The walkthrough took {total:.1f} s. The job took {payload_s:.1f} s; git, the guard and setup took the rest.")
 print(f"Held-out balanced accuracy of the selected team: {evolve:.3f} (mean over seeds).")
 print("Look at:")
-for p in ("proj/runs/cheap-evo/question.card", "proj/runs/cheap-evo/report.md",
+for p in ("question.card", "proj/runs/cheap-evo/report.md",
           "proj/runs/cheap-evo/manifest-555.txt", "proj/guard/budget.card", "init.log"):
     if not os.path.exists(f"{d}/{p}"):
         sys.exit(f"missing {d}/{p}")
     print(f"  {d}/{p}")
-print(f"Atlas page: guard atlas {d}/proj --no-ripples --out {d}/atlas.html")
+print(f"Atlas page: guard atlas {d}/proj --out {d}/atlas.html")
 PY

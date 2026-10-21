@@ -14,6 +14,7 @@ One line per page. None is required reading: open a page when a task names it.
 - [enforcement.md](enforcement.md): how each rule is enforced, and how strongly
 - [enforcement-audit.md](enforcement-audit.md): the scripted attacks on each rule, and which hold
 - [enforceable.md](enforceable.md): the GitHub ruleset and token setup that make the fence a wall
+- [design-v8.md](design-v8.md): the v8 design for review: surface, data shapes, refusal codes, deletions, migration, gates, units
 - [design-sandboxed-agents.md](design-sandboxed-agents.md): the design for sandboxed agents and the broker
 - [autonomy.md](autonomy.md): how agents review and merge their own work
 - [compatibility.md](compatibility.md): what stays stable across harness releases and `guard init --update`

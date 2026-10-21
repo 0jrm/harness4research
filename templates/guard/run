@@ -1,22 +1,51 @@
 #!/usr/bin/env bash
-# usage: guard/run <preflight|ripples|manifest|fence|code|launch> [args...] | guard/run --show <command>
+# usage: guard/run <fence|code|manifest|receipts-check> [args...] | guard/run --show receipts-check
 # Runs the guard script of the harness release that the harness: line of guard/budget.card pins, reading the card from
 # the protected branch, so an edit on a working branch, in the harness clone's working tree or in a vendored file has
-# no effect. The pin is a release tag such as v7.0, or a full commit.
+# no effect. The pin is a release tag such as v8.0, or a full commit.
 #   offline: guard/harness-<pin>.sh is on the protected branch, and the script comes from it.
 #   online:  the script comes from the harness clone's object store at the pin, and the clone must be checked out at
 #            the pin. HPC_HARNESS names the clone; otherwise it is the clone behind `guard` on PATH.
 # A card without harness: belongs to a project installed before the pin, whose scripts are guard/bin/ on the protected
 # branch. HPC_GUARD_REF names the protected branch. HPC_GUARD_LOCAL=1 runs the working-tree copy instead (this working
 # tree's card and vendored file, or the clone's lib/guard/), for the bootstrap before guard/ is merged.
-# --show prints the script instead of running it, for a guard script that runs another.
+# preflight, ripples, launch and card are gone in schema 8: each prints refusal R09 with the guard run line to use
+# instead.
+# --show receipts-check prints that script instead of running it, for the fence, which runs it under its own name.
+# git after -- (or as the command) is refusal R20, line 2 the git command on its own: git runs as it is.
 set -euo pipefail
-show=0; if [ "${1:-}" = --show ]; then show=1; shift; fi
+harness_clone() {  # the harness clone with lib/refusals.py: HPC_HARNESS, else the one behind guard on PATH
+  local clone=${HPC_HARNESS:-} g
+  if [ -z "$clone" ] && g=$(command -v guard); then clone=$(dirname "$(dirname "$(readlink -f "$g")")"); fi
+  [ -n "$clone" ] && [ -f "$clone/lib/refusals.py" ] && echo "$clone"
+}
+git_argv=()
+if [ "${1:-}" = git ]; then git_argv=("$@")
+elif [ "${1:-}" != manifest ]; then
+  seen=0; for a in "$@"; do if [ $seen = 1 ]; then git_argv+=("$a"); elif [ "$a" = -- ]; then seen=1; fi; done
+  [ "${git_argv[0]:-}" = git ] || git_argv=()
+fi
+if [ ${#git_argv[@]} -gt 0 ]; then
+  if clone=$(harness_clone); then exec python3 "$clone/lib/refusals.py" git "${git_argv[@]:1}"; fi
+  line="" said="git${git_argv[1]:+ ${git_argv[1]}}"
+  for a in "${git_argv[@]}"; do
+    [[ $a =~ ^[A-Za-z0-9_./:=@%+,-]+$ ]] || a="'${a//\'/\'\\\'\'}'"
+    line+="${line:+ }$a"
+  done
+  [[ ${#git_argv[@]} -gt 1 && $line != *[\<\[]* && $line != *...* ]] || line="git status"
+  printf 'H4R-R20 %s is not a job; guard run is for cluster jobs, and git runs as it is\n%s\n' "$said" "$line" >&2
+  exit 2
+fi
+show=0; if [ "${1:-}" = --show ] && [ "${2:-}" = receipts-check ]; then show=1; shift; fi
 cmd=${1:-}; shift || true
 base=${HPC_GUARD_REF:-$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)}
 case $cmd in
-  preflight|ripples|manifest|fence|code|launch) ;;
-  *) echo "usage: guard/run <preflight|ripples|manifest|fence|code|launch> [args...]" >&2
+  manifest|fence|code|receipts-check) ;;
+  preflight|ripples|launch|card)
+    if clone=$(harness_clone); then exec python3 "$clone/lib/refusals.py" old "$cmd" "$@"; fi
+    printf 'H4R-R09 guard/run %s is gone; guard run writes the card and prices the job\nguard status\n' "$cmd" >&2
+    exit 2 ;;
+  *) echo "usage: guard/run <fence|code|manifest|receipts-check> [args...]" >&2
      schema=$(git show "$base:guard/VERSION" 2>/dev/null | awk -F': *' '$1=="schema" {print $2; exit}' || true)
      echo "This project's guard is schema ${schema:-1} (guard/VERSION on $base). A command it lacks needs a human to run guard init --update." >&2
      exit 64 ;;

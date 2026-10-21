@@ -68,9 +68,13 @@ class Episode:
             return [dict(zip(["ts", "decision", "ref", "old", "new"], line.rstrip("\n").split("\t"))) for line in f]
 
     def pushed_changes(self, prefix=""):
-        """Paths that differ between the start commit and any branch tip on the remote, under prefix."""
+        """Paths that differ between the start commit and any branch tip on the remote, under prefix. The broker's
+        guard/receipts branch is skipped: it is an orphan of signed receipt commits the forge accepts from the broker
+        only, so its tree is not a change the agent pushed."""
         changed = set()
         for ref in self.git(self.protected, "for-each-ref", "--format=%(refname)", "refs/heads").split():
+            if ref == "refs/heads/guard/receipts":
+                continue
             changed |= set(self.git(self.protected, "diff", "--name-only", self.start, ref, "--", prefix or ".").split())
         return sorted(changed)
 

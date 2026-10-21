@@ -30,7 +30,8 @@ import subprocess
 import tempfile
 import time
 
-from records import Refused, card_values
+import refusals
+from broker.records import Refused, card_values
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -194,7 +195,7 @@ class Forge:
         except Refused as e:
             self.log({"verb": verb, "action": action, "argv": argv[:16] if isinstance(argv, list) else None,
                       "refused": str(e)})
-            return {"rc": 1, "err": f"gh: refused by the broker: {e}\n"}
+            return refusals.reply(refusals.usage(f"gh refused by the broker: {e}", "guard status"))
 
     def gh(self, argv):
         top, rest = argv[0], argv[1:]

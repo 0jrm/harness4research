@@ -17,18 +17,26 @@ open one prints that item's id and queues nothing. With --update, an open or ack
 the new content under the same id and opens again; when the content is the same, nothing changes. find prints the id
 of the open or acked item with that kind and title, and exits 1 when there is none.
 
+The items a<n> are the broker's guard asks, kept where the agent's sandbox cannot write (ask_queues). They list, show
+and close here with the project's own: done a<n> [--note ANSWER] answers it (no note means yes), dismiss a<n> means no.
+
 --json prints the queue as one JSON object, {"schema": 1, "repo", "queue", "items"}, and never writes. --state picks
 the items by state; the default is open and acked, like the bare command. Each item carries its latest state, its
 created time (its first row in the log) and updated time (its latest row), a body of the non-empty action parts and
 commands, its evidence paths, its source, and block, the text the bare command prints for it. A row with the wrong
 number of cells, or a last line with no newline, is skipped, with one line on stderr. Exit 0 for an empty or missing
-queue (items: []) as for a full one, 2 outside a git repository, 64 when --json comes with --remind or a subcommand.
+queue (items: []) as for a full one, 2 outside a git repository, and U01 (exit 2) when --json comes with --remind or a
+subcommand.
 """
-import argparse, datetime as dt, fcntl, json, os, subprocess, sys
+import datetime as dt, fcntl, hashlib, json, os, subprocess, sys
 from collections import namedtuple
+
+import refusals
 
 COLUMNS = ("id", "ts", "state", "kind", "title", "action", "paths", "commands", "source")
 KINDS = ("approve", "run", "check")
+ADD, FIND, LIST = ("guard needs-you add --kind check --title TITLE", "guard needs-you find --kind check --title TITLE",
+                   "guard needs-you")
 ACTION_KEYS = ("why", "expect", "worry", "undo", "note")
 SEP = ";;"
 Move = namedtuple("Move", "sets from_states")
@@ -47,6 +55,24 @@ def git_dir(cwd):
         return None, None
     common, top = (p.stdout.splitlines() + [""])[:2]
     return os.path.join(os.path.abspath(os.path.join(cwd, common)), "guard", "needs-you.tsv"), top or cwd
+
+def ask_queues(queue, top):
+    """The queues that hold this project's guard asks, which the broker keeps out of the agent's sight: its records in
+    <git dir>/guard/broker/ when guard ask ran with no broker, and in the broker's state, named as lib/broker_host.py
+    names a project, when one served the sandbox. Their items are the ones with ids a<n>; the project's own are n<n>."""
+    real = os.path.realpath(top)
+    state = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "guard", "projects",
+                         f"{os.path.basename(real) or 'root'}-{hashlib.sha1(real.encode()).hexdigest()[:8]}")
+    paths = [os.path.join(state, "records", "needs-you.tsv"),  # first: an ask id in a sandbox's checkout never wins
+             os.path.join(os.path.dirname(queue), "broker", "records", "needs-you.tsv")]
+    return [p for p in paths if os.path.exists(p)]
+
+def asks(queue, top):
+    return [(q, it) for q in ask_queues(queue, top) for it in read(q) if it.id.startswith("a")]
+
+def home(queue, top, ident):
+    """The queue that holds item ident: an ask's, else the project's."""
+    return next((q for q, it in asks(queue, top) if it.id == ident), queue)
 
 def from_row(line):
     cells = line.split("\t")
@@ -183,6 +209,7 @@ def remind(fmt):
     hook = hook_input() if fmt == "claude-hook" else {}
     queue, top = git_dir(hook.get("cwd") or os.getcwd())
     items = [it for it in read(queue) if it.state == "open"] if queue else []
+    items += [it for _, it in asks(queue, top) if it.state == "open"] if queue else []
     if not items:
         return
     if fmt == "text":
@@ -260,20 +287,14 @@ def move(queue, verb, ident, note):
         return it._replace(ts=now(), state=state, note=note or it.note)
     transact(queue, change)
 
-class Parser(argparse.ArgumentParser):
-    def error(self, message):
-        self.print_usage(sys.stderr)
-        print(f"{self.prog}: {message}", file=sys.stderr)
-        sys.exit(64)
-
 def main():
-    ap = Parser(prog="guard needs-you", description=__doc__.split("\n\n")[1])
+    ap = refusals.ArgumentParser(prog="guard needs-you", description=__doc__.split("\n\n")[1])
     ap.add_argument("--remind", action="store_true", help="print the open items for a person or an agent hook, or nothing")
     ap.add_argument("--format", choices=("text", "claude-hook"), default="text")
     ap.add_argument("--json", action="store_true", help="print the queue as JSON")
     ap.add_argument("--state", choices=JSON_STATES + ("all",), help="with --json, the state of the items to print")
-    sub = ap.add_subparsers(dest="cmd", parser_class=Parser)
-    p = sub.add_parser("add", help="queue an item and print its id")
+    sub = ap.add_subparsers(dest="cmd", parser_class=refusals.ArgumentParser)
+    p = sub.add_parser("add", help="queue an item and print its id", next=ADD)
     p.add_argument("--kind", required=True, choices=KINDS)
     p.add_argument("--title", required=True)
     p.add_argument("--why", default="")
@@ -284,12 +305,12 @@ def main():
     p.add_argument("--undo", default="")
     p.add_argument("--source", default="")
     p.add_argument("--update", action="store_true", help="give an open or acked item of the same kind and title this content")
-    p = sub.add_parser("find", help="print the id of the open or acked item with this kind and title")
+    p = sub.add_parser("find", help="print the id of the open or acked item with this kind and title", next=FIND)
     p.add_argument("--kind", required=True, choices=KINDS)
     p.add_argument("--title", required=True)
-    sub.add_parser("show", help="print one item's block").add_argument("id")
+    sub.add_parser("show", help="print one item's block", next=LIST).add_argument("id")
     for verb in MOVES:
-        p = sub.add_parser(verb, help=f"mark an item {MOVES[verb].sets}")
+        p = sub.add_parser(verb, help=f"mark an item {MOVES[verb].sets}", next=LIST)
         p.add_argument("id")
         p.add_argument("--note", default="")
     a = ap.parse_args()
@@ -318,14 +339,14 @@ def main():
                 sys.exit(1)
             print(it.id)
         elif a.cmd == "show":
-            it = next((it for it in read(queue) if it.id == a.id), None)
+            it = next((it for it in read(home(queue, top, a.id)) if it.id == a.id), None)
             if not it:
                 raise Refused(f"no item {a.id} in {queue}")
             print(block(it, top))
         elif a.cmd in MOVES:
-            move(queue, a.cmd, a.id, a.note)
+            move(home(queue, top, a.id), a.cmd, a.id, a.note)
         else:
-            items = [it for it in read(queue) if it.state in ("open", "acked")]
+            items = [it for it in read(queue) + [it for _, it in asks(queue, top)] if it.state in ("open", "acked")]
             print("\n\n".join(block(it, top) for it in items) if items else "Nothing needs you.")
     except Refused as e:
         print(f"guard needs-you: {e}", file=sys.stderr)
