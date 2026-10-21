@@ -267,7 +267,7 @@ The dropped rows are listed in the schema 8 removal table (decision 1).
 
 | Command | Arguments | Success, one line | Refusals |
 |---|---|---|---|
-| `guard run <run_dir> --why "<sentence>" [--cause "<text>"] -- <sbatch options> <script> [args]` | E6b's grammar; a leading `sbatch`, `bash`, `sh` or `srun` after `--` is dropped; on a host in `launch_hosts` the same line launches under the supervisor, with `--time`, `--gpus` (a count), `--mem` and `--cpus-per-task` translated as section 4 says | `job <id> submitted for run <run_id>: <min> min x <nodes> node(s) x <cpn> cores = <ch> core-h; guard wait <id>`; on a host `job <host>-<ts> launched for run <run_id>: <min> min x <cores> cores x <gpus> GPUs = <ch> core-h, <gh> GPU-h; guard wait <id>` | R01 to R19 |
+| `guard run <run_dir> --why "<sentence>" [--cause "<text>"] -- <sbatch options> <script> [args]` | E6b's grammar; a leading `sbatch`, `bash`, `sh` or `srun` after `--` is dropped; on a host in `launch_hosts` the same line launches under the supervisor, with `--time`, `--gpus` (a count), `--mem` and `--cpus-per-task` translated as section 4 says | `job <id> submitted for run <run_id>: <min> min x <nodes> node(s) x <cpn> cores = <ch> core-h; guard wait <id>`; on a host `job <host>-<ts> launched for run <run_id>: <min> min x <cores> cores x <gpus> GPUs = <ch> core-h, <gh> GPU-h; guard wait <id>` | R01 to R20 |
 | `guard wait <id> | -- <command...> [--timeout 5m]`; `guard wait --stop <host job>` | id resolution: a session job id (from `acct`, numeric or `1234_5`) first, then a live pid of your uid, then a `<host>-<ts>` host id through the `wait` and `stop` socket verbs (the sandbox cannot see the supervisor); `--timeout` at most 5m (question 13) | last 20 log lines, then `job <id> <A> -> <B>` or `pid <n> exited <c>`; still running: `keep waiting: guard wait <id>` and `stop it: scancel <id>`, `kill <pid>` or `guard wait --stop <id>`, exit 124 | W01 to W03 |
 | `guard ask "<question>" --default <option> --deadline 5m|30m|2h`; `guard ask --status <id>` | E11; the default is `yes`, `no`, or one word the question offers in `[a|b]` brackets; never an effect | `ask <id> waits for the human, <n> min left; then the default: <d>. Do other work; guard status shows the answer` | A01 to A04 |
 | `guard status` | none | E9's six lines: `running:`, `blocked:`, `last refusal:`, `budget:`, `git:`, `next:` | none |
@@ -312,6 +312,7 @@ and the tail (E9).
 | R17 | run | `partition <p> is not in partitions <list>` | the command with `--partition=<first>` |
 | R18 | run | `dependency names job <id>, which this session did not submit` | the command without `--dependency` |
 | R19 | run | `output <o> is outside the project` | the command with `--output=<run_dir>/slurm-%j.out` |
+| R20 | run, guard/run | `git <sub> is not a job; guard run is for cluster jobs, and git runs as it is` | the git command on its own, else `git status` (2026-10-21, after E7b's control agents wrapped 35 pushes) |
 | X00 | socket | `<verb> is not built in this harness` | `guard status` |
 | G01 | guard review, merge, ship in a sandbox | `runs outside the sandbox; push and stop` | `git push origin <branch>` |
 | C01 | compute gate | `<entry> runs only inside a job; guard/budget.card lists it under compute` | `guard run runs/<id> --why 'Run <script> for run <id>.' -- --time=<max_walltime_minutes> <script>` |
