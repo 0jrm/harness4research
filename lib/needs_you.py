@@ -2,6 +2,7 @@
 """usage: guard needs-you [--remind [--format text|claude-hook]]
        guard needs-you add --kind approve|run|check --title T [--why W] [--path P]... [--run CMD]...
                            [--expect E] [--worry W] [--undo U] [--source S] [--update]
+       guard needs-you --json [--state open|acked|done|dismissed|all]
        guard needs-you find --kind approve|run|check --title T
        guard needs-you show <id>
        guard needs-you ack|done|dismiss <id> [--note N]
@@ -18,6 +19,14 @@ of the open or acked item with that kind and title, and exits 1 when there is no
 
 The items a<n> are the broker's guard asks, kept where the agent's sandbox cannot write (ask_queues). They list, show
 and close here with the project's own: done a<n> [--note ANSWER] answers it (no note means yes), dismiss a<n> means no.
+
+--json prints the queue as one JSON object, {"schema": 1, "repo", "queue", "items"}, and never writes. --state picks
+the items by state; the default is open and acked, like the bare command. Each item carries its latest state, its
+created time (its first row in the log) and updated time (its latest row), a body of the non-empty action parts and
+commands, its evidence paths, its source, and block, the text the bare command prints for it. A row with the wrong
+number of cells, or a last line with no newline, is skipped, with one line on stderr. Exit 0 for an empty or missing
+queue (items: []) as for a full one, 2 outside a git repository, and U01 (exit 2) when --json comes with --remind or a
+subcommand.
 """
 import datetime as dt, fcntl, hashlib, json, os, subprocess, sys
 from collections import namedtuple
@@ -94,6 +103,28 @@ def read(queue):
             return latest(f.read())
     except FileNotFoundError:
         return []
+
+def read_json_items(queue):
+    """The latest item per id with the ts of its first row, and a line for each skipped row. A last line with no
+    newline may be cut short, so it is skipped even when it has enough cells."""
+    try:
+        with open(queue) as f:
+            fcntl.flock(f, fcntl.LOCK_SH)
+            text = f.read()
+    except FileNotFoundError:
+        return [], {}, []
+    lines = text.split("\n")
+    unterminated = lines.pop()
+    skipped = [f"row {n}: {len(l.split(chr(9)))} cells, want {len(COLUMNS)}" for n, l in enumerate(lines, 1)
+               if l and not l.startswith("id\t") and len(l.split("\t")) != len(COLUMNS)]
+    if unterminated:
+        skipped.append(f"row {len(lines) + 1}: no newline at the end")
+    created = {}
+    for line in lines:
+        it = from_row(line)
+        if it:
+            created.setdefault(it.id, it.ts)
+    return latest("\n".join(lines)), created, skipped
 
 def transact(queue, change):
     os.makedirs(os.path.dirname(queue), exist_ok=True)
@@ -195,6 +226,25 @@ def remind(fmt):
         out["hookSpecificOutput"] = {"hookEventName": event, "additionalContext": context}
     print(json.dumps(out))
 
+JSON_STATES = ("open", "acked", "done", "dismissed")
+
+def queue_json(queue, top, state):
+    items, created, skipped = read_json_items(queue)
+    for line in skipped:
+        print(f"guard needs-you: {queue}: skipped {line}", file=sys.stderr)
+    wanted = JSON_STATES if state == "all" else (state,) if state else ("open", "acked")
+    out = []
+    for it in items:
+        if it.state not in wanted:
+            continue
+        body = {k: getattr(it, k) for k in ACTION_KEYS if getattr(it, k)}
+        if it.commands:
+            body["commands"] = it.commands
+        out.append(dict(id=it.id, status=it.state, kind=it.kind, repo=top, title=it.title, created=created[it.id],
+                        updated=it.ts, body=body, evidence=it.paths, source=it.source, block=block(it, top)))
+    out.sort(key=lambda d: (int(d["id"][1:]) if d["id"][1:].isdigit() else 0, d["updated"]))
+    return json.dumps(dict(schema=1, repo=top, queue=queue, items=out), sort_keys=True, ensure_ascii=False)
+
 def add(queue, a):
     if not all(c.strip() for c in a.run):
         raise Refused("--run is empty")
@@ -241,6 +291,8 @@ def main():
     ap = refusals.ArgumentParser(prog="guard needs-you", description=__doc__.split("\n\n")[1])
     ap.add_argument("--remind", action="store_true", help="print the open items for a person or an agent hook, or nothing")
     ap.add_argument("--format", choices=("text", "claude-hook"), default="text")
+    ap.add_argument("--json", action="store_true", help="print the queue as JSON")
+    ap.add_argument("--state", choices=JSON_STATES + ("all",), help="with --json, the state of the items to print")
     sub = ap.add_subparsers(dest="cmd", parser_class=refusals.ArgumentParser)
     p = sub.add_parser("add", help="queue an item and print its id", next=ADD)
     p.add_argument("--kind", required=True, choices=KINDS)
@@ -262,6 +314,10 @@ def main():
         p.add_argument("id")
         p.add_argument("--note", default="")
     a = ap.parse_args()
+    if a.json and (a.remind or a.cmd):
+        ap.error("--json cannot be combined with --remind or a subcommand")
+    if a.state and not a.json:
+        ap.error("--state needs --json")
 
     if a.remind:
         try:
@@ -273,7 +329,9 @@ def main():
     try:
         if not queue:
             raise Refused(f"{os.getcwd()} is not a git repository")
-        if a.cmd == "add":
+        if a.json:
+            print(queue_json(queue, top, a.state))
+        elif a.cmd == "add":
             add(queue, a)
         elif a.cmd == "find":
             it = find(read(queue), a.kind, a.title)

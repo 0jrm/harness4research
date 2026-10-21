@@ -115,3 +115,35 @@ expect ny-find-other-kind fail '^$' -- in_dir "$ny" "$guard" needs-you find --ki
 in_dir "$ny" "$guard" needs-you "done" n14 >/dev/null
 expect ny-find-skips-done fail '^$' -- in_dir "$ny" "$guard" needs-you find --kind approve --title Digest
 expect ny-update-after-done-new ok '^n15$' -- in_dir "$ny" "$guard" needs-you add --kind approve --title Digest --why 'four cards' --update
+
+echo "== needs-you --json"
+NJ=$tmp/needs-json; git init -q "$NJ"; nj() { (cd "$NJ" && "$guard" needs-you "$@"); }
+NJF=$NJ/.git/guard/needs-you.tsv; NJTS='^[0-9]{4}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$'
+expect needs-json-missing ok '^0$' -- bash -c 'cd "$1" && "$2" needs-you --json | jq -e ".items | length"' _ "$NJ" "$guard"
+expect needs-json-missing-exit ok - -- nj --json
+expect needs-json-outside-repo fail 'not a git repository' -- bash -c 'cd "$1" && "$2" needs-you --json' _ "$tmp" "$guard"
+expect needs-json-with-remind fail 'cannot be combined' -- nj --json --remind
+expect needs-json-with-subcommand fail 'cannot be combined' -- nj --json show n1
+nj add --kind check --title first --why one --path "$here/README.md" --path "$here/LICENSE" --run 'echo hi' >/dev/null
+nj add --kind run --title second --run 'true' >/dev/null
+nj add --kind check --title third >/dev/null
+sleep 1
+nj add --kind check --title first --why uno --path "$here/README.md" --path "$here/LICENSE" --update >/dev/null
+nj ack n2 >/dev/null; nj "done" n3 >/dev/null
+njq() { (cd "$NJ" && "$guard" needs-you --json "$@" 2>/dev/null | jq -r "$jqf"); }
+jqf='.items[] | select(.id=="n1") | .body.why'; expect needs-json-update-wins ok '^uno$' -- njq
+jqf='.items[] | select(.id=="n2") | .status'; expect needs-json-ack-wins ok '^acked$' -- njq
+jqf='.items | map(.id) | join(",")'; expect needs-json-default-states ok '^n1,n2$' -- njq
+jqf='.items | map(.id) | join(",")'; expect needs-json-state-all ok '^n1,n2,n3$' -- njq --state all
+jqf='.items | map(.status) | join(",")'; expect needs-json-state-done ok '^done$' -- njq --state 'done'
+jqf='.items[] | select(.id=="n1") | .created < .updated'; expect needs-json-created-kept ok '^true$' -- njq
+jqf='.items[] | select(.id=="n1") | .created'; expect needs-json-created-format ok "$NJTS" -- njq
+jqf='.items[] | select(.id=="n1") | .updated'; expect needs-json-updated-format ok "$NJTS" -- njq
+jqf='.items[] | select(.id=="n1") | .created'; expect needs-json-created-first-row ok "^$(awk -F'\t' '$1=="n1"{print $2; exit}' "$NJF")\$" -- njq
+jqf='.items[] | select(.id=="n1") | .evidence | length'; expect needs-json-paths-split ok '^2$' -- njq
+expect needs-json-block-in-plain ok - -- bash -c 'cd "$1" && plain=$("$2" needs-you) && for id in n1 n2; do blk=$("$2" needs-you --json | jq -r --arg id $id ".items[] | select(.id==\$id) | .block"); [[ $plain == *"$blk"* ]] || exit 1; done' _ "$NJ" "$guard"
+expect needs-json-stable ok - -- bash -c 'cd "$1" && "$2" needs-you --json > "$3.a" && "$2" needs-you --json > "$3.b" && cmp "$3.a" "$3.b"' _ "$NJ" "$guard" "$tmp/nj-twice"
+printf 'n9\t2026-01-01T00:00:00Z\topen\tcheck\tcut' >> "$NJF"
+expect needs-json-truncated-ok ok - -- bash -c 'cd "$1" && "$2" needs-you --json 2>/dev/null | jq -e .items >/dev/null' _ "$NJ" "$guard"
+expect needs-json-truncated-stderr ok 'skipped row [0-9]+' -- bash -c 'cd "$1" && "$2" needs-you --json 2>&1 >/dev/null' _ "$NJ" "$guard"
+jqf='.items | map(.id) | join(",")'; expect needs-json-truncated-skipped ok '^n1,n2$' -- njq
