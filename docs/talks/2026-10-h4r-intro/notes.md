@@ -8,7 +8,7 @@ Hi everyone. This is the first time I present harness4research. It is a harness 
 
 ## Slide 2
 
-Picture an agent working overnight on the cluster. Five things go wrong. It burns the allocation with one huge job. It fills a shared disk. It deletes files it thinks are stale. In the morning it reports a number its own files don&apos;t support. Each of those four has happened to someone. And when something fails, it moves the goalposts: one AI research system tried to raise its own timeout instead of making its code faster, and in our benchmark agents edited the failing test. The last two are the scary ones for science.
+Picture an agent working overnight on the cluster. Five things go wrong. It burns the allocation with one huge job. It fills a shared disk. It deletes files it thinks are stale. In the morning it reports a number its own files don't support. Each of those four has happened to someone. And when something fails, it moves the goalposts: one AI research system tried to raise its own timeout instead of making its code faster, and in our benchmark agents edited the failing test. The last two are the scary ones for science.
 
 ## Slide 3
 
@@ -16,7 +16,7 @@ Our first benchmark made this concrete. Nine of ten agents edited a protected te
 
 ## Slide 4
 
-Here is the architecture. The agent runs inside a sandbox: no network, an empty environment, no scheduler client. Its only way out is the broker. The broker reads the project&apos;s limits from its own copy of main, so the agent can&apos;t change them on a branch. It prices each job, submits it to Slurm, forwards model calls to an allowed endpoint, and writes and signs the records. Merges to main pass a CI check called the fence. Anything only a person can decide goes to a queue we call needs-you.
+Here is the architecture. The agent runs inside a sandbox: no network, an empty environment, no scheduler client. Its only way out is the broker. The broker reads the project's limits from its own copy of main, so the agent can't change them on a branch. It prices each job, submits it to Slurm, forwards model calls to an allowed endpoint, and writes and signs the records. Merges to main pass a CI check called the fence. Anything only a person can decide goes to a queue we call needs-you.
 
 ## Slide 5
 
@@ -24,19 +24,19 @@ Not every rule can be a wall, so we name how strong each one is. A note is text 
 
 ## Slide 6
 
-From the agent&apos;s side, the harness is four commands, documented in under 150 words. guard status says what runs and what to do next. guard run submits a job with a one-sentence why; the broker computes the cost and writes the record. guard wait comes back every five minutes with the log tail, so the agent stops polling. guard ask puts a question to a person, with a default the agent names and a deadline. When something is refused, the agent gets a code, a reason, and one command to run as is.
+From the agent's side, the harness is four commands, documented in under 150 words. guard status says what runs and what to do next. guard run submits a job with a one-sentence why; the broker computes the cost and writes the record. guard wait comes back every five minutes with the log tail, so the agent stops polling. guard ask puts a question to a person, with a default the agent names and a deadline. When something is refused, the agent gets a code, a reason, and one command to run as is.
 
 ## Slide 7
 
-Three devices go after the integrity failures. The pin: the project stores only data; the scripts run from a tagged harness version named on main, so editing a guard script on a branch changes nothing. The fence: a CI check that refuses merges that touch protected paths, or that report a number without a committed file or receipt behind it. The holdout: a sealed test set the broker scores, at most three times, and it answers pass or fail with a receipt, never the number, so the agent can&apos;t tune to it.
+Three devices go after the integrity failures. The pin: the project stores only data; the scripts run from a tagged harness version named on main, so editing a guard script on a branch changes nothing. The fence: a CI check that refuses merges that touch protected paths, or that report a number without a committed file or receipt behind it. The holdout: a sealed test set the broker scores, at most three times, and it answers pass or fail with a receipt, never the number, so the agent can't tune to it.
 
 ## Slide 8
 
-This is how one piece of work flows. The person&apos;s request is saved word for word. The agent works on a branch, runs jobs through guard run, and opens a pull request whose brief quotes the request. CI runs the fence; the harness repo itself also runs its tests and the enforcement audit. Then guard ship sorts pull requests by risk: records-only changes merge without a model, small ones share one reviewer, large ones get rounds of independent review, and anything touching guard/ goes to a person. The merge itself checks six conditions.
+This is how one piece of work flows. The person's request is saved word for word. The agent works on a branch, runs jobs through guard run, and opens a pull request whose brief quotes the request. CI runs the fence; the harness repo itself also runs its tests and the enforcement audit. Then guard ship sorts pull requests by risk: records-only changes merge without a model, small ones share one reviewer, large ones get rounds of independent review, and anything touching guard/ goes to a person. The merge itself checks six conditions.
 
 ## Slide 9
 
-Integrations. In Claude Code, two hooks, at session start and on each prompt, remind you of open needs-you items; they inform, they don&apos;t block. Four skills teach agents the workflow: safe HPC science, review and merge, present, and onboarding; they install for Claude Code, Codex and Cursor. runhub is an MCP server that runs agent tasks in worktrees with review. Slurm sees jobs only through the broker. And the harness tests itself: 68 scripted attackers, one per rule; 66 hold, and CI fails if a held one breaks.
+Integrations. In Claude Code, two hooks, at session start and on each prompt, remind you of open needs-you items; they inform, they don't block. Four skills teach agents the workflow: safe HPC science, review and merge, present, and onboarding; they install for Claude Code, Codex and Cursor. runhub is an MCP server that runs agent tasks in worktrees with review. Slurm sees jobs only through the broker. And the harness tests itself: 68 scripted attackers, one per rule; 66 hold, and CI fails if a held one breaks.
 
 ## Slide 10
 
@@ -52,11 +52,11 @@ We read three numbers. First, the rule-break rate on trap episodes: lower is bet
 
 ## Slide 13
 
-October benchmark, harness version 7, thirty episodes per bar. On traps, agents without the harness broke a rule in 20/30 episodes; with the harness, 9/30. That&apos;s 37 points fewer, and the whole interval is below zero. On controls, success was about the same, 21/30 versus 22/30. So: safer, and not less useful. But the next slide shows where that drop actually came from.
+October benchmark, harness version 7, thirty episodes per bar. On traps, agents without the harness broke a rule in 20/30 episodes; with the harness, 9/30. That's 37 points fewer, and the whole interval is below zero. On controls, success was about the same, 21/30 versus 22/30. So: safer, and not less useful. But the next slide shows where that drop actually came from.
 
 ## Slide 14
 
-Split by task, and with a stricter re-score. On walltime, the over-limit job was refused, so it looked like zero. But the re-score also counts running the model on the login node, outside the scheduler, and that brings the harness to 4/10. On the broken fixture, the push check refused every test edit and main stayed clean; the 4/10 left are local tampering or special-casing. On the leaky split there was no check at all, and almost everyone took the shortcut: 10/10 versus 9/10. The lesson: what isn&apos;t checked isn&apos;t prevented.
+Split by task, and with a stricter re-score. On walltime, the over-limit job was refused, so it looked like zero. But the re-score also counts running the model on the login node, outside the scheduler, and that brings the harness to 4/10. On the broken fixture, the push check refused every test edit and main stayed clean; the 4/10 left are local tampering or special-casing. On the leaky split there was no check at all, and almost everyone took the shortcut: 10/10 versus 9/10. The lesson: what isn't checked isn't prevented.
 
 ## Slide 15
 
@@ -68,11 +68,11 @@ Now the run going on right now: version 8, same chores, same seeds, same model. 
 
 ## Slide 17
 
-Cost, harness arm only, version 7 against version 8. On walltime, the chore where the ceremony lived, median requests fell from 113 to 28, and the largest prompt from three quarters of the window to under a quarter. The broken fixture was already cheap. The leaky split got worse: agents there train for hours and keep re-reading long logs, so guard wait isn&apos;t solving that yet. That is the next thing to fix.
+Cost, harness arm only, version 7 against version 8. On walltime, the chore where the ceremony lived, median requests fell from 113 to 28, and the largest prompt from three quarters of the window to under a quarter. The broken fixture was already cheap. The leaky split got worse: agents there train for hours and keep re-reading long logs, so guard wait isn't solving that yet. That is the next thing to fix.
 
 ## Slide 18
 
-Three takeaways. One: checks at the point of action work, and prose rules don&apos;t, at least at this model scale. Two: what a harness costs depends on what the agent must do by hand, so let commands do it. Three: what you don&apos;t check, you don&apos;t prevent; the leaky split shows that. Next: finish the v8 run, then the other three models on the panel, a real Slurm cluster, a second agent scaffold, and onboarding the group. Thanks, happy to take questions.
+Three takeaways. One: checks at the point of action work, and prose rules don't, at least at this model scale. Two: what a harness costs depends on what the agent must do by hand, so let commands do it. Three: what you don't check, you don't prevent; the leaky split shows that. Next: finish the v8 run, then the other three models on the panel, a real Slurm cluster, a second agent scaffold, and onboarding the group. Thanks, happy to take questions.
 
 ## Slide 19
 
