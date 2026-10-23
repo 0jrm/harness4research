@@ -46,11 +46,11 @@ added_cards() {
 }
 
 # run_reviewer <worktree> <log> <ask> <label>: runs each of reviewer_cmds in the worktree until one exits 0, with its
-# reply in <log>. Between tries it resets the worktree to the commit it started at. The reviewer runs without GH_TOKEN,
-# GITHUB_TOKEN or SSH_AUTH_SOCK, and with an empty GH_CONFIG_DIR, because without a token gh and git's gh credential
-# helper fall back to the login stored on this machine, which is often the repository owner's. Its pushes to origin or
-# anywhere on GitHub fail; pushes the project's own tests
-# make to local repositories still work. A command that exits nonzero or replies nothing could not review, and the next
+# reply in <log>, under a soft ulimit -v raised to the hard limit (raise_vmem_limit). Between tries it resets the
+# worktree to the commit it started at. The reviewer runs without GH_TOKEN, GITHUB_TOKEN or SSH_AUTH_SOCK, and with
+# an empty GH_CONFIG_DIR, because without a token gh and git's gh credential helper fall back to the login stored on
+# this machine, which is often the repository owner's. Its pushes to origin or anywhere on GitHub fail; pushes the
+# project's own tests make to local repositories still work. A command that exits nonzero or replies nothing could not review, and the next
 # one gets the round. Sets candidate, the command that ran last, rc, its exit status, err, the first error line of its
 # stderr or else of its reply, and unavailable, empty when it replied and otherwise why it could not.
 run_reviewer() {
@@ -65,7 +65,7 @@ run_reviewer() {
     candidate=${reviewer_cmds[i]}
     echo "guard review: $label: $candidate" >&2
     rc=0
-    (cd "$wt" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK GH_CONFIG_DIR="$ghdir" "${no_push[@]}" \
+    (cd "$wt" && raise_vmem_limit && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK GH_CONFIG_DIR="$ghdir" "${no_push[@]}" \
       bash -c "$candidate \"\$@\"" reviewer "$ask") < /dev/null > "$log" 2> "$log.err" || rc=$?
     err=$(first_error "$log.err"); [ -n "$err" ] || err=$(first_error "$log")
     if [ $rc -ne 0 ]; then unavailable="reviewer unavailable: ${err:+${err%.}. }${candidate%% *} exited $rc; its stderr is in $log.err"
@@ -78,11 +78,11 @@ run_reviewer() {
   rm -rf "$ghdir"
 }
 
-# first_error <file>: prints the file's first line that reads as an error, or else its first nonblank line. Node, for one,
-# ends a crash with its version line, after the error.
+# first_error <file>: prints the file's first line that reads as an error, or else its first nonblank line, skipping
+# minified source (prose_lines). Node, for one, ends a crash with its version line, after the error.
 first_error() {
   local lines
-  lines=$(grep -v '^[[:space:]]*$' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' || true)
+  lines=$(grep -v '^[[:space:]]*$' "$1" | tr -d '\r' | prose_lines | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' || true)
   { grep -m 1 -iE 'error|fatal|fail|denied|refused|unable|cannot|can.t|not found|out of memory|required|timed out|unauthori' <<<"$lines" \
     || head -n 1 <<<"$lines"; } | cut -c 1-160
 }

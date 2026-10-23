@@ -27,6 +27,15 @@ config_whole() {
   echo "$1 is '$v' in $config_file. Set it: guard config set $1 ${config_default[$1]}"; return 1
 }
 
+# raise_vmem_limit: raises this shell's soft ulimit -v to its hard limit, and changes nothing where it cannot. The
+# reviewer CLIs run on Node.js, whose WebAssembly reserves more address space than a soft limit such as FSU RCC's 6 GB
+# allows. Call it in the subshell that starts a reviewer.
+raise_vmem_limit() { ulimit -Sv "$(ulimit -Hv)" 2>/dev/null || :; }
+
+# prose_lines: prints its input without the lines longer than 400 characters. A Node CLI that crashes prints the
+# minified source line it died in, megabytes of code whose words (login, error, memory) say nothing about the crash.
+prose_lines() { awk 'length($0) <= 400'; }
+
 default_reviewer_cmds=("claude -p --permission-mode acceptEdits --strict-mcp-config --setting-sources project --disable-slash-commands --tools=Bash,Read,Edit,Grep,Glob --allowedTools=Bash" "cursor-agent -p --force --trust")
 
 # resolve_reviewer: sets reviewer and reviewer_cmds, the commands guard review tries in order until one exits 0, and

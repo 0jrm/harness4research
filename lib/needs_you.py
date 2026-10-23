@@ -11,9 +11,10 @@ A queue of what only a human can do, check, or approve. With no arguments it pri
 as a 🩺 block: the commands in one fenced block the person can paste whole, a --run that starts with "# " as a
 short comment in it, then a sample of the expected (--expect) and the worrisome (--worry) output, and the command
 that closes the item. add prints the new id, and refuses (exit 2) a path that is relative, missing, or somewhere that
-gets cleaned: /tmp, /var/tmp, $TMPDIR, or a directory named scratchpad. --remind prints nothing when no item
-is open or outside a git repository, so it can run on every prompt. Adding an item with the kind and title of an
-open one prints that item's id and queues nothing. With --update, an open or acked item of that kind and title takes
+gets cleaned: /tmp, /var/tmp, $TMPDIR, or a directory named scratchpad, and a --run that escapes a shell
+character with a backslash (\\| \\& \\; \\< \\>), which a second shell such as ssh's reads unescaped. --remind
+prints nothing when no item is open or outside a git repository, so it can run on every prompt. Adding an item with
+the kind and title of an open one prints that item's id and queues nothing. With --update, an open or acked item of that kind and title takes
 the new content under the same id and opens again; when the content is the same, nothing changes. find prints the id
 of the open or acked item with that kind and title, and exits 1 when there is none.
 
@@ -28,7 +29,7 @@ number of cells, or a last line with no newline, is skipped, with one line on st
 queue (items: []) as for a full one, 2 outside a git repository, and U01 (exit 2) when --json comes with --remind or a
 subcommand.
 """
-import datetime as dt, fcntl, hashlib, json, os, subprocess, sys
+import datetime as dt, fcntl, hashlib, json, os, re, subprocess, sys
 from collections import namedtuple
 
 import refusals
@@ -148,6 +149,19 @@ def cell(name, value, part=False):
         raise Refused(f"--{name} {value!r} holds ';;' or starts or ends with ';', which the queue uses to separate entries")
     return value
 
+ESCAPED = re.compile(r"\\[|&;<>]")
+
+def checked_run(command):
+    """A --run command, refused when it escapes a shell character with a backslash. The person's shell drops the
+    backslash, and a second shell, as ssh starts on the remote host, then reads the bare character: ssh host grep -E
+    A\\|B log ran grep A into a command named B."""
+    m = ESCAPED.search(command)
+    if m:
+        raise Refused(f"--run '{command}' holds {m.group()}, a backslash before a shell character, which a second shell "
+                      "such as ssh's on the remote host reads without the backslash. Quote the remote command as a whole, "
+                      "as in ssh host 'grep -E \"A|B\" log', or give grep each pattern with -e: grep -e A -e B")
+    return command
+
 def cleaned_dirs():
     dirs = {"/tmp", "/var/tmp", os.environ.get("TMPDIR") or "/tmp"}
     return {d for t in dirs for d in (os.path.normpath(t), os.path.realpath(t)) if d != "/"}
@@ -255,7 +269,7 @@ def add(queue, a):
     fields = dict(title=cell("title", a.title), why=cell("why", a.why, part=True), expect=cell("expect", a.expect, part=True),
                   worry=cell("worry", a.worry, part=True),
                   undo=cell("undo", a.undo, part=True), note="", source=cell("source", a.source),
-                  paths=[checked_path(p) for p in a.path], commands=[cell("run", c, part=True) for c in a.run])
+                  paths=[checked_path(p) for p in a.path], commands=[cell("run", checked_run(c), part=True) for c in a.run])
     def new(items):
         same = find(items, a.kind, a.title, ("open", "acked") if a.update else ("open",))
         if same:

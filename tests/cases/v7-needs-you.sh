@@ -62,6 +62,13 @@ expect ny-refuse-tab fail 'holds a tab or a newline' -- in_dir "$ny" "$guard" ne
 expect ny-refuse-newline fail 'holds a tab or a newline' -- in_dir "$ny" "$guard" needs-you add --kind check --title t --why "$(printf 'a\nb')"
 expect ny-refuse-separator fail "holds ';;'" -- in_dir "$ny" "$guard" needs-you add --kind run --title t --run 'case x in x) ;; esac'
 expect ny-refuse-run-without-command fail 'needs at least one --run' -- in_dir "$ny" "$guard" needs-you add --kind run --title t
+expect ny-refuse-escaped-pipe fail '^guard needs-you: --run .ssh skynet grep -E SKIP\\\|start /x/log. holds \\\|, a backslash before a shell character, which a second shell such as ssh.s on the remote host reads without the backslash\. Quote the remote command as a whole, as in ssh host .grep -E "A\|B" log., or give grep each pattern with -e: grep -e A -e B$' -- \
+  in_dir "$ny" "$guard" needs-you add --kind run --title t --run 'ssh skynet grep -E SKIP\|start /x/log'
+expect ny-refuse-escaped-semicolon fail 'holds \\;, a backslash before a shell character' -- in_dir "$ny" "$guard" needs-you add --kind run --title t --run 'find /x -exec ls {} \; -print'
+for esc in '\&' '\<' '\>'; do
+  expect "ny-refuse-escaped-$esc" fail "holds \\$esc, a backslash" -- in_dir "$ny" "$guard" needs-you add --kind run --title t --run "echo a $esc b"
+done
+expect ny-escaped-nothing-queued fail - -- grep -q 'SKIP' "$ny/.git/guard/needs-you.tsv"
 expect ny-refuse-empty-run fail '^guard needs-you: --run is empty$' -- in_dir "$ny" "$guard" needs-you add --kind run --title t --run ''
 expect ny-refusals-write-nothing ok "^$rows\$" -- bash -c 'wc -l < "$1"' _ "$ny/.git/guard/needs-you.tsv"
 expect ny-remind-text ok '^🩺 2 items in .* need you:$' -- in_dir "$ny" "$guard" needs-you --remind

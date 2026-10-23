@@ -169,6 +169,10 @@ expect foundation-u01-needs-you-line ok "^guard needs-you add --kind check --tit
 say("records", {"verb": "add", "store": "needs-you", "item": {"kind": "card", "title": "run001 card"}})'
 expect_refusal foundation-u01-needs-you-run U01 -- py "$ubroker"'
 say("records", {"verb": "add", "store": "needs-you", "item": {"kind": "run", "title": "run001"}})'
+expect_refusal foundation-u01-needs-you-escaped-run U01 -- py "$ubroker"'
+say("records", {"verb": "add", "store": "needs-you", "item": {"kind": "run", "title": "tail the log", "run": ["ssh skynet grep -E SKIP\\|start /x/log"]}})'
+expect foundation-u01-needs-you-escaped-run-why fail 'holds \\\|, a backslash before a shell character.*grep -e A -e B' -- bash -c 'py() { python3 -c "import sys; sys.path.insert(0, sys.argv[1] + \"/lib\"); import _path; exec(sys.argv[2])" "$here" "$1"; }; here=$1; py "$2" 2>&1' _ "$here" "$ubroker"'
+say("records", {"verb": "add", "store": "needs-you", "item": {"kind": "run", "title": "tail the log", "run": ["ssh skynet grep -E SKIP\\|start /x/log"]}})'
 expect_refusal foundation-u01-sacct-help U01 -- py "$ubroker"'
 b.cfg["slurm_bin"] = "/bin"
 say("scheduler", {"verb": "acct", "args": ["--help"]})'

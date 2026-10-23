@@ -90,8 +90,24 @@ expect doctor-probe-login-fix fail '^      Log in to login\. A CLI on a host wit
   doctor XDG_CONFIG_HOME="$(stand_in login 'echo "Error: Authentication required" >&2; exit 1')"
 expect doctor-probe-memory fail '^FAIL  no reviewer answers on skynet: oom ran out of memory \(RangeError: WebAssembly\.instantiate\(\): Out of memory\) under a soft ulimit -v of ' -- \
   doctor XDG_CONFIG_HOME="$(stand_in oom 'printf "/opt/a.js:2\n  ^\n\nRangeError: WebAssembly.instantiate(): Out of memory\n\nNode.js v24.5.0\n" >&2; exit 1')"
-expect doctor-probe-memory-fix fail '^      Raise the soft limit in the shell that runs guard review and guard ship, with ulimit -v unlimited; the hard limit here is ' -- \
+if [ "$(ulimit -Hv)" = unlimited ]; then fix_pat='^      No ulimit -v limits the reviewer on skynet, so skynet is short of memory: run guard review and guard ship on another host$'
+else fix_pat="^      guard review and guard ship raise the soft ulimit -v to the hard limit, $(ulimit -Hv), and only an admin can raise that: "; fi
+expect doctor-probe-memory-fix fail "$fix_pat" -- \
   doctor XDG_CONFIG_HOME="$(stand_in oom 'echo "RangeError: Out of memory" >&2; exit 1')"
+low_vmem() { ( ulimit -Sv 6000000 2>/dev/null; "$@" ); }  # low_vmem <command...>: runs it under RCC's soft ulimit -v
+minified='printf "/opt/a.js:414\n</html>;var l=r(%s);login();throw new Error(\"JavaScript heap out of memory\")\n\n" "$(printf "%0600d" 0)" >&2'
+expect doctor-probe-minified-memory fail '^FAIL  no reviewer answers on skynet: mini ran out of memory \(RuntimeError: Aborted\(RangeError: WebAssembly\.instantiate\(\): Out of memory: Cannot allocate Wasm memory' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in mini "$minified"'; echo "RuntimeError: Aborted(RangeError: WebAssembly.instantiate(): Out of memory: Cannot allocate Wasm memory for new instance). Build with -sASSERTIONS for more info." >&2; echo "Node.js v24.5.0" >&2; exit 1')"
+expect doctor-probe-minified-only fail '^FAIL  no reviewer answers on skynet: mini2 exited 134 \(/opt/a\.js:414\)$' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in mini2 "${minified/heap out of memory/oops}; exit 134")"
+expect doctor-probe-wasm fail '^FAIL  no reviewer answers on skynet: wasm ran out of memory \(Aborted\(WebAssembly\.instantiate\(\) failed\)\)' -- \
+  doctor XDG_CONFIG_HOME="$(stand_in wasm 'echo "Aborted(WebAssembly.instantiate() failed)" >&2; exit 1')"
+expect doctor-probe-raises-vmem fail "^FAIL  no reviewer answers on skynet: vmem exited 1 \(soft $(ulimit -Hv)\)$" -- \
+  low_vmem doctor XDG_CONFIG_HOME="$(stand_in vmem 'echo "soft $(ulimit -Sv)" >&2; exit 1')"
+if [ "$(ulimit -Hv)" = unlimited ]; then
+  expect doctor-probe-memory-names-soft fail "^FAIL  no reviewer answers on skynet: oom ran out of memory \(RangeError: Out of memory\) under a soft ulimit -v of unlimited, the hard limit: guard review, guard ship and this check raise this shell's soft limit of 6000000 to it$" -- \
+    low_vmem doctor XDG_CONFIG_HOME="$(stand_in oom 'echo "RangeError: Out of memory" >&2; exit 1')"
+else skip doctor-probe-memory-names-soft "the hard ulimit -v here is $(ulimit -Hv)"; fi
 expect doctor-probe-network fail '^FAIL  no reviewer answers on skynet: offline cannot reach its service \(Error: getaddrinfo ENOTFOUND api\.example\.com\)$' -- \
   doctor XDG_CONFIG_HOME="$(stand_in offline 'echo "Error: getaddrinfo ENOTFOUND api.example.com" >&2; exit 1')"
 expect doctor-probe-timeout fail '^FAIL  no reviewer answers on skynet: slow did not answer within 1 seconds$' -- \
