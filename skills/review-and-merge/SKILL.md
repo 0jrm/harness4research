@@ -28,7 +28,7 @@ The agent that wrote a change neither reviews nor merges it by hand. `guard ship
    guard pr open --title <title> --request <file> --plan <file> --test <command> --body <file> [--scope <file>] [--item <plan item id>]
    ```
 
-   It writes the brief where `guard review` reads it (shared by every worktree, never committed), pushes, opens the pull request and prints its URL; `--item W1.2` titles it `[W1.2] <title>`. The user's words stay on this machine: it refuses a body that repeats a line of the request, and they never go in a comment. A rerun prints the open pull request's URL and changes nothing.
+   It writes the brief where `guard review` reads it (shared by every worktree, never committed), pushes, opens the pull request, prints its URL; `--item W1.2` titles it `[W1.2] <title>`. The user's words stay on this machine: it refuses a body or scope that repeats a line of the request, and they never go in a comment. A rerun prints the URL; before review, a rerun's `--scope <file>` sets the scope.
 4. Run `guard ship`.
    - When the batch is not due, it says which pull requests wait and when it runs. Tell the user and stop.
    - When it runs, it ends with a summary: the count per tier, each verdict, each merge commit. Relay the summary and every 🩺 block it printed, then stop.
