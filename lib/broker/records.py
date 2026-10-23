@@ -166,7 +166,7 @@ class Records:
             raise Refused("--kind run needs at least one --run command")
         fields = dict(title=cell("title", title), **{k: cell(k, v, part=True) for k, v in text.items()}, note="",
                       source=cell("source", source), paths=[self.item_path(p) for p in paths],
-                      commands=[cell("run", c, part=True) for c in runs])
+                      commands=[cell("run", needs_you.checked_run(c), part=True) for c in runs])
         made = {}
 
         def new(items):
