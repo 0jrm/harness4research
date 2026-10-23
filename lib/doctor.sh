@@ -197,19 +197,27 @@ check_reviewer() {
   else result fail "$item, and claude is not signed in" "Run claude auth login"; fi
 }
 
-# first_match <pattern> <text>: prints the text's first line that matches the pattern, ignoring case, trimmed.
-first_match() { grep -m 1 -iE -- "$1" <<<"$2" | sed 's/^[[:space:]]*//' | cut -c 1-160; }
+# first_match <pattern> <text>: prints the text's first line that matches the pattern, ignoring case, trimmed, and
+# never a line of minified source (prose_lines).
+first_match() { prose_lines <<<"$2" | grep -m 1 -iE -- "$1" | sed 's/^[[:space:]]*//' | cut -c 1-160; }
 
 # probe_why <exit status> <output> <command>: sets why and fix for a reviewer command that did not answer.
 probe_why() {
-  local rc=$1 out=$2 name=${3%% *} line
-  name=${name##*/}
+  local rc=$1 out=$2 name=${3%% *} line soft hard
+  name=${name##*/} soft=$(ulimit -Sv) hard=$(ulimit -Hv)
   if [ "$rc" = 124 ]; then
     why="$name did not answer within $probe_seconds seconds"
     fix="Check that this host reaches the internet; where a site sends commands to compute nodes, run guard review and guard ship on a login node"
-  elif line=$(first_match 'out of memory|cannot allocate|allocation failed|heap limit|ENOMEM' "$out") && [ -n "$line" ]; then
-    why="$name ran out of memory ($line) under a soft ulimit -v of $(ulimit -Sv)"
-    fix="Raise the soft limit in the shell that runs guard review and guard ship, with ulimit -v unlimited; the hard limit here is $(ulimit -Hv)"
+  elif line=$(first_match 'out of memory|cannot allocate|allocation failed|heap limit|ENOMEM|Wasm memory|WebAssembly\.instantiate' "$out") \
+      && [ -n "$line" ]; then
+    # The probe ran under the hard limit, as guard review and guard ship run the reviewer (raise_vmem_limit).
+    why="$name ran out of memory ($line) under a soft ulimit -v of $hard"
+    [ "$soft" = "$hard" ] || why="$why, the hard limit: guard review, guard ship and this check raise this shell's soft limit of $soft to it"
+    if [ "$hard" = unlimited ]; then
+      fix="No ulimit -v limits the reviewer on $(hostname -s), so $(hostname -s) is short of memory: run guard review and guard ship on another host"
+    else
+      fix="guard review and guard ship raise the soft ulimit -v to the hard limit, $hard, and only an admin can raise that: Node needs about 8 GB, so ask the site for more or run them on another host"
+    fi
   elif line=$(first_match 'ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|getaddrinfo|network is unreachable|could not resolve|fetch failed|unable to connect|connection (refused|reset|timed out)' "$out") && [ -n "$line" ]; then
     why="$name cannot reach its service ($line)"
     fix="Run guard review and guard ship on a host with internet access, such as a login node"
@@ -225,7 +233,7 @@ probe_why() {
 }
 
 # check_reviewer_answers: starts each reviewer command once, as guard review would on this host, in an empty directory
-# with a one-word task, and passes on the first that answers.
+# with a one-word task and the soft ulimit -v raised to the hard limit, and passes on the first that answers.
 check_reviewer_answers() {
   local c dir out rc cant=() why fix first_fix=""
   probe_seconds=${HPC_REVIEWER_PROBE_SECONDS:-120}
@@ -233,7 +241,7 @@ check_reviewer_answers() {
   for c in "${reviewer_cmds[@]}"; do
     command -v "$(sed "s|^~|$HOME|" <<<"${c%% *}")" >/dev/null || continue
     dir=$(mktemp -d); rc=0
-    out=$(cd "$dir" && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK timeout "$probe_seconds" \
+    out=$(cd "$dir" && raise_vmem_limit && env -u GH_TOKEN -u GITHUB_TOKEN -u SSH_AUTH_SOCK timeout "$probe_seconds" \
       bash -c "$c \"\$@\"" reviewer "Reply with the one word: ready" < /dev/null 2>&1) || rc=$?
     rm -rf "$dir"
     if [ $rc -eq 0 ] && [[ $out =~ [^[:space:]] ]]; then

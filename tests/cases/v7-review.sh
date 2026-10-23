@@ -11,6 +11,7 @@ cat > "$tmp/fake-reviewer" <<'FAKE'
 echo "call ${GH_TOKEN:-no-token} $*" >> "$FAKE_DIR/calls"
 readlink /proc/self/fd/0 > "$FAKE_DIR/stdin"
 pwd > "$FAKE_DIR/cwd"
+ulimit -Sv > "$FAKE_DIR/vmem"
 echo "${GH_CONFIG_DIR:-unset} $(ls -A "${GH_CONFIG_DIR:-/nonexistent}" 2>/dev/null | wc -l)" > "$FAKE_DIR/ghdir"
 cp .guard-review/prompt.md "$FAKE_DIR/prompt.md"
 git push -q origin HEAD:refs/heads/sneaky 2>/dev/null && echo pushed >> "$FAKE_DIR/calls"
@@ -24,6 +25,7 @@ case $FAKE_REVIEW in
   none) echo "It looks fine to me." ;;
   crash) echo 'Error: Authentication required.' >&2; exit 3 ;;
   node) printf '/opt/agent/index.js:2\n  WebAssembly.instantiate(bytes)\n  ^\n\nRangeError: WebAssembly.instantiate(): Out of memory\n    at main (/opt/agent/index.js:2:3)\n\nNode.js v24.5.0\n' >&2; exit 1 ;;
+  minified) printf '/opt/agent/index.js:414\n</html>;var l=r(%s);throw new Error("login failed")\n\nRangeError: WebAssembly.instantiate(): Out of memory\n' "$(printf '%0600d' 0)" >&2; exit 1 ;;
   silent) ;;
   semicolons) echo "VERDICT: escalate - ;split;; the reason;;; here;" ;;
   fenced) printf 'Report.\n```\nVERDICT: approve - fenced verdict\n```\n' ;;
@@ -107,11 +109,14 @@ expect review-crash-err-kept ok '^Error: Authentication required\.$' -- bash -c 
 review node > "$tmp/node.out" 2>&1; echo "exit $?" >> "$tmp/node.out"
 expect review-node-exit-2 ok '^exit 2$' -- tail -n 1 "$tmp/node.out"
 expect review-node-first-error ok '^guard review: reviewer unavailable: RangeError: WebAssembly\.instantiate\(\): Out of memory\. .* exited 1;' -- cat "$tmp/node.out"
+expect review-minified-first-error fail '^guard review: reviewer unavailable: RangeError: WebAssembly\.instantiate\(\): Out of memory\. .* exited 1;' -- review minified
 review silent > "$tmp/silent.out" 2>&1; echo "exit $?" >> "$tmp/silent.out"
 expect review-silent-exit-2 ok '^exit 2$' -- tail -n 1 "$tmp/silent.out"
 expect review-silent-unavailable ok "^guard review: reviewer unavailable: $tmp/fake-reviewer exited 0 with an empty reply\\.$" -- cat "$tmp/silent.out"
 expect review-unavailable-not-recorded ok "^$rows_before$" -- bash -c 'wc -l < "$1"' _ "$reviews"
 expect review-unavailable-not-queued ok '^Nothing needs you\.$' -- "$guard" needs-you
+rm -f "$tmp/fake/vmem"; ( ulimit -Sv 6000000 2>/dev/null; review approve ) >/dev/null 2>&1
+expect review-raises-vmem-soft-limit ok "^$(ulimit -Hv)$" -- cat "$tmp/fake/vmem"
 expect review-dirty-discarded ok 'uncommitted edits, and they are discarded' -- review dirty
 expect review-dirty-not-pushed ok "^$old_head	" -- git ls-remote origin refs/heads/feat/add
 expect review-strict-verdict fail 'not a VERDICT line' -- review 'approve?'

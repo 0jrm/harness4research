@@ -33,6 +33,7 @@ PRS=$(prs_json "$old" "${all[@]}")
 cat > "$tmp/fake-batch" <<'FAKE'
 #!/usr/bin/env bash
 prs=$(sed -n 's/^# Pull request #\([0-9]*\)$/\1/p' .guard-review/prompt.md)
+ulimit -Sv > "$FAKE_DIR/vmem"
 [ -n "$prs" ] || [ "${FAKE_SINGLE:-}" != crash ] || { echo "Error: offline" >&2; exit 3; }
 [ -n "$prs" ] || { printf 'Single.\nVERDICT: approve - single review\n'; exit; }
 git rev-parse HEAD > "$FAKE_DIR/head"
@@ -158,6 +159,9 @@ expect ship-due-by-green-records ok '^guard ship: due now: green records pull re
 expect ship-green-records-merged ok '^merged #11 as abc11de$' -- cat "$tmp/batch.out"
 fresh; PRS=$(prs_json "$now" 11:rec 14:s1)
 expect ship-now ok '^merged #14 as abc14de$' -- batch "$guard" ship --now
+fresh; PRS=$(prs_json "$now" 14:s1); rm -f "$tmp/fakeb/vmem"
+( ulimit -Sv 6000000 2>/dev/null; batch "$guard" ship --now ) >/dev/null 2>&1
+expect ship-raises-vmem-soft-limit ok "^$(ulimit -Hv)$" -- cat "$tmp/fakeb/vmem"
 expect ship-nothing ok '^guard ship: nothing waits for review or merge\.$' -- batch env MOCK_GH_PRS='[]' "$guard" ship
 expect ship-usage fail '^usage: guard review --batch \| guard merge --batch \| guard ship \[--now\]$' -- "$guard" ship --later
 expect review-batch-usage fail '^usage: guard review <pr number> \| guard review --batch$' -- "$guard" review --batch 5
