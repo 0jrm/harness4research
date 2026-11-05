@@ -5,7 +5,8 @@
 # ruleset requiring a pull request (and guard-fence / fence in a guarded project), the pull request is open and not a
 # draft, at least one check ran and every check passed, and reviews.tsv records approve at the current head. Otherwise
 # it queues the merge for a human and prints that item. Never passes --admin. --batch merges every approved pull
-# request (lib/batch.sh).
+# request (lib/batch.sh). After a merge it removes the head branch's clean worktree and deletes the local branch
+# (clean_merged_branch); a refused or queued merge touches neither.
 # Exit 0 when merged, 1 when gh refused the merge, 2 when this gate refused it.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -96,6 +97,44 @@ merge_one() {
   [ -z "$out" ] || echo "$out"
   merge_sha=$(gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid // empty' 2>/dev/null || true)
   echo "Merged pull request #$pr into $base_ref${merge_sha:+ as ${merge_sha:0:7}}."
+  clean_merged_branch "$head_ref" "$head_sha" || true
+}
+
+# Local branches that clean_merged_branch never deletes, as shell patterns: experiment and record branches stay.
+kept_branches=('exp/*' 'rec/*')
+
+# clean_merged_branch <branch> <merged head>: after a squash-merge, removes the worktree that has <branch> checked out,
+# when it is clean and is neither the main checkout nor this shell's, then deletes the local branch and prunes stale
+# worktrees. Keeps both, saying why, when the branch is in kept_branches, holds commits the merge did not take, or its
+# worktree must stay. Prints one line, or nothing when no local branch has the name. A failure here is reported and
+# never fails the merge, which has already happened.
+clean_merged_branch() {
+  local branch=$1 merged=$2 pattern line candidate="" wt="" main="" out
+  git -C "$top" show-ref -q --verify "refs/heads/$branch" || return 0
+  for pattern in "${kept_branches[@]}"; do
+    # shellcheck disable=SC2053
+    [[ $branch != $pattern ]] || { echo "Kept local branch $branch: $pattern branches are never cleaned up."; return 0; }
+  done
+  git -C "$top" merge-base --is-ancestor "refs/heads/$branch" "$merged" 2>/dev/null ||
+    { echo "Kept local branch $branch: its tip is not part of the merged head ${merged:0:7}."; return 0; }
+  git -C "$top" worktree prune 2>/dev/null || true
+  while IFS= read -r line; do
+    case $line in
+      "worktree "*) [ -n "$main" ] || main=${line#worktree }; candidate=${line#worktree } ;;
+      "branch refs/heads/$branch") wt=$candidate ;;
+    esac
+  done < <(git -C "$top" worktree list --porcelain)
+  if [ -n "$wt" ]; then
+    if [ "$wt" = "$main" ]; then echo "Kept local branch $branch: the main checkout $wt has it checked out."; return 0; fi
+    if [ "$wt" = "$(git rev-parse --show-toplevel 2>/dev/null)" ]; then echo "Kept worktree $wt and local branch $branch: this shell is in it."; return 0; fi
+    if [ -n "$(git -C "$wt" status --porcelain 2>&1)" ]; then
+      echo "Kept worktree $wt and local branch $branch: the worktree has uncommitted changes."; return 0; fi
+    if ! out=$(git -C "$top" worktree remove "$wt" 2>&1); then
+      echo "Could not remove worktree $wt, so local branch $branch stays: $(why "$out")"; return 0; fi
+  fi
+  if ! out=$(git -C "$top" branch -D "$branch" 2>&1); then echo "Could not delete local branch $branch: $(why "$out")"; return 0; fi
+  git -C "$top" worktree prune 2>/dev/null || true
+  echo "Deleted local branch $branch${wt:+ and removed its worktree $wt}."
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

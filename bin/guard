@@ -90,7 +90,8 @@ In any git repository, guarded or not:
   review --batch      reviews every open pull request by tier: records without a model, small ones several to a
                       session, large ones one by one; new question cards and guard changes go to you
   merge <pr>          squash-merges the pull request if policy, credentials, ruleset, checks and review allow it,
-                      and otherwise queues the merge for a human
+                      then removes the head branch's clean worktree and local branch (never exp/ or rec/);
+                      otherwise queues the merge for a human
   merge --batch       runs merge on every pull request approved at its head, and queues one item for the refusals
   pr open --title TITLE --request FILE --plan FILE --test CMD --body FILE [--item ID] [--scope FILE] [--base BRANCH]
                       writes the branch's brief from the user's words, pushes the branch, opens its pull request
