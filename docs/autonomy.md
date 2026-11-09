@@ -75,6 +75,8 @@ A reviewer that exits nonzero or replies nothing gives no verdict. Without a con
 
 Then it runs `gh pr merge <pr> --squash --match-head-commit <sha>`, so a push after the checks stops the merge. It never passes `--admin`. On any `FAIL`, it exits 2, queues an `approve` item titled `Merge PR #<pr>` with the command you run, and prints that item.
 
+After the merge it cleans up locally, since a squash-merge leaves a branch that `git branch --merged` never lists. When a worktree has the pull request's head branch checked out, is clean, and is neither the main checkout nor the one `guard merge` runs in, it runs `git worktree remove` (never `--force`), then `git branch -D` and `git worktree prune`. It prints one line saying what it removed, or why it kept the worktree and branch: uncommitted changes, the main checkout, a local tip with commits the merge did not take, or a branch matching `kept_branches` in `lib/merge.sh`, which is `exp/*` and `rec/*`. A cleanup failure is reported and never fails the merge. A refused or queued merge cleans up nothing. `guard merge --batch` and `guard ship` do the same for each pull request they merge.
+
 Items 2 and 3 are why autonomous merge needs [the enforceable setup](enforceable.md). An agent that holds your admin login could bypass the ruleset, so `guard merge` refuses to merge with it.
 
 ## Tiers and batches
