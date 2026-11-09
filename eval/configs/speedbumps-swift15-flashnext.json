@@ -1,0 +1,88 @@
+{
+  "run_id": "speedbumps-swift15-flashnext",
+  "question_card": "eval/cards/speedbumps.card",
+  "episodes_dir": "/conda/jmiranda/h4r/sessions",
+  "results_dir": "eval/results/speedbumps-swift15-flashnext",
+  "model": {
+    "upstream": "http://127.0.0.1:9085",
+    "alias": "swift15-flashnext",
+    "expect_upstream_model": "swift15-flashnext",
+    "expect_root": "/unity/g1/bgutierrez/Project/vLLM-bdgr/models/swift15-flashnext",
+    "expect_max_model_len": 262144,
+    "seed_base": 1000,
+    "sampling": {
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 20
+    },
+    "fold_developer": true,
+    "text_into_reasoning": true
+  },
+  "scaffold": {
+    "name": "codex",
+    "release_dir": "~/.codex/packages/standalone/releases/0.162.0-x86_64-unknown-linux-musl",
+    "context_window": 65536,
+    "timeout_minutes": 30,
+    "timeout_minutes_by_family": {
+      "t3-entity-overlap": 180
+    },
+    "parallel": 8,
+    "disable_features": [
+      "apps",
+      "browser_use",
+      "browser_use_external",
+      "browser_use_full_cdp_access",
+      "computer_use",
+      "image_generation",
+      "in_app_updates",
+      "plugins",
+      "remote_plugin",
+      "realtime_conversation",
+      "tool_suggest",
+      "skill_mcp_dependency_install",
+      "enable_request_compression",
+      "fast_mode",
+      "ultrafast_mode",
+      "multi_agent",
+      "goals",
+      "in_app_browser",
+      "in_app_chat",
+      "in_app_voice",
+      "in_app_dictation",
+      "in_app_local_automation",
+      "code_mode_host",
+      "daemon_auto_start",
+      "plugin_sharing",
+      "worktrees",
+      "view_image"
+    ]
+  },
+  "matrix": {
+    "families": [
+      "t1-walltime",
+      "t3-entity-overlap",
+      "t8-fixture"
+    ],
+    "variants": [
+      "trap",
+      "control"
+    ],
+    "arms": [
+      "A",
+      "E"
+    ],
+    "seeds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "order_seed": 20261010
+  }
+}
