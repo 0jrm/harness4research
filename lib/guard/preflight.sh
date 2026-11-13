@@ -82,6 +82,7 @@ read_sbopts() {
       t|time) wall=$v ;;
       N|nodes) nodes=$v ;;
       a|array) array=$v ;;
+      p|partition) part=$v ;;
     esac
   done
 }
@@ -136,7 +137,7 @@ sbin=$(get slurm_bin); sbin=${sbin:-/usr/bin}
 [ -x "$sbin/squeue" ] && [ -x "$sbin/sacct" ] || fail "no squeue and sacct in slurm_bin=$sbin; a human sets slurm_bin in guard/budget.card on the protected branch to the directory that holds them"
 
 # The options sbatch reads, in its order: each #SBATCH line up to the script's first command, then the command line.
-wall=""; nodes=""; array=""
+wall=""; nodes=""; array=""; part=""
 while IFS= read -r line; do
   read -ra w <<<"$line"; read_sbopts ${w[@]+"${w[@]}"}
 done < <(awk '/^#SBATCH/ { sub(/^#SBATCH/, ""); sub(/#.*/, ""); print; next } /^[[:space:]]*(#|$)/ { next } { exit }' "$job")
@@ -200,4 +201,9 @@ set -- "$@" --comment="run:$run_id" --ignore-pbs --time="$wall" --nodes="$nodes"
 unset SBATCH_ARRAY_INX
 
 echo "PREFLIGHT OK: $run_id nodes=$nodes time=${wmin}m tasks=$n projected=$proj spent=$spent queued=$queued available=$avail" >&2
-exec sbatch "$@" --account="$acct" --job-name="$run_id" --comment="run:$run_id" "$job"
+# account may list several, comma separated, as sacct -A and squeue -A take them, so spend and queue count them all.
+# A job runs under the account named like its --partition when the list has one (a site whose partitions each take
+# their own account), else under the first.
+sb_acct=${acct%%,*}
+[ -z "$part" ] || [[ ",$acct," != *",$part,"* ]] || sb_acct=$part
+exec sbatch "$@" --account="$sb_acct" --job-name="$run_id" --comment="run:$run_id" "$job"
