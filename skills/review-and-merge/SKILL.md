@@ -16,7 +16,7 @@ The agent that wrote a change neither reviews nor merges it by hand. `guard ship
 
 ## Steps
 
-1. Commit the work on a branch.
+1. Commit the work on a branch named for the change, such as `feat/cram-transfer`, never `feat/v8-u1b`. `guard pr open` refuses vague names and prints the rename.
 2. Write four files outside the repository:
    - the request, copied from the user's messages character for character: no paraphrase, summary, translation, or typo fixes. If it grew over several messages, copy each that shaped it, in order. The reviewer judges the diff against it.
    - the plan: what you changed, file by file, and why; the reviewer checks it as claims.
@@ -40,13 +40,13 @@ The agent that wrote a change neither reviews nor merges it by hand. `guard ship
 When the user says the change cannot wait for the batch, review and merge its one pull request instead of step 4:
 
 1. Run `guard review <pr>`.
-   - Exit 0 is approve. Pull the branch first if the reviewer pushed fixes, then go to step 2.
+   - Exit 0 is approve. If the reviewer pushed fixes, pull the branch, then go to step 2.
    - Exit 1 is `changes` or `escalate`. `guard review` queued an item for the human. Relay its block and stop. If the user then asks you to address the review, fix it, push, and run `guard review` again.
-   - Exit 2 means it refused to start, or no reviewer could run. Do what its message says, such as writing the brief, then rerun. `reviewer unavailable:` is this host's problem (no network, no login, too little memory), which `guard doctor` names. Tell the user; it is not a verdict.
+   - Exit 2 means it refused to start, or no reviewer could run. Do what its message says, then rerun. `reviewer unavailable:` is this host's problem, which `guard doctor` names. Tell the user; it is not a verdict.
 2. Once `gh pr checks <pr>` shows every check finished, run `guard merge <pr>`. Run while a check is pending, it refuses and queues the merge for the human.
    - Exit 0 means it merged.
    - Exit 2 means it refused and queued the merge for a human. Relay the block and stop. Under `merge_policy: semi-manual` this is the expected end: the merge belongs to the human.
-   - Exit 1 means GitHub refused the merge, for example because the head moved. Relay the block and stop.
+   - Exit 1 means GitHub refused the merge. Relay the block and stop.
 
 ## Relaying a 🩺 block
 

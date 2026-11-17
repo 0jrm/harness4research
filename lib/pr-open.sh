@@ -8,7 +8,8 @@
 # repeats a line of the request is refused. When the branch already has an open pull request, it prints that one's URL
 # and changes nothing, so a rerun is safe; a rerun with --scope also adds the scope to that pull request's brief, or
 # replaces the one there, until a guard review has read it (a row for it in reviews.tsv or a log in reviews/). Without
-# --scope it says, on stderr, how to add one. Exit 0 with the URL, 2 on a refusal, 2 with U01 on bad usage.
+# --scope it says, on stderr, how to add one. A new pull request's branch must pass the rule in lib/branch_name.sh;
+# a refusal prints the rename commands. Exit 0 with the URL, 2 on a refusal, 2 with U01 on bad usage.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 grammar() { sed -n '2,3s/^# *//p' "${BASH_SOURCE[0]}" | tr '\n' ' ' | sed 's/^usage: //; s/ *$//'; }
@@ -34,6 +35,8 @@ done
 [ -n "$title" ] && [ -n "$request" ] && [ -n "$plan" ] && [ -n "$test_cmd" ] && [ -n "$body" ] || usage
 # shellcheck source=lib/pr.sh
 . "$here/lib/pr.sh"
+# shellcheck source=lib/branch_name.sh
+. "$here/lib/branch_name.sh"
 [ -z "$item" ] || [[ $item =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || refuse "--item $item is not a plan item id such as W1.2."
 for f in "$request" "$plan" "$body" ${scope:+"$scope"}; do [ -f "$f" ] || refuse "no file $f."; done
 grep -q '[^[:space:]]' "$request" || refuse "$request is empty. Copy the user's request into it word for word."
@@ -79,6 +82,16 @@ PY
     echo "guard pr open: no guard review has read #$number yet, so its brief now has the scope in $scope." >&2
   fi
   echo "${existing#* }"; exit 0
+fi
+
+why=$(branch_name_problem "$branch")
+if [ -n "$why" ]; then
+  new=feat/WHAT-IT-DOES; [[ " ${branch_types[*]} " == *" ${branch%%/*} "* ]] && new=${branch%%/*}/WHAT-IT-DOES
+  refuse "branch $branch: $why
+Rename it to say what it does, then rerun this command:
+  git branch -m $branch $new
+  git push -u origin $new
+  git push origin --delete $branch    # only if $branch was pushed"
 fi
 
 brief=$(brief_path "$branch")
