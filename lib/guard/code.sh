@@ -3,7 +3,8 @@
 # Prints the absolute path of a clean worktree of <repo> detached at <commit>, and creates it on first use.
 # A relative <repo> resolves from the caller's directory. Worktrees live in $HPC_CODE_ROOT, else
 # ${XDG_CACHE_HOME:-$HOME/.cache}/guard/code, never inside <repo> or the current project.
-# A rerun prints the same path. A path in any other state is refused, never reset or deleted.
+# A rerun prints the same path. A path in any other state is refused, never reset or deleted. Concurrent calls for
+# one repo wait on a lock in the code root, since two `git worktree add` in one repo collide (incident 0402c/1).
 set -euo pipefail
 [ $# -eq 2 ] || { echo "usage: guard/run code <repo> <commit>" >&2; exit 64; }
 repo=$1 commit=$2
@@ -18,6 +19,8 @@ path=$(realpath -m -- "$root")/$(basename "$top")-${sha:0:12}
 project=$(git rev-parse --show-toplevel 2>/dev/null || true)
 inside "$path" "$top" && refuse "$path is inside $top. Set HPC_CODE_ROOT outside it."
 inside "$path" "$project" && refuse "$path is inside this project, $project. Set HPC_CODE_ROOT outside it."
+mkdir -p "${path%/*}" || refuse "cannot create the code root ${path%/*}"
+exec 9>>"${path%/*}/.$(basename "$top").lock" && flock 9 || refuse "cannot lock ${path%/*}/.$(basename "$top").lock"
 if [ -e "$path" ] || [ -L "$path" ]; then
   worktrees=$(git -C "$top" worktree list --porcelain)
   grep -qxF "worktree $path" <<<"$worktrees" || refuse "$path exists and is not a worktree of $top"
