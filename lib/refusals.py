@@ -50,8 +50,8 @@ TABLE = [
     _code("R07", "run", {"missing": "{script} is not a file", "sbatch": "sbatch said: {line}"}, None),
     _code("R08", "run", {"budget": "{core_hours} core-h is over the remaining {remaining}; queued as ask {ask}, "
                                    "default no at {due} UTC",
-                         "run": "{core_hours} core-h is over run {run}'s cap {cap}; queued as ask {ask}, default no at "
-                                "{due} UTC",
+                         "run": "{hours} {unit} brings run {run} to {total} {unit}, over its cap {cap}; queued as ask "
+                                "{ask}, default no at {due} UTC",
                          "approval": "approval is queue on guard/budget.card; queued as ask {ask}, default no at {due} "
                                      "UTC",
                          "limit": "{reason}; asked a person as ask {ask}, default no at {due} UTC",

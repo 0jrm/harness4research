@@ -368,6 +368,18 @@ def host_view(broker, lim):
     return HostView(name=name, in_launch_hosts=name in lim.launch_hosts, available_gb=0.0), 0.0
 
 
+def run_hours(broker):
+    """{run id: (core_hours, gpu_hours)} its submitted jobs asked for, over every session on this broker, so a new
+    guard enter does not reset a run's cap."""
+    submitted = {r["seq"] for r in broker.rows if r["state"] == "submitted"}
+    out = {}
+    for r in broker.rows:
+        if r["state"] == "intent" and r["seq"] in submitted and r.get("cost"):
+            core, gpu = out.get(r["run"], (0.0, 0.0))
+            out[r["run"]] = (core + r["cost"]["core_hours"], gpu + r["cost"]["gpu_hours"])
+    return out
+
+
 def gather(broker, inv, lim, script_exists, run_dir_in_project, yes):
     """(the view decide() reads, this session's failed jobs no incident answers yet)."""
     jobs = job_rows(broker, inv.session)
@@ -384,7 +396,7 @@ def gather(broker, inv, lim, script_exists, run_dir_in_project, yes):
     host, gpu_spent = host_view(broker, lim)
     view = RunView(spent_core_hours=spent, queued_core_hours=queued, spent_gpu_hours=gpu_spent,
                    live_jobs=tuple(j for j in jobs if j.sched_state in LIVE),
-                   run_jobs={k: tuple(v) for k, v in run_jobs.items()},
+                   run_jobs={k: tuple(v) for k, v in run_jobs.items()}, run_hours=run_hours(broker),
                    last_failed_job=failed[-1] if failed else None,
                    changed_paths_vs_main=tuple(broker.tree().changed(broker.mirror, ["guard", *filter(None, watch)],
                                                                      ignore)),

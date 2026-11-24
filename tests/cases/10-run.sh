@@ -45,8 +45,34 @@ expect run-r06 ok '^refuse R06 slurm \| git checkout origin/main -- sim.py guard
 expect run-r07 ok '^refuse R07 slurm \| guard status$' -- dt 'd(["--time=5"], view=dataclasses.replace(V, script_exists=False))'
 expect run-r08-budget ok '^queue R08 slurm \| 1000 core-h is over the remaining 90; queued as ask \{ask\}' -- \
   dt 'd(["--time=10", "--array=0-1499"], limits=dataclasses.replace(L, max_concurrent_jobs=2000), show="reason")'
-expect run-r08-run-cap ok "^queue R08 slurm \| 0.67 core-h is over run sim's cap 1" -- \
-  dt 'd(["--time=10"], limits=dataclasses.replace(L, default_run_core_hours=1), view=dataclasses.replace(V, run_jobs={"sim": (job(1, "sim", "COMPLETED", ch=0.5),)}), show="reason")'
+expect run-r08-run-cap ok "^queue R08 slurm \| 0.67 core-h brings run sim to 1.17 core-h, over its cap 1;" -- \
+  dt 'd(["--time=10"], limits=dataclasses.replace(L, default_run_core_hours=1), view=dataclasses.replace(V, run_hours={"sim": (0.5, 0)}), show="reason")'
+# emu-rea-det2: a run already at its 22 GPU-h cap asks for 6 h on one GPU, on either backend; another session's jobs
+# count, since run_hours spans sessions.
+det2='GL = dataclasses.replace(L, default_run_gpu_hours=22, max_gpu_hours=1000, max_core_hours=100000, max_walltime_minutes=600, host_max_walltime_minutes=600)
+GV = dataclasses.replace(V, run_hours={"sim": (88.0, 22.0)})'
+expect run-r08-run-gpu-cap-slurm ok '^queue R08 slurm \| 6 GPU-h brings run sim to 28 GPU-h, over its cap 22;' -- \
+  dt "$det2"'
+d(["--time=360", "--gpus=1"], limits=GL, view=GV, show="reason")'
+expect run-r08-run-gpu-cap-host ok '^queue R08 host \| 6 GPU-h brings run sim to 28 GPU-h, over its cap 22;' -- \
+  dt "$det2"'
+d(["--time=360", "--gpus=1"], limits=GL, view=dataclasses.replace(GV, host=HOST), show="reason")'
+expect run-r08-run-gpu-within ok '^run None host \| None$' -- \
+  dt "$det2"'
+d(["--time=360", "--gpus=1"], limits=GL, view=dataclasses.replace(GV, host=HOST, run_hours={"sim": (24.0, 16.0)}))'
+expect run-r08-run-gpu-no-cap ok '^run None host \| None$' -- \
+  dt "$det2"'
+d(["--time=360", "--gpus=1"], limits=dataclasses.replace(GL, default_run_gpu_hours=0), view=dataclasses.replace(GV, host=HOST))'
+expect run-r08-run-core-cap-host ok '^queue R08 host \| 0.17 core-h brings run sim to 1.17 core-h, over its cap 1;' -- \
+  dt 'd(["--time=10"], limits=dataclasses.replace(L, default_run_core_hours=1), view=dataclasses.replace(V, host=HOST, run_hours={"sim": (1.0, 0)}), show="reason")'
+expect run-r08-run-hours-sessions ok "^\{'sim': \(5.5, 22.0\)\}$" -- python3 -c '
+import sys, types; sys.path.insert(0, sys.argv[1]); import _path
+from broker.run import run_hours
+c = lambda core, gpu: {"core_hours": core, "gpu_hours": gpu}
+print(run_hours(types.SimpleNamespace(rows=[
+    {"seq": 1, "state": "intent", "run": "sim", "session": "a", "cost": c(4.0, 16.0)}, {"seq": 1, "state": "submitted"},
+    {"seq": 2, "state": "intent", "run": "sim", "session": "b", "cost": c(1.5, 6.0)}, {"seq": 2, "state": "submitted"},
+    {"seq": 3, "state": "intent", "run": "sim", "session": "b", "cost": c(9.0, 9.0)}, {"seq": 3, "state": "failed"}])))' "$here/lib"
 expect run-approval-queue ok '^queue R08 slurm \| approval is queue' -- \
   dt 'd(["--time=5"], limits=dataclasses.replace(L, approval="queue"), show="reason")'
 expect run-r08-waiting ok '^queue R08 slurm \| a3$' -- \

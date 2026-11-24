@@ -130,7 +130,8 @@ class LedgerView:
     queued_core_hours: float
     spent_gpu_hours: float
     live_jobs: tuple = ()          # JobRow
-    run_jobs: dict = field(default_factory=dict)   # run_id -> (JobRow, ...)
+    run_jobs: dict = field(default_factory=dict)   # run_id -> (JobRow, ...), this session's
+    run_hours: dict = field(default_factory=dict)  # run_id -> (core_hours, gpu_hours) its submitted jobs ask, every session
     last_failed_job: Optional[JobRow] = None
     changed_paths_vs_main: tuple = ()
     script_exists: bool = True
