@@ -72,7 +72,7 @@ git -C "$human" -c user.name=PI -c user.email=pi@lab commit -qam "chore(guard): 
 expect human-merge ok - -- git -C "$ep/state/git/protected.git" fetch -q "$human" guard/init:main
 
 echo "== preflight, the fake Slurm, and ripples"
-inside 'cd proj && git pull -q && mkdir -p runs/r1 && cp runs/_template/question.card runs/r1/ && git add runs/r1 && git commit -qm "run: r1 card"'
+inside 'cd proj && git pull -q && mkdir -p runs/r1 && sed -e "s/^planned_gpu_hours: .*/planned_gpu_hours: 0/" -e "s/^planned_core_hours: .*/planned_core_hours: 0/" runs/_template/question.card > runs/r1/question.card && git add runs/r1 && git commit -qm "run: r1 card"'
 expect preflight-ok ok '^PREFLIGHT OK: r1 nodes=1 time=10m' -- inside 'cd proj && guard/run preflight runs/r1 job.sh'
 expect preflight-cap fail 'PREFLIGHT FAIL: --time=01:00:00 \(60 min\) exceeds max_walltime_minutes=30' -- inside 'cd proj && guard/run preflight runs/r1 job.sh --time=01:00:00'
 sleep 3
