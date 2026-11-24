@@ -10,6 +10,8 @@ supersedes: <run id this card replaces, or none>
 spawned_from: <run id this card grew out of, or none>
 budget_gpu_hours: <GPU-hours this question is worth; leave the placeholder to use default_run_gpu_hours>
 budget_core_hours: <core-hours this question is worth; leave the placeholder to use default_run_core_hours>
+planned_gpu_hours: <the GPU-hours this card's own plan needs, as arithmetic over its stage caps, arms and read-out, such as 2 x (4+3+4+6+10) + 5; 0 when none; the fence fails a plan over the budget>
+planned_core_hours: <the same for core-hours, such as 6 x 1 x 40 for six one-hour single-node jobs; 0 when none>
 deadline: <YYYY-MM-DD after which no job for this run starts; leave the placeholder for stop_date alone>
 kill_criteria: <stop if ...>
 negative_result_means: <what we conclude and write down>

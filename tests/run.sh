@@ -149,6 +149,8 @@ slurm_bin: $here/tests/mock-bin
 checks: waived the suite tests preflight, not results
 CARD
 printf 'runs/*/checks/*\ntests\n' > guard/watch.list
+# The suite's cards copy the template, so its plans are filled once here; the fence cases below unset them.
+sed -i -e 's/^planned_gpu_hours: .*/planned_gpu_hours: 0/' -e 's/^planned_core_hours: .*/planned_core_hours: 0/' runs/_template/question.card
 git commit -q -am "chore(guard): set budget"; git push -q origin guard/init:main; git fetch -q origin
 git switch -q -c agent/run origin/main
 R=runs/2026-09-29-demo; mkdir -p "$R"
@@ -812,7 +814,13 @@ rm -f launch-*.log; rm -rf runs/explore-*; git checkout -q -- .
 rm -rf "$tmp/state"; unset HPC_GUARD_REF
 
 echo "== fence"
-git switch -q -c pr/clean origin/main; mkdir -p runs/r1; cp runs/_template/question.card runs/r1/; git add -A; git commit -q -m "run: r1"
+# planned_card <dir> [gpu plan] [gpu budget]: the template card with its plans filled, as an agent writes one.
+planned_card() {
+  mkdir -p "$1"
+  sed -e "s/^planned_gpu_hours: .*/planned_gpu_hours: ${2:-0}/" -e 's/^planned_core_hours: .*/planned_core_hours: 0/' \
+    -e "s/^budget_gpu_hours: .*/budget_gpu_hours: ${3:-<default>}/" runs/_template/question.card > "$1/question.card"
+}
+git switch -q -c pr/clean origin/main; planned_card runs/r1; git add -A; git commit -q -m "run: r1"
 expect fence-clean ok 'PASS.guard-untouched' -- guard/run fence origin/main HEAD
 expect fence-clean-setting ok 'PASS.setting-key' -- guard/run fence origin/main HEAD
 cp runs/_template/report.md runs/r1/report.md
@@ -853,7 +861,7 @@ expect fence-watched fail 'FAIL.watched-paths.*tests/t' -- guard/run fence origi
 git push -q origin pr/clean:refs/heads/pr-clean; git switch -q -c pr/card origin/pr-clean
 echo "metric: moved" >> runs/r1/question.card; git commit -q -am x
 expect fence-card fail 'FAIL.question-cards-frozen.*runs/r1/question.card' -- guard/run fence origin/pr-clean HEAD
-git switch -q -c pr/card-twice origin/main; mkdir -p runs/r2; cp runs/_template/question.card runs/r2/; git add -A; git commit -q -m "run: r2"
+git switch -q -c pr/card-twice origin/main; planned_card runs/r2; git add -A; git commit -q -m "run: r2"
 git merge -q --no-edit origin/pr-clean
 expect fence-card-added-merged ok 'PASS.question-cards-frozen' -- guard/run fence origin/main HEAD
 echo "metric: moved" >> runs/r2/question.card; git commit -q -am x
@@ -864,9 +872,16 @@ git add -A; git commit -q -m "merge with an edit"
 expect fence-card-merge-edit fail 'FAIL.question-cards-frozen.*runs/r2/question.card' -- guard/run fence origin/main HEAD
 
 git switch -q -c pr/no-setting origin/main; mkdir -p runs/ns; cp runs/_template/question.card runs/ns/
-sed -i '/^setting:/d' runs/ns/question.card
+sed -i -e '/^setting:/d' -e 's/^planned_gpu_hours: .*/planned_gpu_hours: <hours>/' runs/ns/question.card
 git add -A; git commit -q -m x
 expect fence-card-no-setting fail 'FAIL.setting-key' -- guard/run fence origin/main HEAD
+expect fence-card-no-plan fail 'FAIL.planned-hours.*runs/ns/question.card: planned_gpu_hours must be arithmetic' -- guard/run fence origin/main HEAD
+git switch -q -c pr/over-plan origin/main; planned_card runs/det2 '2 x (4+3+4+6+10)' 22; git add -A; git commit -q -m x
+expect fence-plan-over-budget fail 'FAIL.planned-hours.*planned_gpu_hours 2 x \(4\+3\+4\+6\+10\) = 54 is over budget_gpu_hours 22' -- guard/run fence origin/main HEAD
+git switch -q -c pr/within-plan origin/main; planned_card runs/det2b '2 x (4+3+4+6+10) + 5' 60; git add -A; git commit -q -m x
+expect fence-plan-within-budget ok 'PASS.planned-hours' -- guard/run fence origin/main HEAD
+git switch -q -c pr/bad-plan origin/main; planned_card runs/bp '__import__("os")' 60; git add -A; git commit -q -m x
+expect fence-plan-not-arithmetic fail 'FAIL.planned-hours.*must be arithmetic' -- guard/run fence origin/main HEAD
 
 lineage() { guard/run fence origin/main HEAD | grep card-lineage; }
 no_lineage() { ! lineage | grep -qE "$1"; }
