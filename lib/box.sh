@@ -102,6 +102,10 @@ pick_limits() {  # sets limits to scope or prlimit, and why when prlimit
   ctl=" $(cat "/sys/fs/cgroup$cg/cgroup.controllers" 2> /dev/null || true) "
   [[ $ctl == *" memory "* && $ctl == *" pids "* ]] \
     || { why="the user manager does not delegate the memory and pids controllers"; return; }
+  # Newer systemd-run expands ${VAR} in a scope's command with the host's environment; the command must reach bash as written.
+  if systemd-run --user --scope --quiet --collect --expand-environment=no -- true 2> /dev/null; then
+    scope+=(--expand-environment=no)
+  fi
   # OOMPolicy=continue kills only the process past the limit, not the whole sandbox; older systemd lacks it for scopes.
   if systemd-run --user --scope --quiet --collect "${scope[@]}" -p OOMPolicy=continue -- true 2> /dev/null; then
     scope+=(-p OOMPolicy=continue)
