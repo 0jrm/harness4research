@@ -97,6 +97,9 @@ class Mirror:
             subprocess.run(["git", "init", "-q", "--bare", path], check=True)
 
     def git(self, *args, text=True, env=None, input=None):
+        if not self.origin and "" in args:  # git 2.56 reads an empty URL as the broker's working directory
+            said = "the project has no origin outside it"
+            return subprocess.CompletedProcess(args, 128, "" if text else b"", said if text else said.encode())
         env = {"PATH": os.environ["PATH"], "HOME": self.path, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
                "GIT_ALLOW_PROTOCOL": self.allow, **(env or {})}
         return subprocess.run(["git", "--git-dir", self.path, *args], capture_output=True, text=text, env=env,
