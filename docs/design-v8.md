@@ -105,6 +105,7 @@ Backend     slurm | host                                                        
 Cost        {backend, minutes, nodes, cores, gpus, tasks, core_hours, gpu_hours}    slurm (E6b): core_hours = minutes×array_n/60 × nodes × cores_per_node
                                                                                     host: core_hours = minutes/60 × (cpus_per_task or 1); gpu_hours = minutes/60 × gpus (question 15)
 LedgerView  {spent_core_hours, queued_core_hours, spent_gpu_hours, live_jobs[JobRow], run_jobs{run_id: [JobRow]},
+             run_hours{run_id: (core_hours, gpu_hours)} (every session's submitted jobs),
              last_failed_job?: JobRow (this session's newest failed job with no Incident), changed_paths_vs_main[],
              script_exists, run_dir_in_project, open_asks[AskRecord],
              host{name, in_launch_hosts, available_gb, gpus_free[], bwrap, live_launches}}

@@ -277,17 +277,16 @@ def r10_concurrent(inv, spec, cost, limits, view, b):
 
 
 def r08_budget(inv, spec, cost, limits, view, b):
-    if b != "slurm":
-        return None
     remaining = (limits.max_core_hours - limits.verification_reserve_core_hours - view.spent_core_hours
                  - view.queued_core_hours)
-    if cost.core_hours > remaining:
+    if b == "slurm" and cost.core_hours > remaining:
         return queue("budget", b, core_hours=hours(cost.core_hours), remaining=hours(max(remaining, 0)))
-    if limits.default_run_core_hours:
-        spent = sum(j.cost.core_hours for j in view.run_jobs.get(inv.run_id, ()) if j.cost and j.state == "submitted")
-        if spent + cost.core_hours > limits.default_run_core_hours:
-            return queue("run", b, core_hours=hours(cost.core_hours), run=inv.run_id,
-                         cap=hours(limits.default_run_core_hours))
+    spent = view.run_hours.get(inv.run_id, (0, 0))
+    for unit, asked, done, cap in (("core-h", cost.core_hours, spent[0], limits.default_run_core_hours),
+                                   ("GPU-h", cost.gpu_hours, spent[1], limits.default_run_gpu_hours)):
+        if cap and asked and done + asked > cap:
+            return queue("run", b, hours=hours(asked), unit=unit, run=inv.run_id, total=hours(done + asked),
+                         cap=hours(cap))
 
 
 def r08_approval(inv, spec, cost, limits, view, b):
