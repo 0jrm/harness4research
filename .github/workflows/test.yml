@@ -30,6 +30,10 @@ jobs:
         run: python3 -m py_compile lib/*.py eval/env/*.py
       - name: End-to-end tests
         run: tests/run.sh
+      - name: Formal models
+        # Each model replays a past concurrency bug: it exits 1 when the current design breaks its invariant, and
+        # also when it no longer finds the past bug, since then it cannot be guarding it.
+        run: for m in tests/models/model_*.py; do python3 "$m" || exit 1; done
       - name: Evaluation environment self-test
         # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, and bubblewrap needs them.
         run: |
