@@ -91,6 +91,38 @@ while read -r f; do
 done < <(git diff --name-only --diff-filter=A "$base...$head" -- 'runs/*/question.card')
 if [ -z "$unset_setting" ]; then say PASS setting-key ""; else say FAIL setting-key "added card has no setting:$unset_setting"; fi
 
+# hours <expression>: a plan written as arithmetic, such as 2 x (4+3+4+6+10) + 5, as a number; empty when it is not one.
+hours() {
+  python3 -c 'import ast, sys
+e = sys.argv[1].replace("x", "*").replace("×", "*")
+ok = (ast.Expression, ast.BinOp, ast.Constant, ast.Add, ast.Mult, ast.Sub, ast.Div)
+t = ast.parse(e, mode="eval")
+assert e.strip() and all(isinstance(n, ok) for n in ast.walk(t))
+print(format(eval(compile(t, "<plan>", "eval")), "g"))' "$1" 2>/dev/null
+}
+# An added card plans its own hours from its stages, arms and read-out; a plan above the budget fails before any job
+# runs (emu-rea-det2 and emu-rea-prob each found it mid-run). A budget left as the placeholder, or 0, has no cap.
+plan_problems=""
+while read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in runs/_template/*) continue ;; esac
+  text=$(git show "$head:$f")
+  for kind in gpu core; do
+    plan=$(first_val "planned_${kind}_hours" <<<"$text")
+    total=$(hours "$plan")
+    if [ -z "$plan" ] || [[ $plan == *"<"* ]] || [ -z "$total" ]; then
+      plan_problems="$plan_problems; $f: planned_${kind}_hours must be arithmetic over the card's own caps, such as 2 x (4+3) + 5 (0 when none)"
+      continue
+    fi
+    budget=$(first_val "budget_${kind}_hours" <<<"$text")
+    [[ $budget =~ ^[0-9.]+$ ]] || budget=$(git show "$base:guard/budget.card" 2>/dev/null | first_val "default_run_${kind}_hours")
+    [[ $budget =~ ^[0-9.]+$ ]] && awk -v b="$budget" 'BEGIN { exit !(b > 0) }' || continue
+    awk -v p="$total" -v b="$budget" 'BEGIN { exit !(p > b) }' &&
+      plan_problems="$plan_problems; $f: planned_${kind}_hours $plan = $total is over budget_${kind}_hours $budget; raise the budget or cut the plan"
+  done
+done < <(git diff --name-only --diff-filter=A "$base...$head" -- 'runs/*/question.card')
+if [ -z "$plan_problems" ]; then say PASS planned-hours ""; else say FAIL planned-hours "${plan_problems#; }"; fi
+
 # name_parent <id> <ids>: the run id that <id> extends by name, as the atlas reads it. A prefix ending in -
 # wins (the longest), then a trailing letter steps back (054b to 054a, else 054), then a trailing number (054 to 053).
 name_parent() {
